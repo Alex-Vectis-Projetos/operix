@@ -1,0 +1,649 @@
+Impromptu Google Meet Meeting - September 08
+VIEW RECORDING - 93 mins (No highlights): https://fathom.video/share/BewPBmm6bKipxDyg4mygs9vMPQ4mZt4c
+
+---
+
+0:00 - Alex Souza
+  Fala Alex, tudo bem? Fala aí, boa tarde, tudo bem? Beleza, e você? Caraca, ela dormiu rápido mesmo, hein? Dormiu nada.  Não dormiu? Dormiu nada.
+
+0:16 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Mas ainda não são sete horas aí, pô?
+
+0:23 - Alex Souza
+  Não é bebê, né? Dorme rápido. Mas ela dorme cedo assim mesmo?
+
+0:26 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Ah, tá. Dorme.
+
+0:30 - Alex Souza
+  Você tá tranquilo pra falar ou você prefere falar em outro horário?
+
+0:38 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Tá de boa? Não, tô de boa, tô de boa, dá pra falar, dá pra falar.
+
+0:42 - Alex Souza
+  Qualquer coisa se você precisar sair, não tem problema não, tá? Não, de boa, fica tranquilo. Beleza. Não, tranquilo.
+
+0:51 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Cara, então, a gente tá fechando o diagnóstico ali, né? Basicamente o que eu e o Edu já suspeitava é que tinha um...  We links that are quite similar to the Mr. Props, the question of architecture and everything else, but what I wanted to close with you is to validate some flux for us to be aligned, because so I can improve the architecture, especially the part of the requisites, etc., so it's more valid with you even some parts, that we already suggested some things, but it's more just to be aligned with you even, so we can't work or change the architecture, etc., read it all, I read it all, I read read it all, all the documents, I read it all, and I think you got the idea of the thing, it's interesting, I liked it.
+
+1:48 - Alex Souza
+  Thanks guys.
+
+1:50 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  . . .
+
+1:51 - Alex Souza
+  . . Muito quebrado?
+
+2:08 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Ah, cara, até que sim, viu?
+
+2:12 - Alex Souza
+  Até a parte dos arquivos mesmo tá bem quebrado, sabe? Tem bastante duplicata, bastante resquício de arquitetura, assim, tá bem bagunçado, tá?  Não vou mentir não, vou ser bem sincero contigo, mas nada que também não dá pra não corrigir, né? Tudo é corrigível ali, a gente dá pra reaproveitar bastante coisa nas correções ali, não tem problema não, tá?
+
+2:37 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Você não conseguiu chegar a falar com o seu sócio ali só pra entender essa questão do RH ainda, né?
+
+2:44 - Alex Souza
+  Cara, eu falei com ele, ele tá enrolado, falei com ele mais cedo, ele enrolado. Só que o que que eu vou fazer?  O que que eu vou fazer? Como ele não é o único que vai querer o sistema como um sistema operacional, ele tá...  pensando, ele tá pensando com uma coisa única, entendeu? Um fluxo único pra ele. Só que o problema todo é que ele ele, tipo assim, eu já apresentei pra ele três vezes o projeto, falo pra ele, mostro pra ele, explico pra ele, e ele parece que entra aqui, sai aqui, depois ele fala cara, eu quero que coloque isso, quero que coloque aquilo, quero que isso aqui, isso aqui, isso aqui.  Aí eu falo, pô, já tem isso lá, entendeu?
+
+3:25 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  A gente só precisa organizar.
+
+3:28 - Alex Souza
+  Então, o problema é que ele conversando com o outro programador, porque, tipo assim, com o outro programador que tava no sistema, eu falei pra ele, ele falou, mano, vê o que precisa pra ele, entendeu?  Eu preciso que ele funcione, entendeu? Não sei o que vai se precisar, eu não conheço, eu fiz com o IAC, esse aí é o projeto, aí ele não fez um diagnóstico assim, igual vocês, entendeu?  Ele não foi com essa linha, ele só falou, beleza, o que você quer? Eu falei pra ele, eu falei, ah, quero que tire.  Os bugs que estão no sistema, entendeu? Hoje ele está cheio de bugs. Ele pegou o projeto, é verdade, ele pegou o projeto do Lovobo ainda.  Foi ele que fez a migração, entendeu? Ele que fez tudo. Ele começou a montar o Frankenstein ali. É, na verdade, ele me instruiu como fazer a migração.  Eu fiz a migração, mas eu não tenho... Filha, puxa isso aqui para ela, não deixa isso. Então, peguei, ele me ensinou, eu fiz a migração.  Aí ele começou a comandar lá, entendeu? O Rojson, foi ele que começou a comandar tudo. O GitHub, foi tudo que começou a comandar.  E o chato foi... O que me chateou? Eu e ele tivemos uma discussão esses dias. Uma discussão no sentido que ele falou assim, Cara, você contratou...  trabalho eu te dei as horas de trabalho e eu trabalhei só que eu falei cara eu entendo que você trabalhou as horas mas dentro dessas horas o sistema eu te dei algumas funções ali que você falou que você fez um orçamento não fui eu que fiz foi você que fez o orçamento dentro dessa que ia levar tantas horas isso aqui no outro você colocou eu cara tudo bem que ia levar tantas horas mas dentro desse orçamento que você me fez você me cobrou você cobrou você botou o preço não fui eu que botei preço eu te parei pelo que você colocou as coisas que você falou que ia fazer ali elas tinham que estar funcionando entendeu então a discussão nossa foi assim ele falava que ele trabalhou as horas e eu falava cara você trabalhou eu concordo mas você mas o sistema não resolveu o problema entendeu então se para mim não adianta de nada você quer trabalhar das horas eu não te contratei por hora  eu contratei para resolver o problema, você que botou a hora, entendeu? Sim. Aí acabou, no fim a gente conversou, se entendemos, ele falou, cara, eu estou muito ocupado, eu estou com muito projeto, eu não estou conseguindo atender, eu falei, agora sim, eu entendi, entendeu?  Eu falei, você botou para rodar cuia, né? Ele, botei, eu falei, pronto, então, tudo bem, você... está bem nítido assim.
+
+6:22 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Entendeu?
+
+6:23 - Alex Souza
+  Então, está explicado, eu falei, então, assim, eu peguei um projeto quebrado, das mãos dele, estou entregando para vocês quebrado também.  Sim, sim, não, sim. É, dá para ver bem, mas isso a gente consegue resolver, tá?
+
+6:38 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  A gente já mapeou todo o sistema, agora já está tudo mapeado, todos os bugs de integração, a gente conseguiu mapear tudo.  Então, basicamente mesmo, e agora integrando os dados, integrando os fluxos, e aí o que eu queria validar contigo, alguns fluxos para a gente bater os requisitos, e aí a gente fecha o mapeamento, e aí a gente consegue fazer a...  proposta ali, falou, pra rodar a gente vai precisar disso, disso, tipo, pra rodar o essencial ali, você vai precisar botar isso, isso e isso de funcionalidade no ar, pelo menos.  Mas a partir daqui você já consegue rodar, entendeu?
+
+7:12 - Alex Souza
+  Tipo, por exemplo, o login, o login ele tava todo quebrado já também, sabe?
+
+7:17 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Tipo, assim, simplificando pra ti, basicamente, o que que acontecia? Você entra no sistema, você registra os dados, quando você sai e volta, assim, ou se recarrega a página, ele já não tinha mais dados, sabe?  Porque ficava tudo guardado no local storage, que a gente chama, né? Ficava tudo guardado ali no front-end, vamos dizer assim, no visual.  Então não tinha nada de back-end funcionando, não tinha nada integrado, assim, sabe? Que é um problema recorrente, assim, do logo.
+
+7:43 - Alex Souza
+  É que eu falava com ele. É que eu falava com ele, desculpa te cortando, é que eu falava com ele, assim, eu falava, cara, olha só, que ele falava assim, ó, consertei, eu vou te dar um exemplo, o Wikilog, consertei o Wikilog, aí eu ia lá, fazer o teste,  carregava, realmente carregava tudinho, trabalhava direitinho e tal beleza, quando eu chegava pra apresentar alguém eu chegava assim diante de um técnico e apresentava ele cara, eu ia mostrar, já passaram algumas horas, alguns minutos não carregava, ficava falha, aí eu voltava e falava com ele ó, tá dando um erro, aí ele falava, ó, já consertei aqui, então ficava sempre assim, ele consertei e quebrava, consertei e quebrava todos os menus sem o motivo, você deve ter visto o motivo aí sim, é, e é muito questão também desse de vibe codar, né, que a chama de puriá, que você vai acredita que ela fala que ela corrigiu, mas aí na prática ela não corrigiu nada, sabe, ela fez só uma gambiarra ali visual e ficou pra frente, então esse é provavelmente foi o primeiro erro dele mas bom, vamos validar aqui os fluxos também pra não ficar tomando muito seu tempo e aí a gente vai...  eu tô de boa tudo bom, você quer que eu compartilhe a tela com você, quer ver o... quer que abra o sistema e vai pra você me explicando o que é o fluxo e eu ir vendo lá, ou...
+
+9:06 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Cara, é mais umas perguntas mesmo de que eu mapiei aqui, de tipo de requisito mesmo, por exemplo, quando chega um funcionário novo, quando vocês vão contratar uma pessoa nova, o que que vocês geralmente cadastram, precisa cadastrar dele, o que que você quer controlar dele, assim, sabe, tipo, a quantidade de serviço, onde ele tá, ou precisa de alguns documentos, precisa imputar documento ali que você quer ter na plataforma, sabe, essas questões, assim, nesse fluxo do funcionário, assim, de contratação.
+
+9:39 - Alex Souza
+  Então, vou te explicar, só um minutinho. Tá, tranquilo. Vamos participar da reunião com o papai. Fala oi. Fala oi.
+
+9:55 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Cara, toda sua noventa ainda. Tá.
+
+10:00 - Alex Souza
+  Só o pó da rabiola. Vamos lá. Como que é o fluxo? Eu criei, eu quando criei o sistema, não criei para virar um sistema operacional de uma empresa, no sentido de TRH, administrativo e por aí vai.  A questão, eu quando criei, foi porque o que acontece? Tanto eu, como empresa, quanto o técnico, o técnico na área de funilaria aqui na Europa, ele é independente.  Em regra, ele independente. Dificilmente ele vai ser contratado, porque o salário dele para a contratação o salário é baixo.  Eles não pagam o salário bom. Então, não trabalham. Então, como tem esse déficit de mão de obra aqui, o pessoal já é acertado que essa área é é prestação de serviços.  Sim. Entendeu? Então, tanto eu como técnico somos iguais. Então, qual a ideia do sistema? Ele era um fluxo de técnico-crente e trabalho.  A mesma coisa, gente. Técnico-crente e trabalho. Só que a gente pode ter, eu como empresa, eu posso pegar diferente do técnico.  Por isso que, não sei se você reparou na parte de cadastro, ele tem workspace e técnico para cadastrar.
+
+11:28 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Ele não tem mais nenhuma opção. Porque o técnico, ele pode trabalhar.
+
+11:33 - Alex Souza
+  Ele não precisa estar vinculado a um workspace para trabalhar. Ele pode cadastrar seus clientes, entendeu? Imagina se o técnico João está prestando serviço para a KHS.  Então, ele tem ali para a KHS, ele vai fazer alguns carros. Aí, lá, ele vai ter o tipo de trabalho que ele vai fazer.  Ele faz um orçamento. Ele consegue fazer todo aquele fluxo de produção, entendeu? O Wikilog. E quem gerencia as listas dele...  nesse caso, é ele mesmo também, entendeu? Ah, tá.
+
+12:04 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Então tem esses dois tipos de isolamento, né? Porque o que a gente estava pensando ali dos workspace da empresa mesmo, nível enterprise, então ia ter esses isolamentos que a gente chama de tenants, né?  Então cada empresa tem a sua gerência, sua workspace de trabalho ali, os técnicos, então cada técnico também ele pode ter esse workspace sozinho, independente.
+
+12:27 - Alex Souza
+  Pode ter, exatamente. Tá. Aí por isso que ele está naquele fluxo de usuário. Ali tinha um botão que o menino, ele não trouxe de volta na época, uma das coisas que eu falei pra ele, que com a IA eu tinha colocado, que era questão de permissão pro usuário.  Entendeu? Imagine. O técnico em si, ele já nasce com, ele nasce como se ele fosse um workspace com liberação total, entendeu?  Só que ele a diferença é que ele não pode ter gente pra trabalhar pra ele, entendeu? Ele não pode botar a gente pra trabalhar pra ele, ele não pode vir pra lá, ele  ele só presta serviço para a empresa, entendeu? Então, tudo que é ligado a esse fluxo, ele consegue fazer orçamento, ele consegue produção, a produção virar uma week log, a week log virar uma lista, a lista virar uma fatura, entendeu?
+
+13:16 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Então, ele consegue ter a contabilidade, essa coisa toda.
+
+13:21 - Alex Souza
+  O que ele não tem, o que ele não teria nisso aí é colocar a gente para trabalhar com ele, diferente do Workspace.  Oi, meu, também. Aqui, deixa eu botar a rodinha aqui para você ver. Ah, diferente do Workspace. O Workspace, ele pode tudo isso, além disso aí, ele pode ter um técnico vinculado a ele, porque acontece muito, muitos técnicos não têm contato direto com o cliente, quem tem é nós, entendeu?  Então, o que acontece? A gente pega o trabalho, e terceiriza para eles, entendeu? que eu então terceiriza pra eles por isso aquele fluxo, não sei se você conseguiu ver no detalhamento quando tem lá um detalhamento, não é a regra a parte de regra que eu faço um detalhamento, é, regra e detalhamento é a mesma coisa lá, eu faço um fluxo de divisão de porcentagem sei lá não sei se você conseguiu ver uma situação assim entendeu?  parte do financeiro ali, né isso, que a parte do técnico ele vem, ele ganha, como ele está trabalhando, e é ele que trabalha ele pega o montante maior entendeu?  Mas como a gente está fazendo o intermediário, a gente ganha uma porcentagem em cima dele entendeu?
+
+14:39 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Entendi nesse fluxo agora, então vocês só acompanham basicamente o serviço então quando vocês intermediam, quando pegam o workspace e o enterprise, ela só vai intermediar ali, ela só vai saber o fluxo do serviço e o técnico responsável, vamos dizer assim isso aí, aí nesse você quer dizer que vem vem
+
+15:00 - Alex Souza
+  Acontece que, como a gente está fazendo intermediário para ele, em regra a gente também gerencia tudo para ele, entendeu?  A gente só não ganha em cima dele, a gente meio que trabalha para ele também nesse sentido. Então, tipo assim, o técnico sozinho tem acesso às listas, entendeu?  O técnico vinculado a uma empresa não teria acesso às listas, ele teria acesso ao Wikilog e o financeiro, entendeu?  Entendi. Entendeu? Ele faz a produção, vira o Wikilog, aí o Wikilog vira uma lista. A única coisa que ele vai ter acesso é às faturas que vão ser geradas, porque ele vai ter o acesso ao fluxo financeiro mais dele, porque a ideia é, eu tenho ali 10 técnicos, eu tenho 10 técnicos vinculados comigo.  Aí imagine que ele está vendo tudo ali, se ele estiver vendo tudo, ele pode ver o faturamento de 10 técnicos e na cabeça dele ele viu...  o faturamento da empresa e falar assim, a empresa está ganhando muito acima de mim, ela está me enganando, entendeu?  Entendi. Então a ideia é ele ver só o que pertence a ele.
+
+16:10 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Só o dele mesmo, ali isolado. Exatamente.
+
+16:13 - Alex Souza
+  A ideia é essa. Essa parte de fora. Desculpa até te cortar. Não tem nada de controle de férias, bater ponto.  Ali não, ali não. Ali não. Ali não, nessa parte não. Nessa parte de usuário, não. A gente tinha que ver até uma maneira, porque ele vai ficar com fluxo meio, uma situação repetida, né?  Que vai ser o usuário, que vai ter o usuário e vai ter a parte de cadastro de pessoas lá, de colaboradores.  Talvez se pegar essa parte de usuário e jogar lá dentro de colaboradores também, né? A gente pensar em alguma situação, tipo assim, usuário, usuário ele pode ser, ele pode ser, ter usuário.  Obrigado. Um parceiro, o usuário pode ser um parceiro, um parceiro meu, igual eu, eu tenho três sócios. Eu tenho, desculpa, eu tenho dois sócios.  Então, assim, na minha empresa, a gente participa em três. Entendeu? Participamos em três.
+
+17:18 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Mas aí não faz mais sentido vocês terem um acesso, tipo, como se fosse um administrador só? É, não. Aí no caso é isso.
+
+17:27 - Alex Souza
+  Aí no caso é isso. Eu criei um workspace, sei lá, igual eu estava falando a questão do usuário. É, eu criei um workspace.  Eu, eu, eu sou o administrador. Entendeu? Aí ali, eu boto, abaixa um pouquinho, filha, por favor.
+
+17:42 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Abaixa um pouquinho.
+
+17:43 - Alex Souza
+  Aí eu coloco o parceiro, vou botar os dois parceiros comigo. Aí eu faço lá o detalhamento. Faço lá o detalhamento.
+
+17:50 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Você quer que eu te compartilhe a tela para te mostrar? Ou você está entendendo, consegue pegar?
+
+17:55 - Alex Souza
+  Não, eu peguei, eu peguei, porque eu lembro que da, estou lembrando da última reunião, estou lembrando também do que eu mexi, né?
+
+18:01 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Isso.
+
+18:02 - Alex Souza
+  Aí lá é onde que eu pego e coloco. Eu boto o nome da pessoa, né? No caso, puxa pelo ID da pessoa.  Eu cadastro a pessoa, nasce o ID. Eu puxo ela lá. Aí, dali, eu dou o nome aos bois. É o quê?  Parceiro? É técnico? É, entendeu? E ali eu divido a porcentagem. É cliente também? Porque, às vezes, o cliente, ele pega, ele passa o serviço pra gente, mas ele entra como sócio também, Ele é o cliente, mas é o cliente, mas ele quer, ele quer, ele quer também, não, eu quero uma parceria nisso aí.  Eu vou te dar a vantagem do trabalho, mas eu quero uma vantagem também, entendeu? Tá. E esses acessos de usuário, Que seria usuário, no caso.
+
+18:49 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Eles vão ter visualização, então, só meio que da parte financeira ali, vamos dizer assim. Isso, ele vai ter a visualização da produção até o Wikilog.
+
+19:00 - Alex Souza
+  Até o Wikilog, sendo que a Wikilog, quando ela vira uma lista, quando ela vira uma lista, não, cara, eu acho que seria melhor, porque eu mudei o fluxo, antigamente ficava o Wikilog e a ficava as duas coisas juntas, só que eu tinha mudado o fluxo, não sei se aparece para você alguma coisa, que o fluxo foi até o meu sócio que pediu, porque ele achou muita informação, para ele tudo é muita informação, para ele tudo é muita informação, porque eu ia separar essa parte do técnico e as empresas, da lista para o Wikilog, ia ficar os dois ali.  Então, a pedido do meu sócio, o eu fiz? Orçamento ou produção finalizado vira um Wikilog. O Wikilog assinado pelo chefe lá da oficina, ela passa a virar uma lista, entendeu?  Ela some da Wikilog, ela some de lá e entra para a lista. E da lista vai ficar aquela questão de pendente, pago.  eu acho que seria legal o técnico ter acesso a essa parte, porque aí ele fica ligado também se já foi pago, se não foi pago também, entendeu?  Eu acho que não sei o foi, não. Acho que poderia deixar, entendeu? Tá.
+
+20:13 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Também eu tinha uma dúvida aqui sobre a... da Wikilog. Tipo, quando você já... Quando o técnico lhe afirma, por exemplo, se deu algum erro, quem que pode, por exemplo, vai permitir voltar ou reabrir essa Wikilog?
+
+20:30 - Alex Souza
+  Quem que vai poder reabrir?
+
+20:32 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Só o administrador, técnico...
+
+20:35 - Alex Souza
+  Deixa eu abrir o sistema, deixa eu te compartilhar até ali, te mostrar lá, que vai ficar mais fácil pra eu poder te explicar, rapidinho.  Tranquilo, tranquilo, pode ser.
+
+20:44 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Vamos lá. Também seria basicamente a mesma pergunta do orçamento. Por exemplo, quando o cliente ele aprova um orçamento, aí se aparece, aí já foi aprovado e tal, e aí se vocês começaram a mexer e aí  Apareceu alguma nova correção ou algum dano novo ali que não saiu no orçamento. Você já altera o orçamento naquele orçamento já aprovado ou vocês lançam um novo orçamento ou uma nova revisão para Não, altera lá mesmo.  O técnico pode alterar ali e ele remanda para a aprovação do cliente? É, ele pode sim.
+
+21:26 - Alex Souza
+  Por exemplo, tá aqui, produção, vamos lá. Vamos lá. A gente está aqui executando o trabalho e tal, finalizou. Quando finalizou, vem para cá, o Wikilog está aqui.  O que acontece? Na Wikilog, está vendo aqui? Documento operacional. Eu aperto aqui, ele reabre o documento operacional. Ele vem aqui.  Deixa ver se é isso, né? Validação. É, não, isso aqui, desculpa. Isso aqui é a validação do chefe da oficina.  Isso aqui é a parte que eu falei. Que ele vem aqui, ele marca sim, validação, sim ou não. Se marcou sim, ele já entra e marca aqui a assinatura, registrou.  Ele já entra como uma ordem de pagamento aqui, uma lista. Sim.
+
+22:26 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  É, essa assinatura, você quer que ela tenha a validação real mesmo de assinatura ou só ali, basicamente, um log ou alguma coisa, um traqueamento?
+
+22:39 - Alex Souza
+  Cara, pode ser os dois. Pode ser os dois no sentido que, imagine que o cara, se ele quiser assinar, ele assina.  Entendeu? Mas se ele não quiser assinar, se ele tiver com o tablet lá e uma caneta ou o dedo lá, ele quiser assinar, vai ficar mais fácil para ele, beleza, ele assina.  É igual o caso do orçamento, o orçamento acho que tem isso também. mas se ele não quiser assinar e quiser marcar a caixa lá como assinado ele também pode fazer isso, ele vai estar no login dele entendeu?  tá, então deixa liberado mesmo é, que aí ele fica à vontade, tipo assim, pra não perder tempo imagina, às vezes tem dia que a gente tá fazendo um carro atrás do outro, um carro atrás do outro aí tem que fazer tudo, ele só marca ele olha, ele rapou, marcou, assinou marcou, validou, assinou, já vai embora entendeu?  e fica mais prático agora eu tenho que achar, que eu tinha achado ontem um fluxo que eu quero te mostrar acho que tá aqui ordem de pagamento, acho que ele tá nesse aqui deixa eu correr não, não tá aqui não, tá lá mesmo porque tem uma parte aqui tem uma parte aqui que era vou botar pra cena pra escrever  Mas não é isso não, eu tinha visto ontem esse fluxo que era de correção.
+
+24:06 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Não é depois quando você pega as antigas? Faz, as antigas como assim?
+
+24:14 - Alex Souza
+  A Wikiloc? Não sei cara, agora porque eu tinha, eu tinha achado um fluxo de correção nele aqui que eu achei interessante, deixa eu ver a produção pra ver se ele me dá aqui alguma coisa.  Ele não abre quando aperta aqui né, porque já foi finalizado, tá certo. É, ele não tá me dando, mas a ideia é, a ideia é aqui ó, a ideia é essa correção tá aqui antes de ir pra cá, porque o que que acontece?  Se ele constatar um erro aqui, se ele constatar um erro, tanto no valor, quanto no tipo de trabalho. que foi executado, porque ele tem ali um prazo para ele assinar.  O certo é ele assinar toda semana. Se o carro não voltou naquela semana, é porque tá bom. Mas aqui, infelizmente, acontece às vezes do carro voltar depois de duas semanas.  Entendeu? Então, se ele segurar por duas semanas para assinar até ele ter a precisão, imagine, o carro voltou. Então, ele vem aqui na ação, ele tem uma parte aqui de correção.  Ele aperta aqui para retificar. Retificar, ele volta para a produção. Entendeu? Ele volta para cá. O que vai retificar naquela produção?  Ele aperta aqui, produção. Bota para em produção. Ele aperta aqui, vai mostrar vamos botar assim, o orçamento. abrir o orçamento.  o que que tá errado nisso aí? Tá errado que ficou tudo ruim. O cliente não vai pagar nada. Entendeu?  Entendi. Vai ter que refazer. Enquanto ele não refazer o trabalho, enquanto ele não refazer o trabalho, mas aí entra em produção.  de novo, aí ele finalizou o mesmo fluxo, vai pra cá e volta pra Wikilog, entendeu? Ele refaz o caminho, entendeu?  Entendi.
+
+26:09 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Você quer que coloque algum, que tem algum tipo, por exemplo, ah, esse aqui já tava no Wikilog e agora é o Wikilog e aí ele voltou de novo pra produção, ou seja, então tá dando problema.  Você quer que tenha esse tipo de detalhamento? Pode botar uma sinalização, pode botar alguma coisa que sinalize que isso é uma retífica, entendeu?  Um retorno.
+
+26:32 - Alex Souza
+  Fica preocupado, que aí o técnico já sabe que aquilo ali deu cagada e às vezes pode até pegar e mudar pra outro técnico, aquilo ali, se o técnico não conseguir corrigir.  Perfeito.
+
+26:47 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Agora, voltando do... O chefe que valida o Wikilog, ou é vocês como ADM, ou o próprio técnico pode fazer isso, né?  Então, o chefe aí que...
+
+27:00 - Alex Souza
+  Tá, o chefe, ele é o cliente, ele é o cliente. Então, a gente vai ter que ter um fluxo aqui, por quê?  O acontece? O cliente, aí eu achei legal o meu sócio ter colocado essa parte de um ecossistema, dessa outra parte de pessoas, que aí foi onde dá para resolver essa parte de cliente.  Por quê? Antigamente, eu tinha deixado isso, como cliente resolve isso, mas quem administra a página do cliente? Imagine, uma seguradora que ela tem, cara, umas 15 mil oficinas espalhadas aí pelo mundo.  Quem administra o quê, né? Entendeu? Então, cria, quem vai criar o usuário ali, quem vai ser a pessoa responsável.  Então, essa parte do fluxo de pessoal para cliente seria interessante, porque a gente cria aqui o cliente. Normal, né?  Criamos um cliente aqui. Esse cliente, ele nasce aqui com o ID, a gente convida ele. Em regra, o cliente vai poder ter um fluxo de pessoas para ele poder delegar a função.  Então, acho que seria interessante, porque, por exemplo, vou te dar um exemplo aqui da França do nosso cliente. A gente tem o cliente PDR hoje, que é o nosso maior cliente.  Vou falar só nível França, não vou falar mundial, não. Ele é mundial, não vou falar nível França. Nível França, ele tem, aqui hoje, ele tem 40 plataformas.  Essas plataformas, cada plataforma, a gente tem um gerente, um gerente regional de plataforma, um gerente de plataforma. E se na cidade ela tiver mais de uma plataforma, ele tem um gerente geral ali, regional.  Ou se não tiver, tiver uma aqui, tiver outra no outro departamento, ele tem também um gerente que comanda... Aquele fluxo, aquele...  Tipo estadual ali. Isso, entendeu? Então, assim, só que esse gerente geral, em regra, ele não faz nada. Só quem faz é o gerente de plataforma.  Ele que é responsável por verificar se está tudo correto, entendeu? E nessas plataformas, eles têm funcionários que é recepcionista, só que o recepcionista aqui, ele faz tudo.  Ele é recepcionista, ele recebe o carro. Ele é tipo um pós-venda, do que a gente fala aí no processionário, sabe?  Ele é um pós-venda, ele é um consultor de pós-venda, o recepcionista, entendeu? Ele é um consultor. Às vezes ele mete a mão até lava o carro.
+
+29:40 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Ele é tudo. Entendi.
+
+29:42 - Alex Souza
+  É tipo auxiliar geral, É, exatamente. Então, gente poderia botar esse fluxo de pessoa para eles também, entendeu? Para ele poder dar acesso, entendeu?  Que aí, a ideia, eu não sei se está ficando muito complicada a minha explicação, para professor. Você está conseguindo pegar direitinho?  Estou, estou. Qualquer coisa também eu olho na gravação depois ali. Ah, beleza. Que bom que você está gravando. Então, o que acontece?  A ideia é um sistema, um usuário ali. Eu vou falar de modo geral. Um usuário. Esse usuário pode ter várias empresas ali embaixo.  Entendeu? Cada empresa com o seu workspace, né? Com o seu workspace. Sendo que, imagina, a empresa, o usuário Mikael.  Vou botar que é o diretor geral. O usuário Mikael. Ele é o diretor geral, mas ele tem as empresas.  Ele não é dono das empresas, mas ele comanda as empresas do grupo. Então, ele tem a PDR e ele tem as outras empresas.  A Alianz está tudo ali junto com ele. KHS, tudo junto. Aí ele... Obrigado. usuário é autor. Obrigado. cadastrou, ele fez o usuário dele.  Então ele cadastrou as outras empresas, se for o caso, e a cada empresa ele nomeia um representante ali, que vai ser o cara que vai fazer a parte administrativa, vai gerir tudo ali pra ele, que vai delegar poder, que vai delegar função, entendeu?  Que vai seguir esse fluxo. Mas ele seria diferente de um técnico, né? É, ele seria diferente de um técnico.  Tá. Seria tipo um usuário diferenciado, né? Seria um administrador, só que sem ser o administrador master das empresas. Isso, ele pode ser o RH, ele pode ser quem ele quiser dar o nome dos bons lá, mas o poder que delega o poder é o é o usuário geral, entendeu?  Tá. Ele delegou o poder pra aquela pessoa que vai administrar aquele workspace. Entendi. Então aquela pessoa que entrou naquele workspace daquela empresa, ele não tem acesso às...  outras empresas. Ele fica isolado, Nino. Ele fica isolado, porque quem tá por cima aqui é o Mikael, ele é o cara que consegue transitar em todas, entendeu?  E ver tudo. Essa é ideia. Aí, ali embaixo, à medida que ele vai tendo poder, esse cliente, cara, ele se limita em listas, ele se limita em listas, ele se limita na parte operacional da empresa, tá?  Toda a parte operacional ligada a ele, aquela empresa, a empresa dele, ele consegue ver. Ele não vê financeiro. Financeiro ele não vê, não interessa pra ele, entendeu?  Tá. Ele é cliente, ele como cliente, entendeu? Entendi.
+
+32:47 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  E ele, ah, tá. Tá, acho que eu peguei. Calma, mas só não ficou tão claro as pessoas ali. As pessoas seriam, então, os colaboradores que trabalhariam?  Isso, é.
+
+32:58 - Alex Souza
+  O cliente, ele tem... colaboradores. É diferente do workspace, entendeu? Ele é cliente de um workspace, é cliente de uma empresa que tem um workspace e ele como cliente tem colaboradores.  Entendeu? Cada empresa que é cliente tem um colaborador nesse fluxo. Tá, tá tranquilo. Não, beleza. Tá, tranquilo. Tá, beleza.  Que aí, o que acontece? Esse cliente, como que ele nasce? O cliente, ele nunca cria conta. A ideia é ele nunca cria conta.  Ele é sempre ser convidado. Sempre convidado. Por quê? Eu convido o meu cliente, Micael, eu mando o convite pra ele.  Ou pra quem ele quiser nomear como representante no lugar dele, entendeu? Diga mais, cara. Eu não quero ser, não quero estar a par disso.  Vou deixar fulano de tal que vai... vai determinar tudo aqui para mim, ele que manda. Eu convido essa pessoa, mando por e-mail para ele o convite.  Quando eu criei aqui, cliente, o convite, desculpa, a ideia, ele está com fluxo aqui, onde eu cadastro o cliente, o novo cliente, ele está nascendo aqui com as especificações dele.  Uma ideia mesmo, na verdade, não é nem eu criar esse novo cliente. A ideia é, quando eu mandar o convite para o e-mail dele, ele ter autonomia para criar o espaço dele.  Tá.
+
+34:40 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Mas como você vai gerenciar isso? Você pensou em gerenciar isso na não, não.
+
+34:46 - Alex Souza
+  Falei besteira. Falei besteira, Gustavo. É besteira. Tudo que eu falei, esquece. Apaga a fita, ó. Corrigindo, rebobinando. É. Agora que está caindo a fita da assinatura.
+
+35:00 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Não está fazendo nenhum sentido. Esquece o que eu falei.
+
+35:03 - Alex Souza
+  Esquece o que eu falei do cara ser um usuário e criar empresas. Esquece. Isso aí é só para o workspace.  Por quê? Só para o intermediário. O cliente, se eu estou convidando o cliente, eu estou convidando a empresa dele específica.
+
+35:21 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Se ele tem outras empresas, é outro fluxo.
+
+35:24 - Alex Souza
+  Eu convido a outra empresa dele. Fica melhor.
+
+35:28 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  se fosse um cliente novo. Um cliente novo.
+
+35:31 - Alex Souza
+  Acho que vai ser melhor assim, porque como já tem esse cadastro de cliente aqui, é mais prático. Vai dar menos confuso.  Menos confuso. Só que aí, a gente abre oportunidade para o cliente ter um fluxo de colaboradores para poder trabalhar nesse sentido para ele.  Entendeu? Que é o caso que eu falei da PDR, que ela tem ali 40 plataformas. Ela tem pessoas que trabalham para ela.  Então, não tem ninguém que é comissionado. Então, eles não precisam ter nenhuma parte de comissão, nada disso. A única coisa que eles vão ter é uma parte de pessoas que trabalham para eles, ali dentro.  Parte de pagamento, essas coisas, não precisa ter aí, entendeu? Não precisa ter nada disso para eles. Eles já têm o sistema deles de pagamento, RH, já a contabilidade deles, já se vira do jeito deles.  O que eles precisam ter é o fluxo de pessoas que trabalham só gerenciando, porque quem vai assinar as week logs, quem vai validar as listas, entendeu?  Como fatura ali, entendeu? Que vai liberar o pagamento, que vai receber as faturas para contabilizar, fazer a conferência. É só esse fluxo de pessoal que a gente precisa ter para eles.  Então, a ideia seria, nessa sentido aí, o cliente pode ter um RH, Tá? Porque a gente, muitas vezes, tem que subir a documentação dos técnicos aqui para eles.  Quando você falar...
+
+37:08 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Desculpa, vou te cortar. RH, o que você pensa de funcionalidade? Só o gerenciamento dos colaboradores ou o que mais?  Só o gerenciamento de colaboradores deles ali. O controle de documentação dos técnicos.
+
+37:27 - Alex Souza
+  Qual tipo de documentação? Então, a documentação deles aqui é documentação normal. Identificação válida, identificação válida. Comprovante de morada. Conta bancária, eles não precisam ter acesso a nada disso.  Seguro. Conta bancária só responde a gente. Como a gente faz pagamento. Seguro, porque se eles tiver acesso à conta bancária, eles podem fazer confusão, em vez de transferir para a gente, transferir para...  técnico, e quando a gente fala isso, acontece, acontece muito, eles fazem assim, é fácil fazer isso, fácil, a cabeça deles aqui é fácil, entendeu?
+
+38:14 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Então, o que que acontece?
+
+38:16 - Alex Souza
+  O RH, ele só tem ali a questão, porque o RH deles, o que eles fazem hoje? Alex, o técnico Guilherme tá faltando o seguro dele aqui, o seguro dele tá vencendo, pode me atualizar, me enviar um seguro novo, entendeu?  É só isso, aí...
+
+38:34 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Desculpa, esse tipo de dado, você imputa, você quer imputar ele, por exemplo, um anexo, ou uma foto do documento, ou é só numeração, como que, como vocês registram isso?
+
+38:50 - Alex Souza
+  Então, eu vou botar aqui no usuário, pra ver se, onde que tá isso? Ó, eu tenho que ir pro usuário, né?  Tá conseguindo bem?
+
+38:59 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Tá.
+
+39:00 - Alex Souza
+  tem aqui o usuário a ideia é eu peguei aqui, isso aqui são os usuários que tem aqui, eu pego a peça em cima dele, desse técnico eu consigo ver ali dentro desse técnico a parte documental dele, entendeu?  a ficha técnica dele eu vejo a ficha técnica dele cadastrada a ficha técnica dele é vamos botar assim nome, sobrenome endereço nacionalidade dele nacionalidade a ficha técnica básica, né?  e-mail telefone, whatsapp e dali a gente tem um card que está aqui, olha onde aquele card foi parar foi parar aqui não sei como ele foi parar aqui foi parar aqui tem que ter um card de documentos ali né?  yeah Que esse card aqui, esse card eu tinha pedido, tá vendo? Subir documento, ele já tem ali pra subir.  Ah, tá. Aí você consegue anexar ali, né? Exatamente. Tá, perfeito. E esse card aqui, Gustavo, eu tinha pedido a IA pra fazer no estilo Windows.  Entendeu? Onde a gente consegue mover, pegar uma pasta, botar dentro de pasta, criar pasta, pegar um documento. Fazer tipo um diretório.  Isso. Renomear pasta, escolher pasta, compartilhar, baixar, que ali eu pego, eu dou o nome pra uma pasta. Documentos, documentos pessoais, documentos administrativos, entendeu?  E ali dentro, cada dentro ali, dentro daquela única pasta, fica um negócio. Ah, entendi. Então, beleza. Com função de compartilhamento, ok?  Imagine. Quero compartilhar essa pasta com alguém, da visibilidade. Eu pego dentro daquele ecossistema que eu tenho, que eu trabalho, aquele técnico que ele tá vinculado àquela empresa,  Então, aquela empresa tem o meu ecossistema ali, eu consigo pegar o ID da pessoa responsável, que é o do RH, e dou acesso para ela ali e ela puxa o documento que ela precisa.  Tá. Beleza. Entendeu? Tá, tranquilo. Beleza. Essa é a parte de usuário que eu falei, entendeu? A outra parte já seria o colaborador aqui que ele colocou, né?  O pessoal é diferente, é o que ele queria para a gente ter... Isso aqui é até interessante, fica bom, porque hoje a gente é uma empresa de três.  Tá. Com outras pessoas trabalhando para a gente, tem muitas pessoas que trabalham para a gente, mas é tudo assim, freelance.
+
+41:46 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Sim.
+
+41:47 - Alex Souza
+  E do mais, a situação está caminhando para ter um departamento, para ter um administrativo, para ter... Então, não tem jeito, a gente vai precisar ter um fluxo mesmo de pessoal hoje, igual ele...  ele colocou a mesma pegada, que a diferença é esses aqui só funcionaram, entendeu? Entendi. Tá, perfeito. Ficou bem mais claro.
+
+42:11 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Agora, eu só tinha mais uma dúvida na parte de automação. O que exatamente você espera com as automações? Automação.  Ali mesmo, ali na inteligência, aí tem o que eu...
+
+42:32 - Alex Souza
+  O que é isso aqui? Tá, então essa parte aí vai tirar. Pode tirar, que nem sei o que é isso, cara.  automação. Automoção.
+
+42:44 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Cadê? outro aqui que a gente tinha colocado.
+
+42:47 - Alex Souza
+  Que o Word aí?
+
+42:50 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Cara, não sei por que ele colocou isso.
+
+42:55 - Alex Souza
+  Entendeu? Não faço ideia. Esse que eu não entendi é tipo um...
+
+43:00 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  como se fosse um BI que mapie ele então é basicamente como se você fosse analisar algumas métricas da empresa, do workspace ali, como que tá rodando a produção aí você conseguiria traquear as métricas por aí, sabe?  Acho que essa parte sim até que é interessante É, você acha? É, é mais a parte de BI, né, de business ali pra vocês, por exemplo, vocês verem se meta tá batendo análise da produtividade ali que tem também prevenção dos riscos essas coisas, eu acho que até que faz sentido assim Tá, bom, você sabe Beleza, era mais pra entender essa parte de automação que ela ficou meio aberta ali, que não ficou muito claro Isso que eu falei responde as suas perguntas assim, algumas delas Responde Quando eu falei de documento, tem outra parte que ele criou de documentos por país isso Obrigado.
+
+44:01 - Alex Souza
+  Cara, isso aqui pra mim Eu acho que não tem necessidade Nenhuma Isso aqui na verdade Poderia ficar dentro disso aqui Dentro do Diretóriozinho ali de passo É porque Eu não vejo necessidade nenhuma Porque eu já tenho uma pasta ali a qual eu posso renomear E colocar do jeito que eu quiser Então todo esse fluxo que tem aqui Ok, eu entendi o que ele quis Colocar aqui, tipo França trabalha com cabis Espanha trabalha com resisto mercantil Itália trabalha com Vessurra Vessurra Camerale Portugal NIF Eu entendi o que ele quis colocar aqui Cada país tem o seu tipo de documento que trabalha Beleza Poderia Poderia ficar Essa questão aqui Pro RH, cara Pro RH da empresa ser Pro RH RH RH RH  Ela quiser separar alguma coisa diferente Entendeu? O RH do Orgospite quiser separar alguma coisa diferente Alguma documentação ali Diferenciar, né?
+
+45:11 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Que até poupa de ter ali a menu lateral Desnecessário Próxima pergunta que você tiver aí É, acho que agora só mais uma Mesmo do De faturamento ali da contabilidade Se tem folha Folha salarial É mais tipo Por exemplo Fez, produziu, finalizou Pagou, produziu, finalizou, pagou Tem alguma folha salarial Ou alguma coisa do tipo?
+
+45:45 - Alex Souza
+  Nós temos aqui folha salarial Sim, como funciona? Os técnicos pra vir pra cá Trabalhar, os que estão vinculados à minha empresa Eles são obrigados A ter salário, entendeu?  Porque a gente Eles não tem um bom? Eles são pessoas que não têm documento europeu. Nós tivemos que fazer um visto de trabalho para eles.  Eles continuam recebendo a produção, entendeu? Só que a gente tem um fluxo interno de contrato. Aqui é contrato. Aqui eles não trabalham com carteira de trabalho.  Aqui fora é contrato. Então, fluxo de contrato. Ficha de pay, que é folha de pagamento, o Olerite. Então, além disso, gente tem gastos com hotel, gastos com hospedagem, gastos com alimentação para eles, vale, todas essas coisas.  Só que aí, o que acontece? Nesse quesito aí, eu tinha criado isso aqui. Cadê? Cadê? Deixa eu botar aqui.  Financeiro. Quando vem contabilidade. Eu tinha colocado aqui, onde Onde eu pegava... e dava aqui o nome e os bois.  Eu pegava o papel, entendeu? Você registrava com dia a cada gasto, né? Exatamente. Registrava o que foi despesa, que tipo de despesa que foi?  Ah, foi um treslado, entendeu? Retirada. Retirada foi o quê?
+
+47:17 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Um adiantamento que ele pediu, entendeu?
+
+47:21 - Alex Souza
+  Gastos com o governo, entendeu? Teve um gasto com o governo.
+
+47:25 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Isso só entra naqueles que são realmente vinclados a você, aqueles que são, tipo, técnicos freelancers e não entra aí, ou entra também?  Não entra, entra.
+
+47:36 - Alex Souza
+  Isso aqui é justamente para os técnicos.
+
+47:38 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Esse aqui é justamente para os técnicos. Entendeu? Esse aqui é para os técnicos.
+
+47:43 - Alex Souza
+  O nosso pessoal não, o nosso pessoal é diferente. Toda essa parte aqui, o fluxo dessa parte aqui em regra, ela é só para o fluxo de cliente, técnico, sócio e...  Workspace, entendeu? Que a gente faz aqui a distribuição, aqui é onde que eu te mostrei que faz a distribuição de lucro, entendeu?  Que aqui a gente bota a especificação de quem é o quê, entendeu? Sócio, empresa, cliente. Aí daqui, isso aqui...  cortou. Cortou? Cortou?
+
+48:19 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Quando você ia falar dos fluxos, que serve para o fluxo de cliente, técnico, e você ia falar...
+
+48:24 - Alex Souza
+  Isso. Isso aí. Toda essa parte aqui do financeiro, esse financeiro aqui foi criado só para essa interação entre cliente, técnicos e sócio e usuário ali, entendeu?  E parceiro. Por quê? O que acontece? Eu crio aqui uma regra.
+
+48:43 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Lembra que eu falei que os técnicos não são assalariados?
+
+48:47 - Alex Souza
+  Eles são tudo comissionado.
+
+48:51 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Então, gente bota aqui essa parte da comissão, adiciona aqui, vai escolher quem é que vai receber a comissão, quanto de comissão, entendeu?
+
+48:58 - Alex Souza
+  O sócio... Tchau. João, ele recebe aqui 10%, entendeu? Vai calculando as porcentagens. Exatamente, vai recebendo. E aqui, a gente vai pegando as listas que tem, seleciona o grupo de lista, esse grupo aqui é o grupo de lista.
+
+49:21 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Entendeu? Você quer que deixe essa parte de distribuição de lucro, por exemplo, como cria, ela segue algum padrão ou para cada técnico é diferente?  Tipo, ela tem algum padrão que dá para criar regras, por exemplo, e você salvar, por exemplo, de distribuição de lucro ou para cada um você prefere que inputa manualmente?  Não, melhor deixar manual, porque...
+
+49:47 - Alex Souza
+  Tá, melhor deixar manual, sim. Deixa manual, em regra depende do nível do técnico, entendeu? Entendi. Depende do nível técnico.  Se o técnico for muito bom, a gente tem uma maneira diferente de trabalhar com isso. dele, se ele for muito ruim a gente tem uma maneira diferente, entendeu?  Também tratar entendi.
+
+50:06 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  É, que é do gasto que ele dá e o retorno que ele não dá Entendi Entendeu?
+
+50:14 - Alex Souza
+  Quem manda na empresa é os técnicos, mas ele manda dependendo do nível de profissionalismo dele Entendi. Não, perfeito Aí, daqui esse fluxo aqui de detalhamento com fluxo de contabilidade aqui ele vem pra cá, pro detalhamento que é onde que a gente pega e tem isso aqui Aí, aqui Gustavo, a receita esperado é o que tá na Wikilog o recebido é o que foi fatorado pela lista e já tá pago Desculpa, desculpa, desculpa, desculpa Desculpa O esperado é o que tá na lista, mas tá pendente Entendeu?  Tá lá na lista de pagamento, tá pendente Obrigado Obrigado Obrigado Obrigado Obrigado Obrigado O recebido é o que está na lista, mas está pago.  Se está marcado verde pago, ele entra aqui. Aí aqui, o que está para faturar ainda, o que está para assinar, não entra.  Entendeu? Entendi. Não entra, porque não adianta ele ficar com uma coisa que ainda não foi assinado, ficar alimentando esperança, entendeu?  Vale o que está esperado. Já assinou, já foi, ele já sabe que tem algo para receber, entendeu? Então, ele pode comprar em cima disso aqui.
+
+51:28 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  E a diferença é o que dá. Tipo assim, ele vai mostrar ali o resultado do que tem, se está positivo ou negativo, entendeu?
+
+51:35 - Alex Souza
+  Para ele ali nesse sentido. Aí aqui, está vendo a parte aqui que eu falei, governo, compras, combustível, viagem, despesa, retiradas, aluguéis, é o daqui, da contabilidade.  Da contabilidade ali. Entendeu? Daquele técnico.
+
+51:50 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Eu tenho aqui, técnico, está vendo?
+
+51:53 - Alex Souza
+  Ele me mostra qual técnico, eu seleciono o Açousa e aqui eu começo a preencher para ele. que foi, quando eu venho aqui no detalhamento a Souza, vai ter que aparecer aqui.  Ah, tá, perfeito.
+
+52:08 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Não, entendi. Entendeu?
+
+52:09 - Alex Souza
+  Que aí, o caixa disponível, o caixa disponível se baseia nisso aqui, ó. Se baseia nisso aqui.
+
+52:17 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Nessa diferença que ele tem pra receber quanto menos a despesa, né? É, o caixa disponível sempre vai ser recebida, entendeu?
+
+52:26 - Alex Souza
+  Porque a gente trabalha com o caixa disponível.
+
+52:28 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Sempre vai ser o recebido. O daqui reflete aqui.
+
+52:32 - Alex Souza
+  Então, ele tem aqui 5 mil. Tem que ter aqui 5 mil entre aspas disponível, mas o disponível, ele reflete aquilo lá após abater a despesa.  Ele tem 5 mil, mas teve 3 de despesa. Então, o disponível pra ele vai aparecer 2. 2 mil. 2 mil, exatamente.  Então, ele fez isso, aí ele tem 2 mil É como se fosse o lucro líquido ali, né? Exatamente. exatamente, exatamente que aqui a obrigação vai me falar, se ele está positivo, com dois disponíveis, a obrigação vai me falar, Alex, você tem que pagar o A.Souza ali, já fez o pagamento entendeu?  aí eu, quando eu pago, consigo marcar aqui mesmo aqui mesmo eu marco, pagamento realizado, marquei pagamento e ele fica ok ele sai de caixa disponível, ele fica zerado entendi esse pagamento você faz periódico ou é tipo uma vez no mês ou é, por exemplo quando fecha o e-log caraca, sério?  é, mano, depende do cliente a gente está aí já estamos há um ano e meio com o trabalho do ano passado sem receber ainda caraca, velho é, depende do cliente, tem cliente que paga ali, todo, trabalhou, pagou tem cliente que ele paga, cara só quando próxima  eu esqueço. Entendi.
+
+54:02 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  E dá canseira.
+
+54:04 - Alex Souza
+  Então, isso pode ter que deixar meio aberto. É, infelizmente.
+
+54:08 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Tá, infelizmente. E quando ele tá negativo também, aqui ele me aponta, tá?
+
+54:14 - Alex Souza
+  Se ele tiver negativo aqui, digamos que a despesa dele foi maior do que... Ele também me aponta e me indica que eu vou ter que controlar isso e cobrar ele, entendeu?  Tá. Não, perfeito.
+
+54:27 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Beleza.
+
+54:29 - Alex Souza
+  É esse... Esse fluxo aqui, distribuição, contabilidade, detalhe, são os três fluxos principais desse setor. O confronto S e o P, ele não faz parte daqui, ele faz parte daqui, ó.  Das operações, né?
+
+54:51 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Das operações.
+
+54:53 - Alex Souza
+  Por que ele faz parte daqui, Eduardo? Porque, imagine, o nosso... Você quer que sobe?
+
+55:00 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Vamos subir ele para a operação mesmo ali, tirar dali?
+
+55:05 - Alex Souza
+  Então, agora vou precisar da sua ajuda, porque a ideia antes era um fluxo, mas aí acabou mudando. Acabou mudando, porque o Wikilog, ela em regra, ela vai nascer sempre daqui da produção.  Mas tanto o Wikilog quanto o Lista, você está vendo que tem aqui um botão para carregar manual. Por quê?  Porque imagine que o cliente não queira o sistema. Eu não quero o sistema, eu não quero pagar por isso.  Não, para mim está bom do jeito que eu faço, eu tenho meus funcionários, eles preenchem lá para mim, está tudo certo.  Então, ele já me vem com uma folha, já me vem com uma folha pronta. Deixa eu pegar aqui uma folha para te mostrar rapidinho.  Ele já me vem com uma folha pronta, já preenchida. Então, isso aqui é o Wikilog dele. A Wikilog e Lista é a mesma coisa, é o mesmo chique.  estilo de folha. O que que muda? É só o nome. A Wikilog, ela trabalha por semana. Ela trabalha por semana.  Semana 31, semana 30, semana 40. A lista, ela trabalha... Por que que eu criei esse confronto com ESOP? Por conta dessa situação que eu vou falar agora.  A lista, ela trabalha com trabalhos executados. Esse cliente PDR, ele, a funcionária deles que controla isso, ela é muito descontrolada.  Ela pega dois carros da semana 31, ela pega um carro da semana 30, um carro da semana 29, um carro da semana 2 e joga tudo numa lista.  Joga tudo numa lista. Ela não pega... Cara, eu não sei que loucura é essa. Ela não pega aquela semana, entendeu?  E cria uma lista em cima daquela semana, que ficaria muito mais fácil e prático, ela pega e joga, então quando ela só sai jogando os carros ali só sai jogando, e eles tem um sistema deles lá, que esse sistema deles, cara, é muito confuso porque esse sistema, ele pega ele nunca joga pra mais, ele foi projetado acho que de propósito, ele sempre joga pra menos, então ele ele pega, imagine que o técnico, ele fez ali montagem do carro e fez o martelinho, eles pegam e jogam, por exemplo, pagando o martelinho, mas não paga a montagem aí aquele martelinho deu 500 euros ele joga pagando 200 caraca, entendi por isso que eu criei esse confronto ao ESOP porque a ideia é pegar ele pega os carros daquela, ele vai ter que mapear todo o sistema, cara não tem jeito, vai ter que mapear todas as Wikilogs que tem que ele mapeia aí  Encontrou aquele carro, aí ele pega aquele carro, e isso eu estou falando só no fluxo daquele técnico, tá? Só no fluxo daquele técnico.  Ele mapeia aqueles carros, achou a placa, ou não tem placa, é chassi, achou o chassi do carro. Aí ele pega e vai na lista que está aquele chassi, e aí a Wikilog está ali e vai confrontar para ver.  Está pagando, o que foi feito na Wikilog? A Wikilog que manda, entendeu? A Wikilog ela mandou, está dizendo que foi pago, que está sendo pago, que fez martelinho, que fez pintura e que fez montagem.  Nenhum está pagando 100, no outro está pagando 200, no outro está pagando 50. Então, bateu com a lista que eles subiram aqui, imagine, eu subi a lista, eu subi aqui a lista, subi a lista, bateu, eu acho que o confronto, ele ficaria legal ficar aqui dentro da lista.  Eu estava pensando, eu acho que sim, também, e... Porque aí já sai ali, você já consegue ver Já deu um aviso ali Já tem coisa errada Exatamente, porque Vamos botar assim A Wikilog, ela também pode subir manual Subir manual Deixa eu ver se eu consigo pegar aqui Eu acho que eu consigo pegar uma lista Que o Wikilog vai te mandar Teste Wikilog Vou pegar Vou pegar uma curtinha aqui Essa aqui, vou abrir aqui Pra te mostrar como que tá hoje Eu nem criei uma árvore pra ela, só joguei Numa operação, né, aqui Só joguei Porque aí, eu carreguei a lista Imagina que eu carreguei a lista da oficina Que não tem o sistema Que não adotou o nosso sistema pra trabalhar Peguei, tô carregando Ali a lista dele Aí vai abrir a parte de Extração, eu finalizo Quando eu recebo essa Wikilog  da oficina, abriu foi nada. Foi nada. Quando eu carrego, é porque ele abre, ele não abre assim, ele abre a parte editável.  Ele abre mais ou menos assim, mas é até pouquinho diferente, que eu consigo selecionar o técnico, o cliente, se tiver, a plataforma, enfim.  Ele extrai as informações que está naquela Wikilog, né? É. Aí, o que acontece? Quando eu estou carregando uma Wikilog aqui, essa Wikilog, se eu carregar uma Wikilog aqui, isso já pode ficar como regra.  Carreguei o Wikilog manual, indica que ela está validada. Entendeu? Tá, então a automática já valida. Já valida, entendeu?
+
+1:00:51 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Carreguei, ela já está validada. Então ela entra aqui, validada, e vira uma lista.
+
+1:00:58 - Alex Souza
+  Tá. Entendeu? Ela vira uma lista. A lista, eu sempre, eu botei aqui, L e sempre seis dígitos. L, zero, um, sempre é uma sequência, entendeu?  Pode seguir uma sequência. Isso, pode seguir uma sequência. A lista, aí por quê? Quando eu carregar, imagine que eu carreguei depois a lista dessa oficina.  Joguei a lista para cá. Vou ver se aqui na lista ele funciona. Vou pegar uma lista aqui, tem lista pequena.  Vou carregar aqui. Estou carregando a lista. Ele abriu ali, nesse carregamento, já poderia ter o confronto impressa ali. Não sei se ficaria legal, o você acha?  No carregamento?
+
+1:01:46 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  É.
+
+1:01:48 - Alex Souza
+  Assim que é o fluxo dos dois, tá vendo aí? Ah, tá. Ele me abre o documento, ele fica aqui para mim poder ver.  Isso, para mim, é interessante. O documento está aqui. Eu consigo girar o documento Se foi feito errado Se ele mandou de lado, eu giro o documento Entendeu?
+
+1:02:09 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Eu consigo Dar zoom, diminuir Ah não, eu pensando aqui Eu acho que tem que ficar aí mesmo Tipo, se ele já leu Já identificou E já matou que tem algum problema Que tem alguma divergência Eu acho que tem que ser aí antes de validar Isso, né?
+
+1:02:26 - Alex Souza
+  Seria melhor aqui mesmo, né? É Aí ele carregaria E já carregaria Com essa validação Esse confronto, né?
+
+1:02:36 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Sim, eu acho que tem que ser aí antes de validar Porque se ele Quando a gente assume que ela está entrando Se ela está fazendo o upload É porque ela realmente está certa Pode dar erro, né?
+
+1:02:48 - Alex Souza
+  Pode dar problema depois na frente Exatamente, exatamente Esse aqui é a mesma situação Lá do Wikilog, o Wikilog carrega desse jeito Ele carrega assim também Ele carrega assim também Então, eu que ser  Aí, olha só, tá vendo ali a parte que eu falei? Que ele fica, ó. Eu consigo selecionar o técnico, entendeu?  Pega aqui o técnico, o cliente. Ó, imagine uma coisa, eu botei isso de propósito. Imagine que o nome tá errado.  Eu vou botar aqui pdr, traço, tim, tudo maiúsculo. Eu tenho esse botão pra carregar pra baixo. Ah, tá, vai aplicar pra todos, né?  Entendeu? É, porque se for uma lista muito grande, tiver tudo, imagina que ele não extraiu perfeito. Eu deixei isso de propósito pra todos eles.  Entendeu? Porque eu boto aqui uma nomenclatura e valido e já carrega pra tudo. Beleza. Igual aqui, aqui eu botei o técnico, Souza, mas não validei pra baixo.  Vou botar aqui o Souza, valido. Ele já bota outro de baixo, o Souza também, entendeu? Aham. Nessa pegada. Ó, essa lista aqui, por exemplo, ó, isso aqui é uma...  retífica. Ah, rapaz, isso aqui é bom, ó. Ó, isso aqui ele já veio com uma retífica, eu peguei uma lista perfeita, tá vendo, ó.  Ele joga na lista, ele não joga na Wikilog lá, o...
+
+1:04:13 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  O desconto vai na lista. Vai na lista, tá vendo, ó.
+
+1:04:16 - Alex Souza
+  Ele tá falando que esse carro aqui, ó. Esse carro, ele não foi validado, ele foi, o valor foi de R$ 646,80, mas ele voltou, Teve uma retífica.  Tá vendo, ó. A dedução do ESP. Tá falando aqui, ó. Trabalho Malfeito. Suílio Malfonso.
+
+1:04:36 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Entendeu?
+
+1:04:36 - Alex Souza
+  Tá falando que o trabalho foi mal feito. Aí voltou. E eles tão pagando, e aí aqui, como eles Eles tão tão pagando a diferença, né?  É, eles pegaram o dedo do zílio desse carro, porque eles entenderam que eles já pagaram esse valor em algum outro lugar, esse carro que é o problemático, só que eles já pagaram esse valor em algum outro lugar, então eles abateram daqui, ó.  Entendi. Por isso que a lista ficou 86 e 72. Daí teria que buscar esse Citroën C3 pra entender onde que eles pagaram, Não, onde...  Não, ele já... Teria que buscar o Volkswagen pra ver onde que... da onde que ele é, né?
+
+1:05:17 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  É.
+
+1:05:18 - Alex Souza
+  Não, o que que acontece? Nesse caso aqui, a gente faz assim, tem retífica, né? Esse carro, a gente... Esse carro aqui, a gente joga ele pra retífica, de novo, é...  A retífica, ela pode ficar por aqui também, né? Vendo por esse lado, acho que a... Cara, me ajuda a entender esse fluxo agora, com esse negócio de retífica, pra ver como ficaria melhor.  O que que você acha? Porque a gente ia colocar ela aqui, antes de validar. Eu acho que ele pode ter nos dois.  Aqui é pra fazer a parte manual na Wikilog, se o cara vê lá que ele vai voltar antes, antes de gerar a lista, e aqui...  Vai ficar a parte automática Quando já foi feito É, porque também ele vai precisar Identificar quando voltou ou quando não voltou Exatamente Exatamente, aí esse aqui sai Ele sai daqui como Pagamento e entra pra lá, volta de novo Pra produção, entendeu?  É Pra produção, pra ver se vai ser feito de novo Esse carro ou se não vai ser feito É, a gente pode fazer desse jeito Porque esse fluxo Que ficou legal, ainda bem que apareceu isso aqui Poxa Nossa, ainda bem que eu peguei a lista certa Aí Aí é isso, cara, aí ele tem aqui Os serviços, eu sempre boto Quatro, tanto pra weeklog Quanto pra cá, entendeu?  Eu sempre boto quatro Porque Na funilaria ele pode fazer ali Até quatro Trabalhos, entendeu? O mesmo técnico Ele pode fazer até quatro trabalhos O teatro dele teatro  Entendi Essa pegada aqui É a mesma coisa que o Wikilog É a coisa, os dois trabalham do mesmo jeito A extração, a ideia, o fluxo é desse jeito Sendo que aqui ele nasce Como lista e lá ele nasce como Uma Wikilog, entendeu?  Tem até o nome errado ali Tem que ser o O W e a E a semana, no caso Aí, depois de ele carregado Ele vem por acaso, ele vira Um documento também Só que esse documento aqui É um documento só de De trabalho, entendeu?  É diferente daquele outro documento que a gente mostrou Tá, entendi Mas o fluxo é igual, a mesma coisa que eu falei Eu posso criar aqui uma pasta, fazer a mesma coisa Entendeu o que eu falei?  Fazer um instrumento de arquivos, né? É, entendeu?
+
+1:07:54 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Tá, não, perfeito Desse jeito Então, estamos praticamente entendidos dentro do que você queria entender basicamente matou minhas dúvidas de fluxo que eu estava ali aberto, o que eu vou fazer agora eu vou pegar a gravação rever de novo com calma ali, e aí elencando os requisitos, onde vai precisar mudar onde tem que ter cada tipo de requisito que vai fazer diferente, e aí eu vou montar um documento ou vou digitar ali naquele mesmo documento dos requisitos e aí eu te mando de novo pra tu olhar, bater, e aí a gente dá como finalizado o diagnóstico, e aí a faz a gente vê as próximas fases.  Tá, deixa eu te passar uma outra coisa o Gustavo.
+
+1:08:48 - Alex Souza
+  Claro esse local aqui que ele colocou esse local aqui cara, eu gostei disso aqui que ele implementou entendeu? Só que eu não sei se você viu lá que eu fiz uma mudança no local da forma de apresentação.  Eu tinha mandado um documentozinho para você, mais ou menos, explicando. E esse local, ele pode ser cadastrado aqui. Eu acho interessante esse local.  Por quê? Vamos trazer isso aqui. Eu cadastrei o usuário. Eu criei o usuário. Eu fiz lá o convite para o técnico.  Esse técnico, esse técnico, ele, digamos que eu peguei e mandei ele para a plataforma de Andréziu. Ele está lá em Andréziu.  Então, eu consigo vincular ele a essa plataforma. Cadê o local? Eu consigo...
+
+1:09:52 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Aqui. Imagine.
+
+1:09:53 - Alex Souza
+  Eu consigo vincular esse técnico a esse local. Entendeu? Eu criei o local. Eu vou criando os locais, entendeu? São basicamente as oficinas, né?  As oficinas, que assim eu consigo ver as oficinas que eu tenho para aquele cliente. O cliente PDR, ele me deu 14 plataformas dele.  Eu vou lá e vejo onde que são essas plataformas. A plataforma amarela, a plataforma verde, a plataforma azul, a plataforma amarela em Andresil, a plataforma verde é em Veneciu, a plataforma azul é em Paris, entendeu?  Aí eu vou cadastrando. Ali, gerente responsável. Ele está aqui, cara, gerente responsável. Está ali, aí embaixo. Está ali o nome do gerente responsável.  Isso aqui é aquela situação que a gente falou do cliente. O cliente, quando cria o espaço dele, ele vai criar ali, quando a gente manda o convite, ele está criando espaço, criando o fluxo de pessoas.  dele, De colaboradores. Essa parte aqui de gerente responsável, seria interessante deixar ela editável, manual, mas também com uma opção de buscar esse funcionário dele que está responsável, que ele nomeou.  Já faz a linkagem, né? É. Então, esse local aqui, ele pode ficar tanto para a gente, o Workspace, como pode ficar para ele também.  Imagine que ele quer nomear o local dele, separar os locais dele dentro do sistema. Ele pode ter ali a mesma situação, igual a gente aqui.  Ele criou lá o local dele. Só que esse local dele aqui é diferente do nosso. Entendeu? Porque o local dele trabalha para ele, para o cliente.  O cliente ele tem um local, então ele consegue ver os locais ativos dele, igual eu, na mesma pegada, só que aqui, ó.  Onde que eu tinha, não sei se você conseguiu pegar quando eu falei, é aqui no mapa. No mapa, né?  No mapa. Então, ele aparece aqui, porque hoje, o que acontece? A gente tem isso aqui, Tudo isso aqui. Sendo que equipe, tá vendo, ó.  Não tem um fluxo pra equipe. Eu não sei o que que a equipe faz hoje. Tá. Então, ele aqui dentro, ele criaria, Ó, vamos botar aqui.  Radar. Esse radar aqui é um radar de granil. Teria que ser um radar... Na verdade, nem sei o que que seria esse radar.  Tá. Eu acho que tá vinculado a granizo, o radar. É. Então, aqui. A gente hoje tem isso aqui. O granizo, o PDR Intel, que é isso aqui de baixo, que é fundamental.  Entendeu? Eu aperto aqui, ele me abre um detalhamento. Isso aqui é uma coisa importantíssima, só que ele nem tá trabalhando direito, né?  Nem tá funcionando direito, que ele não tem um detalhamento. se dá uma... probabilidade de 70%, mas não tem mais nada.  E o relato de granizo é se alguém quiser botar manual. tô na cidade, tô aqui em Veneçu, choveu granizo, entendeu?  Então eu venho aqui, eu consigo botar manual, mando a localização de onde foi, o nome da cidade, a localização já vai puxar as informações.
+
+1:13:21 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Cara, caiu aqui tamanho de 30 centímetros o tamanho dos granizos que caiu aqui.
+
+1:13:27 - Alex Souza
+  Severidade, bota aqui. Cara, foi bravo, severo, o negócio aqui tá feio. Se eu tiver foto, mando umas fotos aqui pra colocar, entendeu?  Puxa as fotinhas, que o cara consegue ver aqui, ele vai ver aqui, nesse PDR, então. É aqui que ele vê isso, nesse fluxo.
+
+1:13:48 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Entendeu? Que vai aparecer aqui, o que ele preencheu manual, aparece aqui.
+
+1:13:52 - Alex Souza
+  Se tiver informações meteorológicas, aparece automático aqui também. Entendeu? Tá. Aí, aupro... E aí, aupro... E aí, aupro... Aí, a parte de locais, eu também queria já botar nessa pegada aqui, equipe, ordens e operações.  Entendeu? Tá. Que aí a gente poderia substituir, na verdade já está até aqui, operações. A gente substituiria esses operações por locais.  Tá. Pegou? Sim, entendi. Que aí ele me mostraria operações. Exatamente. Então aqui, operações. Aparecem aqui os pontos no mapa.  Onde ele está aqui, as operações. E onde ele tem uma equipe. Onde ele tem uma equipe cadastrada ali, o cliente botou o gerente.  Onde ele tem o gerente, ele vai botar ali. Marcou o gerente, vai mostrar para ele. Onde que está o gerente dele.  Entendeu? Onde que está atuando. E para a gente, workspace e técnico. E para a gente. também pode ter essa visibilidade aqui, o nosso fluxo, a nossa parte de locais, a gente vê aqui, a gente vai botar aqui locais, a gente vê as plataformas que a gente tem cadastradas para a gente, no caso a gente tem 14, a gente aparece ali no mapa, 14 na França, mas a gente tem também na Itália, a gente tem na Alemanha agora, semana que vem começar na Alemanha, entendeu?  Então a gente consegue ver essas operações aí dentro daquele workspace que a gente trabalha. Entendi. Entendeu? Tá.
+
+1:15:29 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Não, tranquilo.
+
+1:15:30 - Alex Souza
+  Isso daí dá para fazer de ver, isso daí é só integrar ali os dados, tá tranquilo. Aí dentro disso, eu queria te pedir só uma coisa, Eduardo, eu te mandei umas fotos para isso, que tá vendo como é que o mapa está hoje?  Eu tinha pedido o colega para ele poder fazer isso aqui virar mesmo um mapa um mapa mundo, né? Que eu consegui chegar até aqui com o Iá, cara, mas eu não consegui passar daqui.  Como se diz o mapa mundo com ruas e etc?
+
+1:16:05 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Não, não precisaria ser com rua, mas eu estou dando zoom.
+
+1:16:09 - Alex Souza
+  A ideia não era ficar assim, era ficar um... Está vendo? A ideia que vai dando zoom, ele vai abrindo mesmo assim a região.  Não precisa me dar detalhes de um mapa, entendeu? Igual está aqui, está até legal, mas ele aparece essa informação feia que fica aqui, entendeu?  Igual está aqui. Exato, entendeu?
+
+1:16:33 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Isso é renderização do mapa, tá, entendi. Isso.
+
+1:16:36 - Alex Souza
+  Aí, se você conseguisse, Eduardo, transformar esse mapa numa coisa um pouco melhor apresentável... Cadê? Eu te mandei aqui, vamos lá...  Eu te mandei a foto, cara, de como eu gostaria...
+
+1:16:54 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Cara, eu acho que não. Não dá.
+
+1:17:00 - Alex Souza
+  Não, eu te mandei, mandei sim Não acredito que eu não mandei, cara Que isso Eu acho que não, eu não lembro De a gente ter falado de mapa Mas eu mandei mesmo não, cara Mandei mesmo não Mandei nem pra mim aqui Pra poder te mandar Mas eu te mando Uma foto de como Como que eu tinha Projetado pra ficar Entendeu?  Eu te mando aí A ideia de ficar mais apresentável Um mapa direito, apresentável, bonitinho Um negócio Daquele jeito E ter uma outra situação Sem querer abusar do seu tempo Eu acho que você deve estar até sem tempo já agora Não, imagina Só pra finalizar Cara, o que a gente puder retirar De que o WorkNetsus Do sistema limpar tudo isso  E deixar o Perix pra tudo Da página inicial É aqui, ó Aqui o WorkNet, se a trocar pra o Perix Entendeu?  Não, tranquilo, isso aí dá pra gente trocar de boa É isso É isso, mano É isso, é isso Eu acho que você conseguiu pegar tudo Entendeu?
+
+1:18:22 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Eu falei pra caramba, não sei se Não, imagina que isso Deu pra entender sim, ficou bem mais claro agora Os fluxos Nem sei se tá travando Acho que pra mim deu uma selada na internet Eu tô de boa, eu tô vendo Tá, então beleza Ficou bem mais claro, até agradeço aí Por ter disponibilizado o tempo pra explicar de novo O que eu vou fazer Eu vou pegar a gravação agora Vou sentar E aí vou começar a bater os requisitos de novo Pra gente ver onde que vai precisar mudar Qual os fluxos que a gente vai precisar alterar Aí se você quiser pode me mandar já esse do mapa Porque a gente já Tchau Tchau Tchau Tchau Tchau Tchau
+
+1:19:00 - Alex Souza
+  Como é faz ali, tá? Ah, já mandou? Ah, beleza, show. Já mandei. Entendeu? Ele ficaria assim, ó. Essa pegada, a renderização e a forma de a medida que ele for se apresentando, quando apresentam os técnicos em operações, ele abria essas linhas assim, ligando, entendeu?  Como se fosse tudo interligado. Entendi. Tá, eu vou procurar uma tecnologia. Eu não sei se tem tecnologia que já suporta isso, tá?
+
+1:19:25 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Eu vou procurar se a gente já tem. Tá bom, fica à vontade.
+
+1:19:28 - Alex Souza
+  E aí eu te dou o retorno também, tá? Tá, e essa ideia aqui... Aí eu vou te falando, acho que até...  Essa ideia de cores aqui, é... Como eu te mandei, tipo, cada cor representa alguma coisa. Tipo, o azul é que não tem operação nenhuma.  Só tem lá, mas não tem nada. O vermelho aqui tá encerrado a operação e a verde é o que tá em operação.  A amarela aqui tá pausada a operação.
+
+1:19:59 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Entendeu? Isso aqui é... é importante para a gente que a gente consegue visualizar o que está ativo e o não está ativo.
+
+1:20:04 - Alex Souza
+  Tá, não, perfeito. Beleza.
+
+1:20:08 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Isso aí, eu vou isso de imputar no mapa é tranquilo. Eu só vou pesquisar se tem alguma tecnologia de front-end ali, que a gente consegue fazer essas conexões, essas interligações ali no mapa para ficar mais visual.  Eu acho que até amanhã eu consigo finalizar tudo aí, agora com esses requisitos, e aí eu te retorno o documento para você dar uma validada final ali.  Tá bom, Mas qualquer coisa eu vou te falando pelo WhatsApp também ali, se você lembrar de alguma coisa também, quiser acrescentar, pode acrescentar no WhatsApp também, não tem problema.  Tá bom.
+
+1:20:42 - Alex Souza
+  Nessa pegada aí, Gustavo, é muita coisa que é para fazer, né? Então vai demorar um pouco de tempo, vai demorar até um...
+
+1:20:50 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Vai levar um pouco o tempo. Mas se a gente conseguir, a ideia seria, se a gente conseguir botar a parte operacional Tchau, Tchau, tchau.
+
+1:20:59 - Alex Souza
+  Tchau, para jogo, técnico já poder ir ali, tipo, estou com o telefone, vou fazer um trabalho do carro, repetir a foto do carro ali, tirar a foto do...  vou fazer o orçamento, ou vou abrir já a produção, tirar a foto ali do carro, matrícula, já consigo pegar a ficha técnica daquele carro com meio da foto ali, entendeu?  Daquela matrícula ou do chassi dele, já me dá os detalhes do carro, eu preencho ali o que for. se eu conseguir já conseguir o técnico gerando produção, gerando o equilog ali, eu já consigo vender o sistema, entre aspas, ou botar para demo, entendeu?  Para cair no gosto da galera, entendeu? E as outras pessoas podem ir vindo com calma, entendeu?
+
+1:21:42 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Beleza, então a gente prioriza ali a parte da operação, e aí depois a gente vai partindo para o financeiro, ali depois para o RH, ali para o controle de usuários, e aí eu acho que por último a gente poderia deixar a parte do marketplace, das fotos ali, que eu acho que tem a menor relevância para ti.
+
+1:21:59 - Alex Souza
+  Isso. O principal ali é a operação e financeira que vai fazer a virada. É o que o pessoal me cobra.  Porque vai ser utilizado pelas empresas. Lógico. Mas o 95% vai ser técnico. O técnico hoje precisa de sair para ter um registro.  Cara, ele me cobra tanto. Serginho, um maluco da Bélgica, essa semana, me ligou um parceiro e falou, mano, e aí, teu sistema?  Já posso usar aqui? Estou aqui com um monte de tempo para fazer e não tenho tempo para ficar preenchendo papelada.  Entendeu? Entendi. Legal.
+
+1:22:36 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Não, que bom que já tem mercado já para expandir, então. Tem, Tem.
+
+1:22:40 - Alex Souza
+  Esse sistema, promete, entendeu? Ele promete ter um mercado bom. E como eu falei numa reunião, se eu conseguisse para fevereiro do ano que vem eu estar colocando ele em apresentação para sair...  Não, dá, pô. São... São quatro... São...
+
+1:23:00 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Cinco meses, basicamente, né? Então tem bastante.
+
+1:23:04 - Alex Souza
+  Tem. Eu vou deixar o sistema livre, tá?
+
+1:23:07 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Por hora, vou deixar livre mesmo. Os caras usando pra cair no gosto.
+
+1:23:11 - Alex Souza
+  Quando a gente terminar ele, a gente planeja uma forma de pagamento. De assinatura. É, eu vi que você começou pela Stripe, né?  É.
+
+1:23:22 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Mas aí você pretende manter com ela? Não sei.
+
+1:23:28 - Alex Souza
+  Não sei qual seria mesmo. Eu botei a Stripe, que foi a que eu pesquisei ali. É, geralmente é comum, é bem comum.
+
+1:23:35 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  É boa a plataforma, mas às vezes ela tem umas taxas um pouco mais elevadas. Tem outras plataformas, tem taxas melhores, assim.  Mas isso também dá pra, a gente pode te assorear com isso.
+
+1:23:45 - Alex Souza
+  tem problema. Tá bom. Aí eu te mando, você prepara, você vê aí o orçamento de tudo, né? Você vai fazer, você me manda, que aí a gente vê...  A gente vê não.
+
+1:23:57 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Eu vou fazer.
+
+1:23:58 - Alex Souza
+  A gente vê. Eu valido para você, assino o contrato, a gente começa a atacar, entendeu?
+
+1:24:05 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  E tem um detalhe que eu esqueci de te falar, cara. Na verdade, tem uma coisa importante para eu te falar, fugiu da cabeça, mas depois eu coloco uma mensagem.
+
+1:24:12 - Alex Souza
+  Mas não sei se você reparou, hoje o sistema tem modo escuro e modo claro, só que o modo claro está uma bosta.  Ah, não, isso daí dá para a gente fazer o ajuste do front ali.
+
+1:24:24 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Eu vi que estava meio estranho mesmo o contraste, né?
+
+1:24:30 - Alex Souza
+  Eu percebi isso aí quando eu mandei. A princípio, pausar no telefone, os caras vão usar muito o telefone. Você, nessa implementação mesmo, não vai virar aplicativo, mas eles botam o link, salva lá para usar.  Acha que daria certo, daria legal? Dá, dá. É só a gente arrumar o...
+
+1:24:53 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Eu não cheguei a testar o front-end no celular, mas a gente, como vai ser o web também, se fosse...  não... aplicativo daí muda muda assim consideravelmente tá mas como é para ser usado na web mesmo é tranquilo só fazer a responsabilidade ali do das funcionalidades ali da parte do visual mesmo só fazer responsabilidade responsividade para o celular e dá para usar tranquilo é celular e tablet né a maior parte né tá não beleza tranquilo tá isso daí a gente já trabalha nessa parte do front-end ali a gente faz a responsabilidade tá bom obrigado viu Gustavo beleza e desculpa aí não imagina que isso foi é importante porque eu prefiro que esteja tudo claro agora para tanto para mim quanto para ti para a gente não depois a gente não ficar quebrando cabeça ou desalinhar falando tudo isso tá esperando aqui mas não veio assim então é melhor que a gente realmente dedique pouco tempo para ficar tudo claro no sistema para depois a gente foi mais fácil
+
+1:26:00 - Alex Souza
+  Tem muitos detalhes, mas esses detalhes Deixam para uma segunda onda Que é detalhes pequenos O que eu não falei para fazer São coisas que vai Com o tempo a gente vai Ajeitando Vai implementando aos poucos Para já é mesmo É ter algo para eles usarem É que eu criei algo para usar Como interno Para facilitar a minha vida Só que foi vindo ideias, ideias, ideias Fui colocando as ideias Aí dessas ideias Eu vi que tinha mercado para essas ideias Eu falei, ah cara, virou algo Para mim Tá certo, que bom E se Deus quiser vai virar um Sasa De sucesso Se Deus quiser vamos lá, vamos ver Vamos trabalhar para isso Vamos lá Obrigado, obrigado mesmo Imagina, eu que agradeço E agora a gente vai Quando finalizar ali, a gente vai se alinhando Lippo Até Tchau
+
+1:27:00 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  pra vocês lembrar de mais alguma coisa, também pode mandar ali, não tem problema de hora ali também, pode mandar qualquer hora que quando der ali a gente responde e tal.  Tá, e como é que tá o negócio do banco de vocês, cara?
+
+1:27:12 - Alex Souza
+  Cara, a contadora mandou na sexta-feira que tinha saído a transformação ali dos documentos.
+
+1:27:18 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Aí a gente foi resolver essas papeladas, ela disse que tava bloqueada ainda. Então aí ela entrou de novo em contato com a junta comercial pra ver se libera agora manualmente os documentos.  Porque, meu, a gente pegou numa época que a gente deu um azar, assim, miserável, cara. É um negócio que era pra durar duas semanas e tá durando dois meses.  Sabe, é tipo isso.
+
+1:27:43 - Alex Souza
+  Rapaz, vocês já cogitaram em abrir empresa fora do país?
+
+1:27:48 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Cara, não cogitei, mas eu tô pensando seriamente, ainda mais com essas eleições que tá muito incerto.
+
+1:27:55 - Alex Souza
+  Ó, aqui aqui paga-se bastante imposto, na França. Paga... uma parada que é muito prática, que brasileiro pode abrir empresa aqui com passaporte, pode ser presidente.  A minha empresa não é no meu nome, não é nome da minha mãe. Caraca. É, pô, eu sou só um gerente.  Entendi, você só sou administrador ali. Só administrador, eu abri o nome da minha mãe, porque eu tenho eles aqui fizeram uma lei que é burra a lei, a lei o meu documento aqui é um título, seja o salarié ou seja, é um documento de residência para empregado, o nome do documento.  E aí, como vem essa nome criatura, salarié eles entendem que eu não posso abrir empresa. Entendem que o empregado é sempre um empregado.
+
+1:28:51 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Nossa, que indico.
+
+1:28:54 - Alex Souza
+  Aí, pra lei aqui, tá isso na lei, então eu não posso ter empresa. Ser empregado empresário individual Eu posso nada Só posso ser empregado Mas a lei permite um estrangeiro Com o passaporte do seu país Abrir a empresa Caraca, que doideira Não impede de eu abrir a empresa Mas permite eu ser sócio Da empresa e atuar Na empresa, olha só que loucura Que doideira Entendi Que ela não está no seu nome Mas você trabalha lá Eu trabalho Para a empresa, sou contratado Da empresa e o sócio majoritário Da empresa Que doideira, cara É, loucura Aí eu falando nisso porque Aqui paga-se bastante imposto Mas tem muito retorno Você consegue bater muita coisa Mas tem o Paraguai também, né, cara?  Que o pessoal está falando muito bem Eu já tenho Tem um cliente nosso que E...
+
+1:30:00 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  que ele fez um projeto com a gente no passado que ele, quando começou a dar essa reforma tributária, ele falou meu, eu vou tirar pro Paraguai e vou tirar pros Estados Unidos a empresa, não vou ficar mais no Brasil e tá muito mais vantajoso Pensa nessa possibilidade aqui Brasil, mano ou melhor ou fecha É, eu também acho e pelo visto, acho que a gente tá encaminhando tá encaminhando pro pior Muito buracurático, muito buracurático aqui, mano, aqui é muito prático, mano, as paradas, eu tenho um sistema de nota dentro do meu sistema Isso é muito bom Não precisa de, assim, acessar a GovBR, CFAZ Não, você sabe muito, cara, eu tenho MEI aí, eu fui alguns pagamentos eu tava recebendo no Brasil, então eu fazia nota e eu desisti cara, eu falei, não, eu prefiro pagar o imposto daqui que aí eu não ia, aí eu ia pagar imposto, mas eu ia pagar menor, o imposto era menor como MEI É, MEI, acho que nem paga E aí  E só paga a guia, né? Só paga a guia.
+
+1:31:02 - Alex Souza
+  Eu falo, ah, cara, quer saber? Larga isso, cara. Eu prefiro pagar o imposto daqui.
+
+1:31:07 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Joga tudo pra cá. Menos dor de cabeça.
+
+1:31:09 - Alex Souza
+  Não, eu joguei, se a nota estiver errada, eu consigo editar a nota. Cara, não tem dor de cabeça. Eu errei a nota, errei uma informação, uma informaçãozinha que eu que apagar a nota e refazer a nota toda de novo.  Nossa, eu tô uma raiva.
+
+1:31:23 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  E isso quando não cai o sistema também. É.
+
+1:31:27 - Alex Souza
+  Nossa, triste, cara.
+
+1:31:31 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  É, infelizmente ainda é a realidade, Nosso presente. Mas é... Eu vou falar com o Edu mesmo, pra gente ver isso aí.  Capaz que vale a pena.
+
+1:31:42 - Alex Souza
+  É, e eu quero pagar vocês, cara. Ah, então a gente também tá querendo receber, tá precisando receber.
+
+1:31:48 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Tem muitos clientes pra emitir nota também. Que tão esperando. E essa desgraça não sai logo. Que o problema não é nem a nota, eu preciso da nota.
+
+1:31:56 - Alex Souza
+  Mas se tivesse um banco pra pagar, eu ia fazer vocês. Fazer depois. Só menos.
+
+1:32:01 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Mas a gente gosta de fazer tudo certo, porque tem o período da nota ali também, de se passar de um mês, passar de um tempo, já não dá pra emitir direito, eu acho.  Não sei, é.
+
+1:32:14 - Alex Souza
+  Aqui, tem cheio dessas coisas. Tudo pra complicar a nossa vida. Tá bom, então, Edu. Maravilha.
+
+1:32:27 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Então, a gente fica conversando, e até amanhã eu acho que eu consigo terminar tudo, e aí eu vou... Vou te avisando pelo WhatsApp.
+
+1:32:34 - Alex Souza
+  Tá bom, meu querido. Obrigado aí, mais uma vez. Eu que agradeço, mano. Não, imagina que é isso.
+
+1:32:39 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  Eu que agradeço por ter dedicado tempo pra esclarecer de novo sobre o sistema.
+
+1:32:43 - Alex Souza
+  Tá bom. Pra mim é importante, cara. Esse sistema, pra mim... Não, vamos tocar pra frente. É um filho que...  Ele tem um propósito. Esse sistema tem um propósito. Não é só o propósito de ganhar dinheiro, mas tem um propósito muito importante.  importante para mim entre eu e papai que é fundamental.
+
+1:33:04 - EverGreen MKT (adm.evergreenmkt@gmail.com)
+  É assim que surgem bons negócios, cara.
+
+1:33:07 - Alex Souza
+  É verdade. Maravilha, então. Abraço, querido. Valeu, Alex. Abração. Boa noite para ti.

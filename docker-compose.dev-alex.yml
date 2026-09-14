@@ -2,7 +2,7 @@ services:
 
   api_dev:
     build:
-      context: /home/deploy/apps/nexus/QW-Nexus-/backend
+      context: ./backend
       dockerfile: Dockerfile
     container_name: qw_nexus_api_dev_alex
     restart: unless-stopped
@@ -41,7 +41,7 @@ services:
 
   dev_alex:
     build:
-      context: /home/deploy/apps/nexus/QW-Nexus-
+      context: ./
       dockerfile: Dockerfile.frontend
       args:
         VITE_API_URL: http://72.62.27.129:4010/api
