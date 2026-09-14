@@ -70,3 +70,15 @@ Este documento registra as linhas exatas do código fonte inspecionadas durante 
     const aiRes = await fetchAICompletion({ ... });
   ```
 - **Impacto**: Consumo indevido de cotas de IA e vulnerabilidade de Denial of Service (DoS) por sobrecarga de base64.
+
+---
+
+## 5. Achados Adicionais e Fora de Escopo
+
+1. **Configuração de Variáveis de Ambiente (`backend/src/config/env.ts`)**:
+   - `SMTP_PORT` e `SMTP_SECURE` quando configurados como string vazia `""` no arquivo `.env` causavam falha de validação Zod no startup do backend em ambiente de teste. Foi implementado preprocessador sanitizando strings vazias para `undefined`.
+2. **Setup Global de Testes (`src/test/setup.ts`)**:
+   - O setup executava `window.matchMedia` incondicionalmente, falhando em suites de integração do backend que rodam em `@vitest-environment node`. Corrigido com guarda defensiva `typeof window !== "undefined"`.
+3. **Linter Pré-existente no Frontend (`npm run lint`)**:
+   - Falhas pré-existentes identificadas no baseline em `src/components/production/OrderDetailDialog.tsx` (chamada condicional de `useMemo`) e `src/main.tsx` (`require()` style import). Fora do escopo da Spec 001 (Fundação de Contexto e Segurança); catalogadas para tratamento nas fatias respectivas de Produção e Shell.
+
