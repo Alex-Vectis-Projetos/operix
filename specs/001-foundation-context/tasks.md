@@ -1,6 +1,6 @@
 # Tarefas — Spec 001: Foundation Context
 
-Status geral da fatia: `Concluída / Pronta para Revisão`
+Status geral da fatia: `READY FOR RE-REVIEW`
 
 ---
 
@@ -19,3 +19,12 @@ Status geral da fatia: `Concluída / Pronta para Revisão`
 - [x] **T08**: Escrever teste automatizado comprovando o bloqueio de autorregistro de admin.
 - [x] **T09**: Executar `npm run typecheck`, `npm run lint` e suíte de testes.
 - [x] **T10**: Atualizar tasks e produzir walkthrough da fatia.
+
+## Bloco 4: Remediação de Revisão Independente (Review Changes)
+- [x] **R01 (SEC-001)**: Substituição de checagens permissivas por `assertTenantAccess` centralizado (deny-by-default) nas rotas de Locations e People.
+- [x] **R02 (SEC-002, SEC-003)**: `activeWorkspaceId` obrigatório em `GET` e `POST` (Locations e People), retornando 403 Forbidden sem workspace ativo e eliminando `body.workspace_id` como autoridade.
+- [x] **R03 (SEC-004)**: `POST /api/workspaces/:workspaceId/members` forçando `User.role = "user"` e `UserRole.role = "user"`, impedindo escalada de autoridade global a partir de papel local.
+- [x] **R04 (SEC-005)**: Remoção de e-mail hardcoded `qwork@qworkgroup.com` de `requestContext.ts`.
+- [x] **R05 (SEC-006)**: Validação de chave estrangeira de `Location` contra o `activeWorkspaceId` em `POST /people` e `PATCH /people/:id`.
+- [x] **R06 (TEST-001)**: Implementação de suíte de integração comportamental cobrindo itens A a F (Membership decoupling, objeto sem tenant, forged POST, no active workspace, cross-tenant FK, HTTP auth).
+
