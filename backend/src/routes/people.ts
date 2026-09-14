@@ -1,11 +1,15 @@
 import { Router, type Response } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
+import { resolveRequestContext } from "../middleware/requestContext.js";
 import { buildPermissionsForRole } from "../lib/permissionPolicy.js";
 import { isPersonType, findMissingPersonFields, TYPES_REQUIRING_LOCATION, type PersonType } from "../lib/personValidation.js";
 import { buildPersonDocumentSummary, computeDocumentStatus } from "../lib/personDocumentStatus.js";
 
 export const peopleRouter = Router();
+
+peopleRouter.use(requireAuth);
+peopleRouter.use(resolveRequestContext);
 
 function checkPermission(req: AuthenticatedRequest, action: "view" | "create" | "edit" | "delete" | "upload_document"): boolean {
   const { admin, map } = buildPermissionsForRole(req.auth?.role);
@@ -86,6 +90,7 @@ peopleRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res: Respon
   const people = await prisma.person.findMany({
     where: {
       deletedAt: null,
+      ...(req.ctx?.activeWorkspaceId ? { workspaceId: req.ctx.activeWorkspaceId } : {}),
       ...(type ? { type } : {}),
       ...(status ? { status } : {}),
       ...(location_id ? { locationId: location_id } : {}),
@@ -125,6 +130,9 @@ peopleRouter.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Res
     include: { location: true, identityDocuments: true },
   });
   if (!person) return res.status(404).json({ message: "Pessoa não encontrada." });
+  if (person.workspaceId && req.ctx?.activeWorkspaceId && person.workspaceId !== req.ctx.activeWorkspaceId) {
+    return res.status(403).json({ message: "Acesso negado: pessoa pertence a outro workspace." });
+  }
 
   let documentsSummary: unknown[] = [];
   let countryNotConfigured = false;
@@ -177,7 +185,7 @@ peopleRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res: Respo
 
   const person = await prisma.person.create({
     data: {
-      workspaceId: body.workspace_id ?? null,
+      workspaceId: req.ctx?.activeWorkspaceId ?? body.workspace_id ?? null,
       type,
       fullName: String(body.full_name).trim(),
       birthDate: body.birth_date ? new Date(body.birth_date) : null,
@@ -218,6 +226,9 @@ peopleRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: R
   const id = req.params["id"] as string;
   const existing = await prisma.person.findFirst({ where: { id, deletedAt: null } });
   if (!existing) return res.status(404).json({ message: "Pessoa não encontrada." });
+  if (existing.workspaceId && req.ctx?.activeWorkspaceId && existing.workspaceId !== req.ctx.activeWorkspaceId) {
+    return res.status(403).json({ message: "Acesso negado: pessoa pertence a outro workspace." });
+  }
 
   const body = req.body ?? {};
   const type = (isPersonType(body.type) ? body.type : existing.type) as PersonType;
@@ -296,6 +307,11 @@ peopleRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res: 
     return res.status(403).json({ message: "Você não tem permissão para excluir Pessoas." });
   }
   const id = req.params["id"] as string;
+  const existing = await prisma.person.findFirst({ where: { id, deletedAt: null } });
+  if (!existing) return res.status(404).json({ message: "Pessoa não encontrada." });
+  if (existing.workspaceId && req.ctx?.activeWorkspaceId && existing.workspaceId !== req.ctx.activeWorkspaceId) {
+    return res.status(403).json({ message: "Acesso negado: pessoa pertence a outro workspace." });
+  }
   await prisma.person.update({
     where: { id },
     data: { deletedAt: new Date(), deletedBy: req.auth?.userId ?? null },
@@ -307,6 +323,11 @@ peopleRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res: 
 peopleRouter.get("/:id/documents", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (!checkPermission(req, "view")) {
     return res.status(403).json({ message: "Você não tem permissão para visualizar documentos." });
+  }
+  const person = await prisma.person.findFirst({ where: { id: req.params["id"] as string, deletedAt: null } });
+  if (!person) return res.status(404).json({ message: "Pessoa não encontrada." });
+  if (person.workspaceId && req.ctx?.activeWorkspaceId && person.workspaceId !== req.ctx.activeWorkspaceId) {
+    return res.status(403).json({ message: "Acesso negado: pessoa pertence a outro workspace." });
   }
   const documents = await prisma.document.findMany({
     where: { entityType: "person", parentId: req.params["id"] as string },
@@ -328,6 +349,9 @@ peopleRouter.post("/:id/documents", requireAuth, async (req: AuthenticatedReques
 
   const person = await prisma.person.findFirst({ where: { id: personId, deletedAt: null } });
   if (!person) return res.status(404).json({ message: "Pessoa não encontrada." });
+  if (person.workspaceId && req.ctx?.activeWorkspaceId && person.workspaceId !== req.ctx.activeWorkspaceId) {
+    return res.status(403).json({ message: "Acesso negado: pessoa pertence a outro workspace." });
+  }
 
   const document = await prisma.document.create({
     data: {
@@ -353,6 +377,14 @@ peopleRouter.delete("/:id/documents/:documentId", requireAuth, async (req: Authe
   if (!checkPermission(req, "upload_document")) {
     return res.status(403).json({ message: "Você não tem permissão para remover documentos." });
   }
+  const person = await prisma.person.findFirst({ where: { id: req.params["id"] as string, deletedAt: null } });
+  if (!person) return res.status(404).json({ message: "Pessoa não encontrada." });
+  if (person.workspaceId && req.ctx?.activeWorkspaceId && person.workspaceId !== req.ctx.activeWorkspaceId) {
+    return res.status(403).json({ message: "Acesso negado: pessoa pertence a outro workspace." });
+  }
+  const doc = await prisma.document.findUnique({ where: { id: req.params["documentId"] as string } });
+  if (!doc || doc.parentId !== person.id) return res.status(404).json({ message: "Documento não encontrado." });
   await prisma.document.delete({ where: { id: req.params["documentId"] as string } });
   return res.json({ deleted: 1 });
 });
+

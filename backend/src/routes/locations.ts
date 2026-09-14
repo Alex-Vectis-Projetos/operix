@@ -1,9 +1,13 @@
 import { Router, type Response } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
+import { resolveRequestContext } from "../middleware/requestContext.js";
 import { buildPermissionsForRole } from "../lib/permissionPolicy.js";
 
 export const locationsRouter = Router();
+
+locationsRouter.use(requireAuth);
+locationsRouter.use(resolveRequestContext);
 
 function checkPermission(req: AuthenticatedRequest, action: "view" | "create" | "edit" | "delete"): boolean {
   const { admin, map } = buildPermissionsForRole(req.auth?.role);
@@ -47,7 +51,7 @@ function findMissingFields(body: Record<string, unknown>): string[] {
 }
 
 // GET /locations?status=&country=&search=
-locationsRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+locationsRouter.get("/", async (req: AuthenticatedRequest, res: Response) => {
   if (!checkPermission(req, "view")) {
     return res.status(403).json({ message: "Você não tem permissão para visualizar Locais." });
   }
@@ -55,6 +59,7 @@ locationsRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res: Res
 
   const locations = await prisma.location.findMany({
     where: {
+      ...(req.ctx?.activeWorkspaceId ? { workspaceId: req.ctx.activeWorkspaceId } : {}),
       ...(status ? { status } : {}),
       ...(country ? { addressCountry: country } : {}),
       ...(search
@@ -72,17 +77,20 @@ locationsRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res: Res
 });
 
 // GET /locations/:id
-locationsRouter.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+locationsRouter.get("/:id", async (req: AuthenticatedRequest, res: Response) => {
   if (!checkPermission(req, "view")) {
     return res.status(403).json({ message: "Você não tem permissão para visualizar Locais." });
   }
   const location = await prisma.location.findUnique({ where: { id: req.params["id"] as string } });
   if (!location) return res.status(404).json({ message: "Local não encontrado." });
+  if (location.workspaceId && req.ctx?.activeWorkspaceId && location.workspaceId !== req.ctx.activeWorkspaceId) {
+    return res.status(403).json({ message: "Acesso negado: local pertence a outro workspace." });
+  }
   return res.json(mapLocation(location));
 });
 
 // POST /locations
-locationsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+locationsRouter.post("/", async (req: AuthenticatedRequest, res: Response) => {
   if (!checkPermission(req, "create")) {
     return res.status(403).json({ message: "Você não tem permissão para criar Locais." });
   }
@@ -94,7 +102,7 @@ locationsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res: Re
 
   const location = await prisma.location.create({
     data: {
-      workspaceId: body.workspace_id ?? null,
+      workspaceId: req.ctx?.activeWorkspaceId ?? body.workspace_id ?? null,
       name: String(body.name).trim(),
       addressStreet: String(body.address_street).trim(),
       addressNumber: body.address_number ?? null,
@@ -116,11 +124,17 @@ locationsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res: Re
 });
 
 // PATCH /locations/:id
-locationsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+locationsRouter.patch("/:id", async (req: AuthenticatedRequest, res: Response) => {
   if (!checkPermission(req, "edit")) {
     return res.status(403).json({ message: "Você não tem permissão para editar Locais." });
   }
   const id = req.params["id"] as string;
+  const existing = await prisma.location.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ message: "Local não encontrado." });
+  if (existing.workspaceId && req.ctx?.activeWorkspaceId && existing.workspaceId !== req.ctx.activeWorkspaceId) {
+    return res.status(403).json({ message: "Acesso negado: local pertence a outro workspace." });
+  }
+
   const body = req.body ?? {};
 
   const fieldMap: Record<string, string> = {
@@ -157,11 +171,17 @@ locationsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res
 });
 
 // DELETE /locations/:id — bloqueado se houver Pessoa vinculada (inativar em vez de excluir)
-locationsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+locationsRouter.delete("/:id", async (req: AuthenticatedRequest, res: Response) => {
   if (!checkPermission(req, "delete")) {
     return res.status(403).json({ message: "Você não tem permissão para excluir Locais." });
   }
   const id = req.params["id"] as string;
+  const existing = await prisma.location.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ message: "Local não encontrado." });
+  if (existing.workspaceId && req.ctx?.activeWorkspaceId && existing.workspaceId !== req.ctx.activeWorkspaceId) {
+    return res.status(403).json({ message: "Acesso negado: local pertence a outro workspace." });
+  }
+
   const peopleCount = await prisma.person.count({ where: { locationId: id, deletedAt: null } });
   if (peopleCount > 0) {
     return res.status(409).json({

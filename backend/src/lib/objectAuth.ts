@@ -57,10 +57,8 @@ export function assertObjectAccess<
     throw new NotFoundError("Recurso não encontrado.");
   }
 
-  // 1. Validação de fronteira de tenant
-  if (resource.workspaceId) {
-    assertTenantAccess(ctx, resource.workspaceId);
-  }
+  // 1. Validação de fronteira de tenant (deny-by-default)
+  assertTenantAccess(ctx, resource.workspaceId);
 
   // 2. Validação de escopo restrito ("own") para técnico
   const mustEnforceOwn =
