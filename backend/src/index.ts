@@ -89,12 +89,21 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     });
   }
 
+  if (err && typeof err === "object" && "statusCode" in err && typeof (err as Record<string, unknown>).statusCode === "number") {
+    const status = (err as Record<string, unknown>).statusCode as number;
+    const msg = err instanceof Error ? err.message : String((err as Record<string, unknown>).message || "Acesso negado.");
+    return res.status(status).json({
+      message: msg,
+    });
+  }
+
   const message = err instanceof Error ? err.message : String(err);
   console.error("[api] unhandled error", message);
   return res.status(500).json({
     message: "Erro interno no servidor.",
   });
 });
+
 
 app.listen(env.PORT, async () => {
   console.log(`[api] listening on port ${env.PORT}`);

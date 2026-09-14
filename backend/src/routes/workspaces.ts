@@ -7,6 +7,7 @@ import { generateDisplayCode } from "../lib/displayCode.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
 import { buildBillingContext } from "../lib/subscription.js";
+import { updateMemberMembershipOnly } from "../lib/membershipService.js";
 
 const createWorkspaceSchema = z.object({
   name: z.string().min(2).max(120),
@@ -463,7 +464,7 @@ workspaceRouter.post("/:workspaceId/members", async (req: AuthenticatedRequest, 
           email: input.email,
           passwordHash,
           fullName: input.fullName.trim(),
-          role: normalizedRole,
+          role: "user",
         },
         select: {
           id: true,
@@ -496,7 +497,7 @@ workspaceRouter.post("/:workspaceId/members", async (req: AuthenticatedRequest, 
       await tx.userRole.create({
         data: {
           userId: createdUser.id,
-          role: normalizedRole,
+          role: "user",
         },
       });
 
@@ -587,33 +588,10 @@ workspaceRouter.patch("/:workspaceId/members/:membershipId", async (req: Authent
     }
 
     const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const nextMembership = await tx.membership.update({
-        where: { id: membership.id },
-        data: {
-          role: normalizedRole ?? undefined,
-          status: input.status ?? undefined,
-        },
-        select: {
-          id: true,
-          role: true,
-          status: true,
-        },
+      const nextMembership = await updateMemberMembershipOnly(tx, membership.id, {
+        role: normalizedRole,
+        status: input.status,
       });
-
-      if (normalizedRole) {
-        await tx.user.update({
-          where: { id: membership.user.authUserId },
-          data: { role: normalizedRole },
-        });
-        await tx.userRole.upsert({
-          where: { userId: membership.user.authUserId },
-          update: { role: normalizedRole },
-          create: {
-            userId: membership.user.authUserId,
-            role: normalizedRole,
-          },
-        });
-      }
 
       return nextMembership;
     });

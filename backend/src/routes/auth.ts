@@ -12,11 +12,11 @@ import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
 import { isEmailConfigured, sendEmail } from "../lib/email/resend.js";
 import { passwordResetEmail, welcomeEmail } from "../lib/email/templates.js";
 
-const registerSchema = z.object({
+export const registerSchema = z.object({
   email: z.string().email().transform((value: string) => value.trim().toLowerCase()),
   password: z.string().min(8, "A senha deve ter pelo menos 8 caracteres."),
   fullName: z.string().min(2, "Informe o nome completo."),
-  role: z.enum(["admin", "technician", "partner", "client"]).default("admin"),
+  role: z.enum(["user", "technician", "client"]).default("user"),
 });
 
 const loginSchema = z.object({
@@ -70,7 +70,7 @@ authRouter.post("/register", async (req: Request, res: Response, next: NextFunct
           email: input.email,
           passwordHash,
           fullName: input.fullName,
-          role: input.role,
+          role: "user",
         },
         select: {
           id: true,
@@ -95,7 +95,7 @@ authRouter.post("/register", async (req: Request, res: Response, next: NextFunct
           fullName: createdUser.fullName,
           email: createdUser.email,
           displayCode,
-          isSystemOwner: createdUser.email.toLowerCase() === "qwork@qworkgroup.com",
+          isSystemOwner: false,
         },
       });
 
