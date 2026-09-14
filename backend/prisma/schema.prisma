@@ -21,6 +21,9 @@ model User {
   profile   Profile?
   userRole  UserRole?
 
+  createdBudgets    Budget[] @relation("BudgetCreator")
+  technicianBudgets Budget[] @relation("BudgetTechnician")
+
   @@map("users")
 }
 
@@ -70,6 +73,7 @@ model UserRole {
 model Workspace {
   id          String   @id @default(uuid())
   name        String
+  type        String   @default("company")
   ownerUserId String   @map("owner_user_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
@@ -87,6 +91,8 @@ model Workspace {
   billingAttachments BillingAttachment[]
   backendEventLogs  BackendEventLog[]
   workspaceInvites  WorkspaceInvite[]
+  budgets           Budget[]
+  budgetPhotos      BudgetPhoto[]
 
   @@map("workspaces")
 }
@@ -462,6 +468,7 @@ model Client {
 
   serviceOrders ServiceOrder[]
   paymentOrders PaymentOrder[]
+  budgets       Budget[]
 
   @@index([workspaceId])
   @@map("clients")
@@ -575,7 +582,12 @@ model ProductionOrder {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  photos ProductionPhoto[]
+  budgetId         String?         @unique @map("budget_id")
+  budgetRevisionId String?         @map("budget_revision_id")
+
+  photos         ProductionPhoto[]
+  budget         Budget?         @relation(fields: [budgetId], references: [id], onDelete: SetNull)
+  budgetRevision BudgetRevision? @relation("ProductionOrderRevision", fields: [budgetRevisionId, budgetId], references: [id, budgetId], onDelete: SetNull)
 
   @@index([workspaceId, status])
   @@map("production_orders")
@@ -597,6 +609,105 @@ model ProductionPhoto {
   @@index([productionOrderId])
   @@map("production_photos")
 }
+
+model Budget {
+  id                    String    @id @default(uuid())
+  workspaceId           String    @map("workspace_id")
+  code                  String
+  clientId              String?   @map("client_id")
+  clientName            String?   @map("client_name")
+  vehiclePlate          String?   @map("vehicle_plate")
+  vehicleVin            String?   @map("vehicle_vin")
+  vehicleBrand          String?   @map("vehicle_brand")
+  vehicleModel          String?   @map("vehicle_model")
+  currentRevisionNumber Int       @default(1) @map("current_revision_number")
+  currentRevisionId     String?   @map("current_revision_id")
+  approvedRevisionId    String?   @map("approved_revision_id")
+  technicianUserId      String?   @map("technician_user_id")
+  createdById           String    @map("created_by_id")
+  legacyLocalId         String?   @map("legacy_local_id")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  deletedAt             DateTime? @map("deleted_at")
+
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client           Client?           @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdBy        User              @relation("BudgetCreator", fields: [createdById], references: [id])
+  technician       User?             @relation("BudgetTechnician", fields: [technicianUserId], references: [id])
+  currentRevision  BudgetRevision?   @relation("BudgetCurrentRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  approvedRevision BudgetRevision?   @relation("BudgetApprovedRevision", fields: [approvedRevisionId], references: [id], onDelete: SetNull)
+  revisions        BudgetRevision[]  @relation("BudgetRevisions")
+  photos           BudgetPhoto[]
+  productionOrder  ProductionOrder?
+
+  @@unique([workspaceId, code])
+  @@unique([workspaceId, legacyLocalId])
+  @@index([workspaceId])
+  @@index([vehiclePlate])
+  @@index([clientId])
+  @@map("budgets")
+}
+
+model BudgetRevision {
+  id                   String    @id @default(uuid())
+  budgetId             String    @map("budget_id")
+  revisionNumber       Int       @map("revision_number")
+  status               String    @default("draft") // draft | submitted | approved | rejected
+  currencyCode         String    @default("EUR") @map("currency_code")
+  budgetType           String    @default("pdr") @map("budget_type")
+  clientSnapshot       Json      @map("client_snapshot")
+  vehicleSnapshot      Json      @map("vehicle_snapshot")
+  dossierSnapshot      Json?     @map("dossier_snapshot")
+  parts                Json      @default("[]")
+  services             Json      @default("[]")
+  labor                Json      @default("[]")
+  interventionTypes    String[]  @map("intervention_types")
+  diagnosis            String?
+  technicalDescription String?   @map("technical_description")
+  grossTotal           Decimal   @default(0) @db.Decimal(12, 2) @map("gross_total")
+  discountPct          Decimal   @default(0) @db.Decimal(5, 2) @map("discount_pct")
+  discountTotal        Decimal   @default(0) @db.Decimal(12, 2) @map("discount_total")
+  netTotal             Decimal   @default(0) @db.Decimal(12, 2) @map("net_total")
+  taxPct               Decimal   @default(0) @db.Decimal(5, 2) @map("tax_pct")
+  taxTotal             Decimal   @default(0) @db.Decimal(12, 2) @map("tax_total")
+  finalTotal           Decimal   @default(0) @db.Decimal(12, 2) @map("final_total")
+  signature            Json?
+  rejection            Json?
+  approvedAt           DateTime? @map("approved_at")
+  approvedById         String?   @map("approved_by_id")
+  createdById          String    @map("created_by_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  budget               Budget            @relation("BudgetRevisions", fields: [budgetId], references: [id], onDelete: Cascade)
+  asCurrentForBudgets  Budget[]          @relation("BudgetCurrentRevision")
+  asApprovedForBudgets Budget[]          @relation("BudgetApprovedRevision")
+  productionOrders     ProductionOrder[] @relation("ProductionOrderRevision")
+
+  @@unique([budgetId, revisionNumber])
+  @@unique([id, budgetId])
+  @@index([budgetId, status])
+  @@map("budget_revisions")
+}
+
+model BudgetPhoto {
+  id          String   @id @default(uuid())
+  budgetId    String   @map("budget_id")
+  workspaceId String   @map("workspace_id")
+  storagePath String   @map("storage_path")
+  category    String   // inspection | damage | document
+  caption     String?
+  sizeBytes   Int?     @map("size_bytes")
+  uploadedBy  String   @map("uploaded_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  budget    Budget    @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([budgetId])
+  @@index([workspaceId])
+  @@map("budget_photos")
+}
+
 
 model WorkspaceInvite {
   id              String    @id @default(uuid())

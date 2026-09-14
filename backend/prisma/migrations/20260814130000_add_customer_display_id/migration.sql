@@ -6,7 +6,7 @@ ALTER TABLE "billing_clients"
 ADD COLUMN IF NOT EXISTS "customer_display_num" INTEGER;
 
 ALTER TABLE "billing_clients"
-ADD COLUMN IF NOT EXISTS "customer_display_id" VARCHAR(32);
+ADD COLUMN IF NOT EXISTS "customer_display_id" TEXT;
 
 -- Garante unicidade de C-XXXXX por workspace
 CREATE UNIQUE INDEX IF NOT EXISTS "billing_clients_workspace_id_customer_display_num_key"
@@ -14,5 +14,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS "billing_clients_workspace_id_customer_display
 
 -- Garante que o display_id formatado é único global
 CREATE UNIQUE INDEX IF NOT EXISTS "billing_clients_customer_display_id_key"
-  ON "billing_clients" ("customer_display_id")
-  WHERE "customer_display_id" IS NOT NULL;
+  ON "billing_clients" ("customer_display_id");
