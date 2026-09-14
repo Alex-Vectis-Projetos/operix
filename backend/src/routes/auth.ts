@@ -12,7 +12,7 @@ import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
 import { isEmailConfigured, sendEmail } from "../lib/email/resend.js";
 import { passwordResetEmail, welcomeEmail } from "../lib/email/templates.js";
 
-const registerSchema = z.object({
+export const registerSchema = z.object({
   email: z.string().email().transform((value: string) => value.trim().toLowerCase()),
   password: z.string().min(8, "A senha deve ter pelo menos 8 caracteres."),
   fullName: z.string().min(2, "Informe o nome completo."),
