@@ -1,7 +1,11 @@
 import { Router, type Request, type Response } from "express";
 import { fetchAICompletion, parseToolCall } from "../lib/ai.js";
+import { requireAuth } from "../middleware/auth.js";
 
 export const extractRouter = Router();
+
+// S5A-008: Proteger todos os endpoints caros de extração/OCR de IA contra chamadas anônimas
+extractRouter.use(requireAuth);
 
 extractRouter.post("/production-order", async (req: Request, res: Response) => {
   try {

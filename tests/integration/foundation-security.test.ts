@@ -63,14 +63,9 @@ describe("Spec 001 — Foundation Context & Security Regression Tests", () => {
       const { extractRouter } = await import("../../backend/src/routes/extract.js");
       
       const stack = extractRouter.stack;
-      const orderRoute = stack.find((layer: any) => layer.route?.path === "/production-order");
+      const hasAuthLayer = stack.some((layer: any) => !layer.route && layer.handle?.name === "requireAuth");
       
-      expect(orderRoute).toBeDefined();
-      
-      // No código vulnerável, a rota tem 1 único handler e ZERO middlewares de autenticação
-      const handlers = orderRoute.route.stack;
-      // Para estar protegido, deve ter middleware de autenticação na pilha
-      expect(handlers.length).toBeGreaterThan(1);
+      expect(hasAuthLayer).toBe(true);
     });
   });
 
