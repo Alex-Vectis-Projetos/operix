@@ -47,8 +47,7 @@ keys.txt
 *.backup-*
 *.bak-*
 
-# Especificações e relatórios de desenvolvimento temporários
-specs/
+# Relatórios e artefatos de desenvolvimento temporários
 reports/
 .specify/
 .claude/worktrees/

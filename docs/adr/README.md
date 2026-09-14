@@ -44,7 +44,7 @@ As seguintes ADRs estão mapeadas para formalização à medida que as respectiv
 
 | ADR | Título | Status | Fatia |
 |---|---|---|:---:|
-| [ADR-001](001-request-context-and-tenancy.md) | RequestContext Mandatório e Isolamento Multi-Tenant Server-Side | *Planejada* | R0 |
+| [ADR-001](001-request-context-and-tenancy.md) | RequestContext Mandatório e Isolamento Multi-Tenant Server-Side | **Aceito** | R0 |
 | [ADR-002](002-user-person-membership-identity.md) | Desacoplamento Canônico de Identidade (User, Membership, Person) | *Planejada* | R0 |
 | [ADR-003](003-canonical-client.md) | Unificação do Modelo de Cliente Operacional e Comercial | *Planejada* | R0 |
 | [ADR-004](004-budget-revisions.md) | Versionamento Imutável de Orçamentos e Eliminação de LocalStorage | *Planejada* | R1 |
