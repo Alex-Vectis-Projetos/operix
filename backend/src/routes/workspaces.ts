@@ -464,7 +464,7 @@ workspaceRouter.post("/:workspaceId/members", async (req: AuthenticatedRequest, 
           email: input.email,
           passwordHash,
           fullName: input.fullName.trim(),
-          role: normalizedRole,
+          role: "user",
         },
         select: {
           id: true,
@@ -497,7 +497,7 @@ workspaceRouter.post("/:workspaceId/members", async (req: AuthenticatedRequest, 
       await tx.userRole.create({
         data: {
           userId: createdUser.id,
-          role: normalizedRole,
+          role: "user",
         },
       });
 

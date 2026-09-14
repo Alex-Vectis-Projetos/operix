@@ -147,8 +147,7 @@ export async function resolveRequestContext(
     }
 
     const platformRole =
-      req.auth.role === "platform_admin" ||
-      req.auth.email.toLowerCase() === "qwork@qworkgroup.com"
+      req.auth.role === "platform_admin"
         ? ("platform_admin" as const)
         : ("user" as const);
 
