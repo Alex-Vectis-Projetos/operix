@@ -55,20 +55,22 @@
 ## T03: Provisionamento e Ciclo de Vida do Personal Workspace (ADR-002)
 - **Descrição**: Implementar a lógica de provisionamento de Personal Workspace para técnicos independentes no serviço de autenticação/workspaces e no middleware `requestContext` (lazy-provisioning para técnicos autônomos sem workspace ativo), garantindo no máximo 1 personal workspace por `AppUser`.
 - **DoD**:
-  - [ ] Criação de workspace com `type = "personal"` e `ownerUserId` vinculado ao `AppUser.id`;
-  - [ ] Proteção contra múltiplos workspaces pessoais via índice único parcial;
-  - [ ] Resolução automática no `requestContext` na ausência de cabeçalho `X-Workspace-Id`;
-  - [ ] Validação server-side estrita de `X-Workspace-Id` (seletor não-confiável);
-  - [ ] Teste automatizado cobrindo o ciclo de vida do personal workspace.
+  - [x] Criação de workspace com `type = "personal"` e `ownerUserId` vinculado ao `AppUser.id`;
+  - [x] Proteção contra múltiplos workspaces pessoais via índice único parcial;
+  - [x] Resolução automática no `requestContext` na ausência de cabeçalho `X-Workspace-Id`;
+  - [x] Validação server-side estrita de `X-Workspace-Id` (seletor não-confiável);
+  - [x] Teste automatizado cobrindo o ciclo de vida do personal workspace (`PERSONAL-LIFE-01`, `PERSONAL-RES-01`).
+- **Status de Auditoria**: `T03 PASSED` (`provisionPersonalWorkspace` + `POST /api/workspaces/personal` + auto-resolução no `requestContext`).
 
 ---
 
 ## T04: Endpoints de Clientes Operacionais (`/api/clients`)
 - **Descrição**: Criar rotas leves de leitura e criação para o modelo `Client` em `backend/src/routes/clients.ts`, protegidas por `resolveRequestContext`.
 - **DoD**:
-  - [ ] `GET /api/clients`: retorna clientes filtrados por `ctx.activeWorkspaceId` e status ativo;
-  - [ ] `POST /api/clients`: cadastra cliente validando payload com Zod e associando a `ctx.activeWorkspaceId`;
-  - [ ] Rejeição estrita de vinculação cross-tenant de clientes.
+  - [x] `GET /api/clients`: retorna clientes filtrados por `ctx.activeWorkspaceId` e status ativo;
+  - [x] `POST /api/clients`: cadastra cliente validando payload com Zod e associando a `ctx.activeWorkspaceId`;
+  - [x] Rejeição estrita de vinculação cross-tenant de clientes (`CLIENT-CRUD-01`, `CLIENT-ISOLATION-01`).
+- **Status de Auditoria**: `T04 PASSED` (Router montado em `/api/clients`, isolamento estrito com 404 para evitar enumeração e 100% de testes verdes).
 
 ---
 

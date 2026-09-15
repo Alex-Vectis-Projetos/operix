@@ -8,6 +8,7 @@ import { prisma } from "../lib/prisma.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
 import { buildBillingContext } from "../lib/subscription.js";
 import { updateMemberMembershipOnly } from "../lib/membershipService.js";
+import { provisionPersonalWorkspace } from "../middleware/requestContext.js";
 
 const createWorkspaceSchema = z.object({
   name: z.string().min(2).max(120),
@@ -179,6 +180,7 @@ workspaceRouter.post("/", async (req: AuthenticatedRequest, res: Response, next:
         data: {
           name: input.name.trim(),
           ownerUserId: appUser.id,
+          type: "company",
         },
       });
 
@@ -265,6 +267,50 @@ workspaceRouter.post("/", async (req: AuthenticatedRequest, res: Response, next:
         id: workspace.id,
         name: workspace.name,
         owner_user_id: workspace.ownerUserId,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+workspaceRouter.post("/personal", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const [appUser, user] = await Promise.all([
+      prisma.appUser.findUnique({
+        where: { authUserId: req.auth!.userId },
+        select: { id: true, name: true, workspaceId: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: req.auth!.userId },
+        select: { fullName: true },
+      }),
+    ]);
+
+    if (!appUser) {
+      return res.status(404).json({ message: "App user not found." });
+    }
+
+    const userName = appUser.name || user?.fullName || undefined;
+    const personalWs = await provisionPersonalWorkspace(appUser.id, userName);
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: personalWs.id },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        ownerUserId: true,
+        createdAt: true,
+      },
+    });
+
+    return res.status(200).json({
+      workspace: {
+        id: workspace?.id,
+        name: workspace?.name,
+        type: workspace?.type,
+        owner_user_id: workspace?.ownerUserId,
       },
     });
   } catch (error) {

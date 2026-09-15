@@ -169,6 +169,12 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
     const { productionOrdersRouter } = await import("../../backend/src/routes/productionOrders.js");
     app.use("/api/production-orders", productionOrdersRouter);
 
+    const { workspaceRouter } = await import("../../backend/src/routes/workspaces.js");
+    app.use("/api/workspaces", workspaceRouter);
+
+    const { clientsRouter } = await import("../../backend/src/routes/clients.js");
+    app.use("/api/clients", clientsRouter);
+
     // Tentativa de carregar rota de orçamentos se existir
     try {
       // @ts-expect-error rota a ser implementada na Spec 002
@@ -180,7 +186,11 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       // budgets.js ainda não existe (esperado para T02)
     }
 
+    const { ZodError } = await import("zod");
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      if (err instanceof ZodError) {
+        return res.status(400).json({ message: "Payload inválido.", issues: err.issues });
+      }
       const statusCode = err?.statusCode || (err instanceof ForbiddenError ? 403 : 500);
       res.status(statusCode).json({ message: err?.message || "Internal error" });
     });
@@ -216,7 +226,12 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       where: { workspaceId: { in: [FIXTURES.wsAlpha, FIXTURES.wsBravo, FIXTURES.independentTechC.personalWsId] } },
     });
     await prisma.client.deleteMany({
-      where: { id: { in: [FIXTURES.clientA, FIXTURES.clientB] } },
+      where: {
+        OR: [
+          { id: { in: [FIXTURES.clientA, FIXTURES.clientB] } },
+          { workspaceId: { in: [FIXTURES.wsAlpha, FIXTURES.wsBravo, FIXTURES.independentTechC.personalWsId] } },
+        ],
+      },
     });
     await prisma.membership.deleteMany({
       where: {
@@ -304,6 +319,154 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
 
       // Limpa workspace corporativo secundário
       await prisma.workspace.delete({ where: { id: secondCompanyWs.id } });
+    });
+
+    it("PERSONAL-LIFE-01: Ciclo de vida idempotente do personal workspace via POST /api/workspaces/personal", async () => {
+      const tokenC = signAccessToken({
+        id: FIXTURES.independentTechC.userId,
+        email: FIXTURES.independentTechC.email,
+        role: "user",
+      });
+
+      // 1. Provisiona workspace pessoal pela primeira vez
+      const res1 = await fetch(`${baseUrl}/api/workspaces/personal`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenC}`,
+        },
+      });
+
+      expect(res1.status).toBe(200);
+      const data1 = await res1.json();
+      expect(data1.workspace).toBeDefined();
+      expect(data1.workspace.type).toBe("personal");
+      expect(data1.workspace.owner_user_id).toBe(FIXTURES.independentTechC.appUserId);
+
+      // 2. Chamada subsequente (idempotente) deve retornar o mesmo workspace sem erro
+      const res2 = await fetch(`${baseUrl}/api/workspaces/personal`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenC}`,
+        },
+      });
+
+      expect(res2.status).toBe(200);
+      const data2 = await res2.json();
+      expect(data2.workspace.id).toBe(data1.workspace.id);
+    });
+
+    it("PERSONAL-RES-01: RequestContext resolve automaticamente o personal workspace na ausência de X-Workspace-Id", async () => {
+      const tokenC = signAccessToken({
+        id: FIXTURES.independentTechC.userId,
+        email: FIXTURES.independentTechC.email,
+        role: "user",
+      });
+
+      // Técnico autônomo sem cabeçalho X-Workspace-Id
+      const response = await fetch(`${baseUrl}/api/clients`, {
+        headers: {
+          Authorization: `Bearer ${tokenC}`,
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(Array.isArray(body.clients)).toBe(true);
+    });
+
+    it("CLIENT-CRUD-01: POST /api/clients cadastra cliente no workspace e GET /api/clients lista", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const resCreate = await fetch(`${baseUrl}/api/clients`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Oficina Alpha Auto Center",
+          contactEmail: "contato@alpha.com",
+          contactPhone: "+351 912345678",
+          address: "Rua Central 100, Lisboa",
+        }),
+      });
+
+      expect(resCreate.status).toBe(201);
+      const created = await resCreate.json();
+      expect(created.client).toBeDefined();
+      expect(created.client.name).toBe("Oficina Alpha Auto Center");
+      expect(created.client.workspaceId).toBe(FIXTURES.wsAlpha);
+
+      const resList = await fetch(`${baseUrl}/api/clients`, {
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+        },
+      });
+
+      expect(resList.status).toBe(200);
+      const list = await resList.json();
+      const found = list.clients.find((c: any) => c.name === "Oficina Alpha Auto Center");
+      expect(found).toBeDefined();
+      expect(found.id).toBe(created.client.id);
+    });
+
+    it("CLIENT-ISOLATION-01: Isolamento estrito de clientes entre workspaces (GET / e GET /:id retornam 404 para outro tenant)", async () => {
+      // 1. Cliente cadastrado no Workspace A
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const resCreate = await fetch(`${baseUrl}/api/clients`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Cliente Secreto Workspace A",
+        }),
+      });
+
+      const { client: clientA } = await resCreate.json();
+
+      // 2. Usuário de Workspace B lista clientes do seu workspace
+      const tokenB = signAccessToken({
+        id: FIXTURES.ownerB.userId,
+        email: FIXTURES.ownerB.email,
+        role: "user",
+      });
+
+      const resListB = await fetch(`${baseUrl}/api/clients`, {
+        headers: {
+          Authorization: `Bearer ${tokenB}`,
+          "X-Workspace-Id": FIXTURES.wsBravo,
+        },
+      });
+
+      expect(resListB.status).toBe(200);
+      const listB = await resListB.json();
+      const leak = listB.clients.find((c: any) => c.id === clientA.id);
+      expect(leak).toBeUndefined();
+
+      // 3. Usuário de Workspace B tenta consultar diretamente o ID do cliente de A
+      const resGetB = await fetch(`${baseUrl}/api/clients/${clientA.id}`, {
+        headers: {
+          Authorization: `Bearer ${tokenB}`,
+          "X-Workspace-Id": FIXTURES.wsBravo,
+        },
+      });
+
+      // Deve retornar 404 para evitar enumeração de recursos (Zero Trust / BOLA)
+      expect(resGetB.status).toBe(404);
     });
 
     it("PO-03: Foreign Key Composta garante que budgetRevisionId pertença obrigatoriamente ao mesmo budgetId", async () => {
