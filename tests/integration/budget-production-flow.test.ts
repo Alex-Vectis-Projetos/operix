@@ -1899,4 +1899,158 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       expect(data.photos[0].download_url).toBe(data.photos[0].url);
     });
   });
+
+  // =========================================================================
+  // GRUPO F: SINCRONIZAÇÃO ASSISTIDA E IDEMPOTENTE DO LOCALSTORAGE - T09
+  // =========================================================================
+  describe("Grupo F: Sincronização Assistida e Idempotente do LocalStorage (T09)", () => {
+    it("SYNC-LOCAL-01: POST /api/budgets/sync-local cria orçamentos e retorna mapa legacyLocalId -> budgetId", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/budgets/sync-local`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          items: [
+            {
+              id: "local-budget-101",
+              client_name: "Cliente Legado 101",
+              vehicle_plate: "LOC-0101",
+              vehicle_model: "Golf",
+              gross_total: 850.5,
+            },
+            {
+              legacyLocalId: "local-budget-102",
+              clientName: "Cliente Legado 102",
+              vehiclePlate: "LOC-0102",
+              grossTotal: 1200,
+            },
+          ],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.synced).toBeDefined();
+      expect(data.synced["local-budget-101"]).toBeDefined();
+      expect(data.synced["local-budget-102"]).toBeDefined();
+
+      const b1 = await prisma.budget.findUnique({
+        where: { id: data.synced["local-budget-101"] },
+        include: { currentRevision: true },
+      });
+      expect(b1).not.toBeNull();
+      expect(b1?.workspaceId).toBe(FIXTURES.wsAlpha);
+      expect(b1?.legacyLocalId).toBe("local-budget-101");
+      expect(b1?.clientName).toBe("Cliente Legado 101");
+      expect(b1?.currentRevision?.grossTotal.toString()).toBe("850.5");
+    });
+
+    it("SYNC-LOCAL-02: Idempotência concorrente — sincronizar itens repetidos não duplica no PostgreSQL", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const payload = {
+        items: [
+          {
+            legacyLocalId: "local-budget-idempotent",
+            clientName: "Cliente Idempotente",
+            vehiclePlate: "IDEM-01",
+            grossTotal: 500,
+          },
+        ],
+      };
+
+      const res1 = await fetch(`${baseUrl}/api/budgets/sync-local`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      expect(res1.status).toBe(200);
+      const data1 = await res1.json();
+      const firstBudgetId = data1.synced["local-budget-idempotent"];
+      expect(firstBudgetId).toBeDefined();
+
+      const res2 = await fetch(`${baseUrl}/api/budgets/sync-local`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      expect(res2.status).toBe(200);
+      const data2 = await res2.json();
+      expect(data2.synced["local-budget-idempotent"]).toBe(firstBudgetId);
+
+      const count = await prisma.budget.count({
+        where: {
+          workspaceId: FIXTURES.wsAlpha,
+          legacyLocalId: "local-budget-idempotent",
+        },
+      });
+      expect(count).toBe(1);
+    });
+
+    it("SYNC-LOCAL-03: Isolamento de tenant — mesmo legacyLocalId em workspaces distintos cria orçamentos distintos", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+      const tokenB = signAccessToken({
+        id: FIXTURES.ownerB.userId,
+        email: FIXTURES.ownerB.email,
+        role: "user",
+      });
+
+      const sharedLocalId = "shared-local-id-unique";
+
+      const resAlpha = await fetch(`${baseUrl}/api/budgets/sync-local`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          items: [{ legacyLocalId: sharedLocalId, clientName: "Cliente Alpha" }],
+        }),
+      });
+      const dataAlpha = await resAlpha.json();
+
+      const resBravo = await fetch(`${baseUrl}/api/budgets/sync-local`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenB}`,
+          "X-Workspace-Id": FIXTURES.wsBravo,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          items: [{ legacyLocalId: sharedLocalId, clientName: "Cliente Bravo" }],
+        }),
+      });
+      const dataBravo = await resBravo.json();
+
+      expect(dataAlpha.synced[sharedLocalId]).toBeDefined();
+      expect(dataBravo.synced[sharedLocalId]).toBeDefined();
+      expect(dataAlpha.synced[sharedLocalId]).not.toBe(dataBravo.synced[sharedLocalId]);
+    });
+  });
 });

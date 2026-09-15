@@ -132,10 +132,11 @@
 ## T09: Sincronização Assistida e Idempotente do LocalStorage (`legacyLocalId`)
 - **Descrição**: Implementar rota `POST /api/budgets/sync-local` e componente frontend com banner/diálogo para migração controlada de dados legados do `localStorage` protegida por `@@unique([workspaceId, legacyLocalId])`.
 - **DoD**:
-  - [ ] Banner exibido apenas quando orçamentos locais são detectados;
-  - [ ] Confirmação explícita do usuário antes do envio;
-  - [ ] Backend garante idempotência concorrente via chave única no PostgreSQL;
-  - [ ] Chaves locais são limpas/arquivadas apenas após confirmação 200/201 do servidor.
+  - [x] Banner exibido apenas quando orçamentos locais são detectados;
+  - [x] Confirmação explícita do usuário antes do envio;
+  - [x] Backend garante idempotência concorrente via chave única no PostgreSQL;
+  - [x] Chaves locais são limpas/arquivadas apenas após confirmação 200/201 do servidor.
+- **Status de Auditoria**: `T09 PASSED` (Banner reativo implementado em `LocalBudgetsSyncBanner.tsx`, montado em `BudgetPanel.tsx`, rota normalizada `POST /api/budgets/sync-local` e 100% dos testes do Grupo F GREEN: `SYNC-LOCAL-01`, `SYNC-LOCAL-02`, `SYNC-LOCAL-03`. Total na suíte: 51/51 GREEN).
 
 ---
 

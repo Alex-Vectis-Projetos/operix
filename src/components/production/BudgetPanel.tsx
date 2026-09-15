@@ -31,6 +31,7 @@ import {
   openBudgetPreview as sharedOpenBudgetPreview,
   downloadBudgetHtml as sharedDownloadBudgetHtml,
 } from "@/lib/budgetPdfUtils";
+import { LocalBudgetsSyncBanner } from "./LocalBudgetsSyncBanner";
 
 const STORAGE_KEY = "budgets-local-v1";
 const BUDGET_TO_ORDER_MAP_KEY = "budget-to-production-order-v1";
@@ -571,6 +572,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
 
   return (
     <div className="space-y-4">
+      <LocalBudgetsSyncBanner />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           {totals.count > 0 ? (

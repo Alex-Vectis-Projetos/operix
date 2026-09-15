@@ -281,8 +281,22 @@ budgetsRouter.post("/sync-local", async (req: Request, res: Response, next: Next
       return res.status(403).json({ message: "Workspace ativo não definido." });
     }
 
-    const items = Array.isArray(req.body.items) ? req.body.items : [];
-    const result = await syncLocalBudgets(ctx.activeWorkspaceId, ctx.actorUserId, items);
+    const rawItems = Array.isArray(req.body.items) ? req.body.items : [];
+    const normalizedItems = rawItems
+      .map((item: any) => ({
+        legacyLocalId: String(item.legacyLocalId || item.legacy_local_id || item.id || "").trim(),
+        clientName: item.clientName ?? item.client_name ?? item.clientSnapshot?.name,
+        vehiclePlate: item.vehiclePlate ?? item.vehicle_plate ?? item.vehicleSnapshot?.plate,
+        vehicleBrand: item.vehicleBrand ?? item.vehicle_brand ?? item.vehicleSnapshot?.brand,
+        vehicleModel: item.vehicleModel ?? item.vehicle_model ?? item.vehicleSnapshot?.model,
+        grossTotal: item.grossTotal ?? item.gross_total ?? item.finalTotal ?? item.final_total,
+        parts: item.parts,
+        services: item.services,
+        labor: item.labor,
+      }))
+      .filter((item: any) => Boolean(item.legacyLocalId));
+
+    const result = await syncLocalBudgets(ctx.activeWorkspaceId, ctx.actorUserId, normalizedItems);
 
     return res.status(200).json({ synced: result });
   } catch (error) {
