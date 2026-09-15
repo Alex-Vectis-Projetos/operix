@@ -963,6 +963,15 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
   // =========================================================================
   describe("Grupo B: Comportamento de Negócio e Serviços (RED Baseline)", () => {
     it("TENANT-01: Usuário do Workspace A não lê Budget do Workspace B (404 Not Found para evitar enumeração)", async () => {
+      const budgetB = await prisma.budget.create({
+        data: {
+          id: "b-ws-bravo-tenant-01",
+          workspaceId: FIXTURES.wsBravo,
+          code: "ORC-BRAVO-T01",
+          createdById: FIXTURES.ownerB.userId,
+        },
+      });
+
       const tokenA = signAccessToken({
         id: FIXTURES.techA1.userId,
         email: FIXTURES.techA1.email,
@@ -970,7 +979,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       });
 
       // Tentativa de ler orçamento do Workspace B
-      const response = await fetch(`${baseUrl}/api/budgets/b2222222-2222-4222-8222-222222222222`, {
+      const response = await fetch(`${baseUrl}/api/budgets/${budgetB.id}`, {
         headers: {
           Authorization: `Bearer ${tokenA}`,
           "X-Workspace-Id": FIXTURES.wsAlpha,
@@ -978,7 +987,6 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       });
 
       // Padronização: lookup por ID de recurso de outro tenant retorna 404 Not Found
-      // Atualmente falha porque a rota não existe no Express (retorna HTML Cannot GET /...)
       expect(response.status).toBe(404);
       const text = await response.text();
       let body: any = {};
@@ -1139,7 +1147,36 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         role: "user",
       });
 
-      const response = await fetch(`${baseUrl}/api/budgets/b-approved-lock/revisions/r-approved-lock`, {
+      const budget = await prisma.budget.create({
+        data: {
+          id: "b-approved-lock-2",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "ORC-LOCK-2",
+          createdById: FIXTURES.ownerA.userId,
+        },
+      });
+
+      const revApproved = await prisma.budgetRevision.create({
+        data: {
+          id: "r-approved-lock-2",
+          budgetId: budget.id,
+          revisionNumber: 1,
+          status: "approved",
+          clientSnapshot: { name: "Cliente" },
+          vehicleSnapshot: { plate: "ABC-0000" },
+          grossTotal: 500.0,
+          netTotal: 500.0,
+          finalTotal: 500.0,
+          createdById: FIXTURES.ownerA.userId,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: budget.id },
+        data: { approvedRevisionId: revApproved.id, currentRevisionId: revApproved.id },
+      });
+
+      const response = await fetch(`${baseUrl}/api/budgets/${budget.id}/revisions/${revApproved.id}`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${tokenA}`,
@@ -1158,7 +1195,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       expect(body.revision.status).toBe("draft");
 
       // Revisão 1 permanece aprovada e intacta
-      const rev1 = await prisma.budgetRevision.findUnique({ where: { id: "r-approved-lock" } });
+      const rev1 = await prisma.budgetRevision.findUnique({ where: { id: revApproved.id } });
       expect(rev1?.status).toBe("approved");
     });
 
@@ -1208,6 +1245,22 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
     });
 
     it("PO-02: Re-aprovação com OP aberta atualiza a mesma OP conforme whitelist", async () => {
+      // 1. Cria a revisão 2 para o orçamento b-approve-flow
+      await prisma.budgetRevision.create({
+        data: {
+          id: "r-new-rev-2",
+          budgetId: "b-approve-flow",
+          revisionNumber: 2,
+          status: "submitted",
+          clientSnapshot: { name: "Cliente" },
+          vehicleSnapshot: { plate: "ABC-1111", model: "Clio Atualizado" },
+          grossTotal: 800.0,
+          netTotal: 800.0,
+          finalTotal: 800.0,
+          createdById: FIXTURES.ownerA.userId,
+        },
+      });
+
       const tokenA = signAccessToken({
         id: FIXTURES.ownerA.userId,
         email: FIXTURES.ownerA.email,

@@ -90,16 +90,18 @@
 ## T06: Endpoints da API de Orçamentos e Revisões com `revisionId` Explícito (`/api/budgets`)
 - **Descrição**: Criar rotas REST em `backend/src/routes/budgets.ts` protegidas por `resolveRequestContext` e validação Zod, exigindo `revisionId` explícito em aprovações e rejeições.
 - **DoD**:
-  - [ ] `GET /api/budgets`: lista orçamentos do workspace ativo com filtros;
-  - [ ] `POST /api/budgets`: cria orçamento e primeira revisão;
-  - [ ] `GET /api/budgets/:id`: retorna orçamento com revisão ativa;
-  - [ ] `GET /api/budgets/:id/revisions`: retorna histórico de revisões;
-  - [ ] `PUT /api/budgets/:id/revisions/:revisionId`: atualiza rascunho ou gera nova revisão;
-  - [ ] `POST /api/budgets/:id/revisions/:revisionId/reject`: registra rejeição com motivo formal;
-  - [ ] `POST /api/budgets/:id/revisions/:revisionId/approve`: aprova revisão indicada e integra com OP;
-  - [ ] `POST /api/budgets/:id/photos`: upload e metadados de `BudgetPhoto` usando UUID canônico;
-  - [ ] `GET /api/budgets/:id/photos`: listagem com presigned URLs temporárias;
-  - [ ] Todos os endpoints validam `assertTenantAccess` e `assertObjectAccess`.
+  - [x] `GET /api/budgets`: lista orçamentos do workspace ativo com filtros;
+  - [x] `POST /api/budgets`: cria orçamento e primeira revisão;
+  - [x] `GET /api/budgets/:id`: retorna orçamento com revisão ativa;
+  - [x] `GET /api/budgets/:id/revisions`: retorna histórico de revisões;
+  - [x] `PUT /api/budgets/:id/revisions/:revisionId`: atualiza rascunho ou gera nova revisão;
+  - [x] `POST /api/budgets/:id/revisions/:revisionId/reject`: registra rejeição com motivo formal;
+  - [x] `POST /api/budgets/:id/revisions/:revisionId/approve`: aprova revisão indicada e integra com OP;
+  - [x] `POST /api/budgets/:id/photos`: upload e metadados de `BudgetPhoto` usando UUID canônico;
+  - [x] `GET /api/budgets/:id/photos`: listagem com presigned URLs temporárias;
+  - [x] `POST /api/budgets/sync-local`: migração idempotente de orçamentos do `localStorage`;
+  - [x] Todos os endpoints validam `assertTenantAccess` e `assertObjectAccess`.
+- **Status de Auditoria**: `T06 PASSED` (100% dos 8 testes de aceitação comportamental do Grupo B GREEN: `BUDGET-API-01`, `REVISION-01`, `REVISION-02`, `REJECT-01`, `APPROVE-01`, `PO-02`, `CONCURRENT-01`, `TENANT-01`. Total na suíte: 31/31 GREEN).
 
 ---
 
