@@ -118,7 +118,14 @@ CREATE UNIQUE INDEX "workspaces_owner_user_id_personal_key" ON "workspaces"("own
 ALTER TABLE "production_orders" ADD CONSTRAINT "production_orders_budget_id_fkey" FOREIGN KEY ("budget_id") REFERENCES "budgets"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "production_orders" ADD CONSTRAINT "production_orders_budget_revision_id_budget_id_fkey" FOREIGN KEY ("budget_revision_id", "budget_id") REFERENCES "budget_revisions"("id", "budget_id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "production_orders" ADD CONSTRAINT "production_orders_budget_revision_id_budget_id_fkey" FOREIGN KEY ("budget_revision_id", "budget_id") REFERENCES "budget_revisions"("id", "budget_id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- Constraint de integridade de linhagem: budget_id e budget_revision_id devem ser ambos NULL (OP direta) ou ambos NOT NULL (OP originada de Budget)
+ALTER TABLE "production_orders" ADD CONSTRAINT "production_orders_budget_lineage_check" CHECK (
+  ("budget_id" IS NULL AND "budget_revision_id" IS NULL)
+  OR
+  ("budget_id" IS NOT NULL AND "budget_revision_id" IS NOT NULL)
+);
 
 -- AddForeignKey
 ALTER TABLE "budgets" ADD CONSTRAINT "budgets_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "workspaces"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -133,10 +140,10 @@ ALTER TABLE "budgets" ADD CONSTRAINT "budgets_created_by_id_fkey" FOREIGN KEY ("
 ALTER TABLE "budgets" ADD CONSTRAINT "budgets_technician_user_id_fkey" FOREIGN KEY ("technician_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "budgets" ADD CONSTRAINT "budgets_current_revision_id_fkey" FOREIGN KEY ("current_revision_id") REFERENCES "budget_revisions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "budgets" ADD CONSTRAINT "budgets_current_revision_id_id_fkey" FOREIGN KEY ("current_revision_id", "id") REFERENCES "budget_revisions"("id", "budget_id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "budgets" ADD CONSTRAINT "budgets_approved_revision_id_fkey" FOREIGN KEY ("approved_revision_id") REFERENCES "budget_revisions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "budgets" ADD CONSTRAINT "budgets_approved_revision_id_id_fkey" FOREIGN KEY ("approved_revision_id", "id") REFERENCES "budget_revisions"("id", "budget_id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "budget_revisions" ADD CONSTRAINT "budget_revisions_budget_id_fkey" FOREIGN KEY ("budget_id") REFERENCES "budgets"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -146,3 +153,4 @@ ALTER TABLE "budget_photos" ADD CONSTRAINT "budget_photos_budget_id_fkey" FOREIG
 
 -- AddForeignKey
 ALTER TABLE "budget_photos" ADD CONSTRAINT "budget_photos_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "workspaces"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+

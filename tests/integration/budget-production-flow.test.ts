@@ -207,6 +207,10 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
     await prisma.budgetPhoto.deleteMany({
       where: { workspaceId: { in: [FIXTURES.wsAlpha, FIXTURES.wsBravo, FIXTURES.independentTechC.personalWsId] } },
     });
+    await prisma.budget.updateMany({
+      where: { workspaceId: { in: [FIXTURES.wsAlpha, FIXTURES.wsBravo, FIXTURES.independentTechC.personalWsId] } },
+      data: { currentRevisionId: null, approvedRevisionId: null },
+    });
     await prisma.budgetRevision.deleteMany({});
     await prisma.budget.deleteMany({
       where: { workspaceId: { in: [FIXTURES.wsAlpha, FIXTURES.wsBravo, FIXTURES.independentTechC.personalWsId] } },
@@ -438,6 +442,76 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         })
       ).rejects.toThrow();
     });
+
+    it("POINTER-01: Budget A não aceita currentRevisionId apontando para revisão de Budget B", async () => {
+      // Tentativa de fazer o Budget 1 apontar currentRevisionId para a Revision 2 (que pertence ao Budget 2)
+      // A FK composta (current_revision_id, id) -> budget_revisions(id, budget_id) deve REJEITAR!
+      await expect(
+        prisma.budget.update({
+          where: { id: "b1111111-1111-4111-8111-111111111111" },
+          data: {
+            currentRevisionId: "r2222222-2222-4222-8222-222222222222", // Pertence a Budget 2!
+          },
+        })
+      ).rejects.toThrow();
+
+      // Já apontar para a Revision 1 (do próprio Budget 1) deve ter SUCESSO
+      const updated = await prisma.budget.update({
+        where: { id: "b1111111-1111-4111-8111-111111111111" },
+        data: {
+          currentRevisionId: "r1111111-1111-4111-8111-111111111111",
+        },
+      });
+      expect(updated.currentRevisionId).toBe("r1111111-1111-4111-8111-111111111111");
+    });
+
+    it("POINTER-02: Budget A não aceita approvedRevisionId apontando para revisão de Budget B", async () => {
+      // A FK composta (approved_revision_id, id) -> budget_revisions(id, budget_id) deve REJEITAR!
+      await expect(
+        prisma.budget.update({
+          where: { id: "b1111111-1111-4111-8111-111111111111" },
+          data: {
+            approvedRevisionId: "r2222222-2222-4222-8222-222222222222", // Pertence a Budget 2!
+          },
+        })
+      ).rejects.toThrow();
+
+      // Apontar para Revision 1 (do próprio Budget 1) deve ter SUCESSO
+      const updated = await prisma.budget.update({
+        where: { id: "b1111111-1111-4111-8111-111111111111" },
+        data: {
+          approvedRevisionId: "r1111111-1111-4111-8111-111111111111",
+        },
+      });
+      expect(updated.approvedRevisionId).toBe("r1111111-1111-4111-8111-111111111111");
+    });
+
+    it("PO-LINEAGE-01: CHECK constraint rejeita budgetRevisionId preenchido com budgetId NULL", async () => {
+      // Tentativa de criar OP com budgetRevisionId preenchido mas budgetId nulo
+      // Viola a CHECK constraint: production_orders_budget_lineage_check
+      await expect(
+        prisma.productionOrder.create({
+          data: {
+            id: "po-invalid-lineage-check",
+            workspaceId: FIXTURES.wsAlpha,
+            code: "OP-CHECK-FAIL",
+            budgetId: null,
+            budgetRevisionId: "r1111111-1111-4111-8111-111111111111",
+            createdBy: FIXTURES.ownerA.userId,
+          },
+        })
+      ).rejects.toThrow();
+    });
+
+    it("PO-LINEAGE-02: Excluir BudgetRevision referenciada por ProductionOrder é bloqueado por ON DELETE RESTRICT", async () => {
+      // A OP 'po-valid-integrity' criada no teste PO-03 referencia revision1 (r1111111-1111-4111-8111-111111111111)
+      // Tentativa de deletar fisicamente a BudgetRevision deve ser sumariamente bloqueada pelo PostgreSQL
+      await expect(
+        prisma.budgetRevision.delete({
+          where: { id: "r1111111-1111-4111-8111-111111111111" },
+        })
+      ).rejects.toThrow();
+    });
   });
 
   // =========================================================================
@@ -445,7 +519,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
   // Status esperado: RED (falham pois endpoints e serviços ainda não existem)
   // =========================================================================
   describe("Grupo B: Comportamento de Negócio e Serviços (RED Baseline)", () => {
-    it("TENANT-01: Usuário do Workspace A não lê Budget do Workspace B", async () => {
+    it("TENANT-01: Usuário do Workspace A não lê Budget do Workspace B (404 Not Found para evitar enumeração)", async () => {
       const tokenA = signAccessToken({
         id: FIXTURES.techA1.userId,
         email: FIXTURES.techA1.email,
@@ -460,11 +534,17 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         },
       });
 
-      // Deve falhar com 403 Forbidden (ou 404 deny-by-default)
-      // Atualmente retorna 404 (Route not implemented) ou rejeição
-      expect(response.status).toBe(403);
-      const body = await response.json();
-      expect(body.message).toMatch(/Acesso negado|Forbidden/i);
+      // Padronização: lookup por ID de recurso de outro tenant retorna 404 Not Found
+      // Atualmente falha porque a rota não existe no Express (retorna HTML Cannot GET /...)
+      expect(response.status).toBe(404);
+      const text = await response.text();
+      let body: any = {};
+      try {
+        body = JSON.parse(text);
+      } catch {
+        // Express HTML 404
+      }
+      expect(body.message || "").toMatch(/não encontrado|not found/i);
     });
 
     it("TECH-OWN-01: Técnico vinculado com scope own não acessa Budget de outro técnico", async () => {

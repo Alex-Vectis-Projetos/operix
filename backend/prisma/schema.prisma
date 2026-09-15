@@ -587,7 +587,7 @@ model ProductionOrder {
 
   photos         ProductionPhoto[]
   budget         Budget?         @relation(fields: [budgetId], references: [id], onDelete: SetNull)
-  budgetRevision BudgetRevision? @relation("ProductionOrderRevision", fields: [budgetRevisionId, budgetId], references: [id, budgetId], onDelete: SetNull)
+  budgetRevision BudgetRevision? @relation("ProductionOrderRevision", fields: [budgetRevisionId, budgetId], references: [id, budgetId], onDelete: Restrict)
 
   @@index([workspaceId, status])
   @@map("production_orders")
@@ -634,8 +634,8 @@ model Budget {
   client           Client?           @relation(fields: [clientId], references: [id], onDelete: SetNull)
   createdBy        User              @relation("BudgetCreator", fields: [createdById], references: [id])
   technician       User?             @relation("BudgetTechnician", fields: [technicianUserId], references: [id])
-  currentRevision  BudgetRevision?   @relation("BudgetCurrentRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
-  approvedRevision BudgetRevision?   @relation("BudgetApprovedRevision", fields: [approvedRevisionId], references: [id], onDelete: SetNull)
+  currentRevision  BudgetRevision?   @relation("BudgetCurrentRevision", fields: [currentRevisionId, id], references: [id, budgetId], onDelete: Restrict)
+  approvedRevision BudgetRevision?   @relation("BudgetApprovedRevision", fields: [approvedRevisionId, id], references: [id, budgetId], onDelete: Restrict)
   revisions        BudgetRevision[]  @relation("BudgetRevisions")
   photos           BudgetPhoto[]
   productionOrder  ProductionOrder?
