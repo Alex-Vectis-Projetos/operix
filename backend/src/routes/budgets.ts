@@ -17,6 +17,17 @@ import {
   syncLocalBudgets,
 } from "../services/budgetService.js";
 import { validateTechnicianAssignment } from "./productionOrders.js";
+import multer from "multer";
+import { randomUUID } from "node:crypto";
+import { PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+  s3,
+  getBudgetPhotoStorageKey,
+  getPresignedDownloadUrl,
+  assertTenantStoragePath,
+} from "../lib/minio.js";
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 export const budgetsRouter = Router();
 
@@ -503,7 +514,7 @@ budgetsRouter.post("/:id/revisions/:revisionId/reject", async (req: Request, res
 
 /**
  * GET /api/budgets/:id/photos
- * Lista fotos anexadas ao orçamento.
+ * Lista fotos anexadas ao orçamento com presigned download URLs (TTL 15 min).
  */
 budgetsRouter.get("/:id/photos", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -519,30 +530,41 @@ budgetsRouter.get("/:id/photos", async (req: Request, res: Response, next: NextF
       return res.status(404).json({ message: "Orçamento não encontrado." });
     }
 
+    if (ctx) {
+      assertObjectAccess(ctx, budget);
+    }
+
     const photos = await prisma.budgetPhoto.findMany({
-      where: { budgetId },
+      where: { budgetId, workspaceId },
       orderBy: { createdAt: "desc" },
     });
 
-    return res.status(200).json({
-      photos: photos.map((p) => ({
-        id: p.id,
-        budget_id: p.budgetId,
-        budgetId: p.budgetId,
-        workspace_id: p.workspaceId,
-        workspaceId: p.workspaceId,
-        storage_path: p.storagePath,
-        storagePath: p.storagePath,
-        category: p.category,
-        caption: p.caption,
-        size_bytes: p.sizeBytes,
-        sizeBytes: p.sizeBytes,
-        uploaded_by: p.uploadedBy,
-        uploadedBy: p.uploadedBy,
-        created_at: p.createdAt.toISOString(),
-        createdAt: p.createdAt.toISOString(),
-      })),
-    });
+    const photosWithUrls = await Promise.all(
+      photos.map(async (p) => {
+        const url = await getPresignedDownloadUrl("production-photos", p.storagePath, 900);
+        return {
+          id: p.id,
+          budget_id: p.budgetId,
+          budgetId: p.budgetId,
+          workspace_id: p.workspaceId,
+          workspaceId: p.workspaceId,
+          storage_path: p.storagePath,
+          storagePath: p.storagePath,
+          url,
+          download_url: url,
+          category: p.category,
+          caption: p.caption,
+          size_bytes: p.sizeBytes,
+          sizeBytes: p.sizeBytes,
+          uploaded_by: p.uploadedBy,
+          uploadedBy: p.uploadedBy,
+          created_at: p.createdAt.toISOString(),
+          createdAt: p.createdAt.toISOString(),
+        };
+      })
+    );
+
+    return res.status(200).json({ photos: photosWithUrls });
   } catch (error) {
     return next(error);
   }
@@ -550,47 +572,154 @@ budgetsRouter.get("/:id/photos", async (req: Request, res: Response, next: NextF
 
 /**
  * POST /api/budgets/:id/photos
- * Registra metadados de foto após upload com storage_path canônico.
+ * Registra foto (multipart ou metadados) com chave canônica: tenants/{workspaceId}/budgets/{budgetId}/{photoId}.jpg
  */
-budgetsRouter.post("/:id/photos", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const budgetId = String(req.params.id);
-    const ctx = req.ctx;
-    if (!ctx?.activeWorkspaceId) {
-      return res.status(403).json({ message: "Workspace ativo não definido." });
-    }
+budgetsRouter.post(
+  "/:id/photos",
+  upload.single("file"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const budgetId = String(req.params.id);
+      const ctx = req.ctx;
+      if (!ctx?.activeWorkspaceId) {
+        return res.status(403).json({ message: "Workspace ativo não definido." });
+      }
 
-    const budget = await prisma.budget.findUnique({
-      where: { id: budgetId },
-    });
+      const budget = await prisma.budget.findUnique({
+        where: { id: budgetId },
+      });
 
-    if (!budget || budget.deletedAt || budget.workspaceId !== ctx.activeWorkspaceId) {
-      return res.status(404).json({ message: "Orçamento não encontrado." });
-    }
+      if (!budget || budget.deletedAt || budget.workspaceId !== ctx.activeWorkspaceId) {
+        return res.status(404).json({ message: "Orçamento não encontrado." });
+      }
 
-    const photoSchema = z.object({
-      storagePath: z.string().min(1, "storagePath é obrigatório."),
-      category: z.string().default("damage"),
-      caption: z.string().optional().nullable(),
-      sizeBytes: z.number().int().positive().optional(),
-    });
+      if (ctx) {
+        assertObjectAccess(ctx, budget);
+      }
 
-    const input = photoSchema.parse(req.body);
+      const file = req.file;
+      const b = req.body;
 
-    const photo = await prisma.budgetPhoto.create({
-      data: {
+      const photoId = randomUUID();
+      const ext = file?.originalname ? file.originalname.split(".").pop() || "jpg" : "jpg";
+      const canonicalKey = getBudgetPhotoStorageKey(
+        ctx.activeWorkspaceId,
         budgetId,
-        workspaceId: ctx.activeWorkspaceId,
-        storagePath: input.storagePath,
-        category: input.category,
-        caption: input.caption ?? null,
-        sizeBytes: input.sizeBytes,
-        uploadedBy: ctx.actorUserId,
-      },
-    });
+        photoId,
+        ext
+      ).storageKey;
 
-    return res.status(201).json({ photo });
-  } catch (error) {
-    return next(error);
+      let finalStoragePath = canonicalKey;
+      let finalSizeBytes = file?.size || Number(b.size_bytes || b.sizeBytes) || null;
+
+      if (file) {
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: "production-photos",
+            Key: canonicalKey,
+            Body: file.buffer,
+            ContentType: file.mimetype || "image/jpeg",
+          })
+        );
+      } else if (b.storage_path || b.storagePath) {
+        const suppliedPath = String(b.storage_path || b.storagePath);
+        assertTenantStoragePath(ctx, suppliedPath);
+        finalStoragePath = suppliedPath;
+      }
+
+      const photo = await prisma.budgetPhoto.create({
+        data: {
+          id: photoId,
+          budgetId,
+          workspaceId: ctx.activeWorkspaceId,
+          storagePath: finalStoragePath,
+          category: b.category || "damage",
+          caption: b.caption ?? null,
+          sizeBytes: finalSizeBytes,
+          uploadedBy: ctx.actorUserId,
+        },
+      });
+
+      const url = await getPresignedDownloadUrl("production-photos", finalStoragePath, 900);
+
+      return res.status(201).json({
+        photo: {
+          id: photo.id,
+          budgetId: photo.budgetId,
+          budget_id: photo.budgetId,
+          workspaceId: photo.workspaceId,
+          workspace_id: photo.workspaceId,
+          storagePath: photo.storagePath,
+          storage_path: photo.storagePath,
+          url,
+          download_url: url,
+          category: photo.category,
+          caption: photo.caption,
+          sizeBytes: photo.sizeBytes,
+          size_bytes: photo.sizeBytes,
+          uploadedBy: photo.uploadedBy,
+          uploaded_by: photo.uploadedBy,
+          createdAt: photo.createdAt.toISOString(),
+          created_at: photo.createdAt.toISOString(),
+        },
+      });
+    } catch (error) {
+      return next(error);
+    }
   }
-});
+);
+
+/**
+ * DELETE /api/budgets/:id/photos/:photoId
+ * Valida tenant, exclui registro no banco e objeto físico no MinIO.
+ */
+budgetsRouter.delete(
+  "/:id/photos/:photoId",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const budgetId = String(req.params.id);
+      const photoId = String(req.params.photoId);
+      const ctx = req.ctx;
+      if (!ctx?.activeWorkspaceId) {
+        return res.status(403).json({ message: "Workspace ativo não definido." });
+      }
+
+      const budget = await prisma.budget.findUnique({
+        where: { id: budgetId },
+      });
+
+      if (!budget || budget.deletedAt || budget.workspaceId !== ctx.activeWorkspaceId) {
+        return res.status(404).json({ message: "Orçamento não encontrado." });
+      }
+
+      if (ctx) {
+        assertObjectAccess(ctx, budget);
+      }
+
+      const photo = await prisma.budgetPhoto.findUnique({
+        where: { id: photoId },
+      });
+
+      if (!photo || photo.budgetId !== budgetId || photo.workspaceId !== ctx.activeWorkspaceId) {
+        return res.status(404).json({ message: "Foto não encontrada neste tenant." });
+      }
+
+      try {
+        await s3.send(
+          new DeleteObjectCommand({
+            Bucket: "production-photos",
+            Key: photo.storagePath,
+          })
+        );
+      } catch (s3Err) {
+        console.warn("[storage] Aviso: falha ao remover arquivo físico do MinIO:", s3Err);
+      }
+
+      await prisma.budgetPhoto.delete({ where: { id: photoId } });
+
+      return res.json({ deleted: 1, id: photoId });
+    } catch (error) {
+      return next(error);
+    }
+  }
+);

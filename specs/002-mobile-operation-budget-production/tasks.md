@@ -120,10 +120,12 @@
 ## T08: Governança de Storage e Upload de Fotos com UUIDs Canônicos (`storage.ts` e `productionPhotos.ts`)
 - **Descrição**: Refatorar rotas de storage e fotos para garantir autorização server-side, chaves no MinIO com UUIDs canônicos e eliminação de tokens JWT na query string.
 - **DoD**:
-  - [ ] Backend gera chaves com prefixo seguro `tenants/{workspaceId}/budgets/{budgetId}/{photoId}.jpg` e `tenants/{workspaceId}/production-orders/{orderId}/{photoId}.jpg`;
-  - [ ] URLs temporárias de download geradas via presigned URL (máximo 15 min de TTL);
-  - [ ] Upload e exclusão validam que a entidade pertence ao tenant ativo;
-  - [ ] Bloqueio comprovado de acesso cross-tenant a arquivos.
+  - [x] Backend gera chaves com prefixo seguro `tenants/{workspaceId}/budgets/{budgetId}/{photoId}.jpg` e `tenants/{workspaceId}/production-orders/{orderId}/{photoId}.jpg`;
+  - [x] URLs temporárias de download geradas via presigned URL (máximo 15 min de TTL);
+  - [x] Upload e exclusão validam que a entidade pertence ao tenant ativo;
+  - [x] Bloqueio comprovado de acesso cross-tenant a arquivos;
+  - [x] Eliminação de tokens JWT na query string.
+- **Status de Auditoria**: `T08 PASSED` (100% dos 7 testes de aceitação do Grupo E GREEN: `PHOTO-CANONICAL-01`, `PHOTO-CANONICAL-02`, `STORAGE-NO-JWT-QUERY-01`, `STORAGE-PRESIGNED-DOWNLOAD-01`, `STORAGE-CROSS-TENANT-BLOCK-01`, `PHOTO-CROSS-TENANT-DELETE-01`, `PHOTO-GET-PRESIGNED-01`. Total na suíte: 48/48 GREEN).
 
 ---
 

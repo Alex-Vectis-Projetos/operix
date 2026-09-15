@@ -183,22 +183,20 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
     const { productionOrdersRouter } = await import("../../backend/src/routes/productionOrders.js");
     app.use("/api/production-orders", productionOrdersRouter);
 
+    const { productionPhotosRouter } = await import("../../backend/src/routes/productionPhotos.js");
+    app.use("/api/production-orders/:orderId/photos", productionPhotosRouter);
+
+    const { storageRouter } = await import("../../backend/src/routes/storage.js");
+    app.use("/api/storage", storageRouter);
+
     const { workspaceRouter } = await import("../../backend/src/routes/workspaces.js");
     app.use("/api/workspaces", workspaceRouter);
 
     const { clientsRouter } = await import("../../backend/src/routes/clients.js");
     app.use("/api/clients", clientsRouter);
 
-    // Tentativa de carregar rota de orçamentos se existir
-    try {
-      // @ts-expect-error rota a ser implementada na Spec 002
-      const { budgetsRouter } = await import("../../backend/src/routes/budgets.js");
-      if (budgetsRouter) {
-        app.use("/api/budgets", budgetsRouter);
-      }
-    } catch {
-      // budgets.js ainda não existe (esperado para T02)
-    }
+    const { budgetsRouter } = await import("../../backend/src/routes/budgets.js");
+    app.use("/api/budgets", budgetsRouter);
 
     const { ZodError } = await import("zod");
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -1659,6 +1657,246 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       expect(response.status).toBe(403);
       const body = await response.json();
       expect(body.message).toContain("TECH-ASSIGN-01");
+    });
+  });
+
+  // =========================================================================
+  // Grupo E: Governança de Storage e Fotos com UUIDs Canônicos (T08)
+  // =========================================================================
+  describe("Grupo E: Governança de Storage e Fotos com UUIDs Canônicos (T08)", () => {
+    it("PHOTO-CANONICAL-01: Upload de foto para orçamento gera chave canônica com UUIDs e URL pré-assinada", async () => {
+      const budget = await prisma.budget.create({
+        data: {
+          id: "b-photo-canonical-01",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "ORC-PHOTO-01",
+          createdById: FIXTURES.ownerA.userId,
+        },
+      });
+
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/budgets/${budget.id}/photos`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          category: "damage",
+          caption: "Dano no parachoque",
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      const photo = body.photo;
+
+      // Valida padrão canônico: tenants/{workspaceId}/budgets/{budgetId}/{photoId}.jpg
+      const expectedPrefix = `tenants/${FIXTURES.wsAlpha}/budgets/${budget.id}/`;
+      expect(photo.storagePath).toMatch(new RegExp(`^${expectedPrefix}[a-f0-9\\-]+\\.jpg$`));
+      expect(photo.storagePath).not.toContain("ORC-PHOTO-01"); // Não usa código humano
+      expect(photo.url).toBeDefined();
+      expect(typeof photo.url).toBe("string");
+    });
+
+    it("PHOTO-CANONICAL-02: Upload de foto para OP gera chave canônica com UUIDs e URL pré-assinada", async () => {
+      const order = await prisma.productionOrder.create({
+        data: {
+          id: "po-photo-canonical-01",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "PO-PHOTO-01",
+          createdBy: FIXTURES.ownerA.userId,
+        },
+      });
+
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/production-orders/${order.id}/photos`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          category: "finished",
+          caption: "Veículo finalizado",
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const photo = await response.json();
+
+      // Valida padrão canônico: tenants/{workspaceId}/production-orders/{orderId}/{photoId}.jpg
+      const expectedPrefix = `tenants/${FIXTURES.wsAlpha}/production-orders/${order.id}/`;
+      expect(photo.storagePath).toMatch(new RegExp(`^${expectedPrefix}[a-f0-9\\-]+\\.jpg$`));
+      expect(photo.storagePath).not.toContain("PO-PHOTO-01");
+      expect(photo.url).toBeDefined();
+      expect(typeof photo.url).toBe("string");
+    });
+
+    it("STORAGE-NO-JWT-QUERY-01: Acesso com ?token= na query string é recusado (eliminação de JWT em URL)", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      // Tentativa de obter arquivo privado passando JWT na query string sem header Authorization
+      const response = await fetch(
+        `${baseUrl}/api/storage/file/production-photos/tenants/${FIXTURES.wsAlpha}/photo.jpg?token=${tokenA}`
+      );
+
+      // Rejeita 401 porque tokens JWT em query string foram banidos por segurança
+      expect(response.status).toBe(401);
+    });
+
+    it("STORAGE-PRESIGNED-DOWNLOAD-01: POST /api/storage/presigned-download gera URL assinada com TTL de 15 min", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/storage/presigned-download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket: "production-photos",
+          path: `tenants/${FIXTURES.wsAlpha}/budgets/b-test/photo.jpg`,
+          expiresInSeconds: 900,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.url).toBeDefined();
+      expect(typeof data.url).toBe("string");
+      expect(data.expiresInSeconds).toBe(900);
+    });
+
+    it("STORAGE-CROSS-TENANT-BLOCK-01: Usuário do Workspace A tentando obter presigned download de arquivo do Workspace B recebe 403", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      // Usuário de Alpha tenta assinar arquivo de Bravo
+      const response = await fetch(`${baseUrl}/api/storage/presigned-download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket: "production-photos",
+          path: `tenants/${FIXTURES.wsBravo}/budgets/b-bravo/photo.jpg`,
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.message).toContain("outro workspace");
+    });
+
+    it("PHOTO-CROSS-TENANT-DELETE-01: Usuário do Workspace A tentando deletar foto de OP do Workspace B recebe 404", async () => {
+      const orderBravo = await prisma.productionOrder.create({
+        data: {
+          id: "po-photo-bravo-01",
+          workspaceId: FIXTURES.wsBravo,
+          code: "PO-BRAVO-DEL",
+          createdBy: FIXTURES.ownerB.userId,
+        },
+      });
+
+      const photoBravo = await prisma.productionPhoto.create({
+        data: {
+          id: "ph-bravo-del-01",
+          productionOrderId: orderBravo.id,
+          workspaceId: FIXTURES.wsBravo,
+          storagePath: `tenants/${FIXTURES.wsBravo}/production-orders/${orderBravo.id}/ph-01.jpg`,
+          category: "damage",
+          uploadedBy: FIXTURES.ownerB.userId,
+        },
+      });
+
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(
+        `${baseUrl}/api/production-orders/${orderBravo.id}/photos/${photoBravo.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${tokenA}`,
+            "X-Workspace-Id": FIXTURES.wsAlpha,
+          },
+        }
+      );
+
+      // Rejeita 404 (Anti-enumeração deny-by-default)
+      expect(response.status).toBe(404);
+    });
+
+    it("PHOTO-GET-PRESIGNED-01: Listagem de fotos inclui URLs pré-assinadas temporárias", async () => {
+      const budget = await prisma.budget.create({
+        data: {
+          id: "b-photo-list-01",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "ORC-LIST-PH",
+          createdById: FIXTURES.ownerA.userId,
+        },
+      });
+
+      await prisma.budgetPhoto.create({
+        data: {
+          id: "ph-budget-list-01",
+          budgetId: budget.id,
+          workspaceId: FIXTURES.wsAlpha,
+          storagePath: `tenants/${FIXTURES.wsAlpha}/budgets/${budget.id}/ph-list-01.jpg`,
+          category: "damage",
+          uploadedBy: FIXTURES.ownerA.userId,
+        },
+      });
+
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/budgets/${budget.id}/photos`, {
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.photos).toHaveLength(1);
+      expect(data.photos[0].url).toBeDefined();
+      expect(typeof data.photos[0].url).toBe("string");
+      expect(data.photos[0].download_url).toBe(data.photos[0].url);
     });
   });
 });

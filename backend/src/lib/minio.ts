@@ -3,8 +3,13 @@ import {
   CreateBucketCommand,
   HeadBucketCommand,
   PutBucketPolicyCommand,
+  GetObjectCommand,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
+import { ForbiddenError } from "./objectAuth.js";
+import type { RequestContext } from "../middleware/requestContext.js";
 
 export const s3 = new S3Client({
   endpoint: env.MINIO_ENDPOINT,
@@ -68,6 +73,93 @@ export async function ensureBuckets(): Promise<void> {
     }
   }
   console.log("[minio] buckets verificados");
+}
+
+/**
+ * Gera caminho determinístico e canônico para foto de orçamento:
+ * tenants/{workspaceId}/budgets/{budgetId}/{photoId}.jpg
+ */
+export function getBudgetPhotoStorageKey(
+  workspaceId: string,
+  budgetId: string,
+  photoId: string = randomUUID(),
+  extension: string = "jpg"
+): { photoId: string; storageKey: string } {
+  const ext = extension.replace(/^\./, "") || "jpg";
+  return {
+    photoId,
+    storageKey: `tenants/${workspaceId}/budgets/${budgetId}/${photoId}.${ext}`,
+  };
+}
+
+/**
+ * Gera caminho determinístico e canônico para foto de ordem de produção:
+ * tenants/{workspaceId}/production-orders/{orderId}/{photoId}.jpg
+ */
+export function getProductionPhotoStorageKey(
+  workspaceId: string,
+  orderId: string,
+  photoId: string = randomUUID(),
+  extension: string = "jpg"
+): { photoId: string; storageKey: string } {
+  const ext = extension.replace(/^\./, "") || "jpg";
+  return {
+    photoId,
+    storageKey: `tenants/${workspaceId}/production-orders/${orderId}/${photoId}.${ext}`,
+  };
+}
+
+/**
+ * Gera caminho determinístico e canônico para assinatura digital:
+ * tenants/{workspaceId}/budgets/{budgetId}/signatures/{revisionId}.png
+ */
+export function getSignatureStorageKey(
+  workspaceId: string,
+  budgetId: string,
+  revisionId: string
+): string {
+  return `tenants/${workspaceId}/budgets/${budgetId}/signatures/${revisionId}.png`;
+}
+
+/**
+ * Gera URL pré-assinada de download temporária no MinIO/S3 (TTL máximo de 15 minutos = 900s).
+ * Dispensa passagem de token JWT na query string.
+ */
+export async function getPresignedDownloadUrl(
+  bucket: string,
+  key: string,
+  expiresInSeconds: number = 900
+): Promise<string> {
+  try {
+    const command = new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    });
+    return await getSignedUrl(s3, command, { expiresIn: expiresInSeconds });
+  } catch (err) {
+    console.error("[minio] getPresignedDownloadUrl error:", err);
+    return "";
+  }
+}
+
+/**
+ * Garante que um caminho de storage sob o prefixo 'tenants/{wsId}/...' pertença
+ * estritamente ao workspace ativo no RequestContext.
+ */
+export function assertTenantStoragePath(ctx: RequestContext, storagePath: string): void {
+  if (!ctx.activeWorkspaceId) {
+    throw new ForbiddenError("Workspace ativo não definido no contexto.");
+  }
+
+  const parts = storagePath.split("/");
+  if (parts[0] === "tenants" && parts[1]) {
+    const pathWorkspaceId = parts[1];
+    if (pathWorkspaceId !== ctx.activeWorkspaceId) {
+      throw new ForbiddenError(
+        "Acesso negado: o arquivo solicitado pertence a outro workspace."
+      );
+    }
+  }
 }
 
 export { PUBLIC_BUCKETS };
