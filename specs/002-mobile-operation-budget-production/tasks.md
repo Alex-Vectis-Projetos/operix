@@ -77,12 +77,13 @@
 ## T05: Serviço de Domínio de Orçamentos (`budgetService.ts`)
 - **Descrição**: Implementar `backend/src/services/budgetService.ts` com a lógica de negócio: cálculo decimal, geração concorrente segura de código (`code`), imutabilidade de revisões aprovadas, auditoria, whitelist de campos de re-aprovação e aprovação transacional idempotente (1:0..1 com `ProductionOrder`).
 - **DoD**:
-  - [ ] Geração atômica de código sequencial por workspace;
-  - [ ] Criação de revisão rascunho ao editar orçamento aprovado sem mutar a versão anterior;
-  - [ ] Aprovação transacional (`prisma.$transaction`) exigindo `revisionId` explícito (409 em caso de estado divergente);
-  - [ ] Re-aprovação aplica estritamente a whitelist permitida sem sobrescrever status operacional, timestamps de execução, apontamento de técnico ou fotos;
-  - [ ] Rejeição de aprovação com erro 422 se a OP já estiver finalizada (`delivered`);
-  - [ ] Todos os cálculos monetários processados com `Prisma.Decimal`.
+  - [x] Geração atômica de código sequencial por workspace (`generateBudgetCode`);
+  - [x] Criação de revisão rascunho ao editar orçamento aprovado sem mutar a versão anterior (`updateBudgetRevision`);
+  - [x] Aprovação transacional (`prisma.$transaction`) exigindo `revisionId` explícito (409 em caso de estado divergente);
+  - [x] Re-aprovação aplica estritamente a whitelist permitida sem sobrescrever status operacional, timestamps de execução, apontamento de técnico ou fotos (`approveBudgetRevision`);
+  - [x] Rejeição de aprovação com erro 422 se a OP já estiver finalizada (`delivered`);
+  - [x] Todos os cálculos monetários processados com `Prisma.Decimal` (`calculateRevisionTotals`).
+- **Status de Auditoria**: `T05 PASSED` (8 testes unitários e comportamentais de domínio no Grupo C 100% GREEN: `DECIMAL-01`, `SERVICE-BUDGET-01`, `SERVICE-CLIENT-CROSS-01`, `SERVICE-REVISION-IMMUTABLE-01`, `SERVICE-APPROVE-TRANSACTION-01`, `SERVICE-DELIVERED-LOCK-01`, `SERVICE-REJECT-01`, `SERVICE-SYNC-LOCAL-01`).
 
 ---
 

@@ -4,7 +4,21 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import express, { type Request, type Response, type NextFunction } from "../../backend/node_modules/express/index.js";
 import { prisma } from "../../backend/src/lib/prisma.js";
 import { signAccessToken } from "../../backend/src/lib/jwt.js";
-import { ForbiddenError } from "../../backend/src/lib/objectAuth.js";
+import {
+  ForbiddenError,
+  NotFoundError,
+  ConflictError,
+  UnprocessableEntityError,
+} from "../../backend/src/lib/objectAuth.js";
+import {
+  Prisma,
+  calculateRevisionTotals,
+  createBudget,
+  updateBudgetRevision,
+  approveBudgetRevision,
+  rejectBudgetRevision,
+  syncLocalBudgets,
+} from "../../backend/src/services/budgetService.js";
 
 // Configurações de ambiente mínimas para testes
 process.env.NODE_ENV = "test";
@@ -674,6 +688,272 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           where: { id: "r1111111-1111-4111-8111-111111111111" },
         })
       ).rejects.toThrow();
+    });
+  });
+
+  // =========================================================================
+  // GRUPO C: SERVIÇO DE DOMÍNIO DE ORÇAMENTOS - budgetService (T05)
+  // Status esperado: GREEN (testa regras de negócio, cálculos, atomicidade e idempotência)
+  // =========================================================================
+  describe("Grupo C: Serviço de Domínio de Orçamentos (T05)", () => {
+    it("DECIMAL-01: calculateRevisionTotals processa cálculos monetários com precisão Decimal e 2 casas", () => {
+      const totals = calculateRevisionTotals({
+        grossTotal: 1000.0,
+        discountPct: 10.0,
+        taxPct: 23.0,
+      });
+
+      expect(totals.grossTotal).toBeInstanceOf(Prisma.Decimal);
+      expect(totals.grossTotal.toString()).toBe("1000");
+      expect(totals.discountTotal.toString()).toBe("100");
+      expect(totals.netTotal.toString()).toBe("900");
+      expect(totals.taxTotal.toString()).toBe("207");
+      expect(totals.finalTotal.toString()).toBe("1107");
+    });
+
+    it("SERVICE-BUDGET-01: createBudget gera agregador Budget, Revision 1 (draft) e código sequencial", async () => {
+      const res = await createBudget({
+        workspaceId: FIXTURES.wsAlpha,
+        createdById: FIXTURES.ownerA.userId,
+        clientId: FIXTURES.clientA,
+        clientName: "Cliente Alpha 1",
+        vehiclePlate: "SVC-001",
+        grossTotal: 500.0,
+        discountPct: 5.0,
+        taxPct: 23.0,
+      });
+
+      expect(res.budget).toBeDefined();
+      expect(res.budget.code).toMatch(/^ORC-\d{4}-\d{4}$/);
+      expect(res.budget.currentRevisionNumber).toBe(1);
+      expect(res.revision.status).toBe("draft");
+      expect(res.budget.currentRevisionId).toBe(res.revision.id);
+      expect(res.budget.approvedRevisionId).toBeNull();
+    });
+
+    it("SERVICE-CLIENT-CROSS-01: createBudget rejeita clientId pertencente a outro workspace", async () => {
+      await expect(
+        createBudget({
+          workspaceId: FIXTURES.wsAlpha,
+          createdById: FIXTURES.ownerA.userId,
+          clientId: FIXTURES.clientB, // Pertence a wsBravo
+          vehiclePlate: "SVC-CROSS",
+        })
+      ).rejects.toThrow(ForbiddenError);
+    });
+
+    it("SERVICE-REVISION-IMMUTABLE-01: updateBudgetRevision edita draft in-place e gera nova revisão se aprovada", async () => {
+      // 1. Cria orçamento
+      const { budget, revision } = await createBudget({
+        workspaceId: FIXTURES.wsAlpha,
+        createdById: FIXTURES.ownerA.userId,
+        clientId: FIXTURES.clientA,
+        vehiclePlate: "IMMUT-01",
+        grossTotal: 200.0,
+      });
+
+      // 2. Edita draft -> in-place
+      const draftUpdate = await updateBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        revision.id,
+        FIXTURES.ownerA.userId,
+        { grossTotal: 250.0 }
+      );
+      expect(draftUpdate.isNewRevision).toBe(false);
+      expect(draftUpdate.revision.id).toBe(revision.id);
+      expect(draftUpdate.revision.finalTotal.toString()).toBe("250");
+
+      // 3. Aprova revisão
+      const approved = await approveBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        revision.id,
+        FIXTURES.ownerA.userId
+      );
+      expect(approved.revision.status).toBe("approved");
+
+      // 4. Edição subsequente após aprovação -> FORK da revisão 2
+      const postApprUpdate = await updateBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        revision.id,
+        FIXTURES.ownerA.userId,
+        { grossTotal: 400.0 }
+      );
+      expect(postApprUpdate.isNewRevision).toBe(true);
+      expect(postApprUpdate.revision.revisionNumber).toBe(2);
+      expect(postApprUpdate.revision.status).toBe("draft");
+      expect(postApprUpdate.revision.finalTotal.toString()).toBe("400");
+      expect(postApprUpdate.budget.currentRevisionId).toBe(postApprUpdate.revision.id);
+      expect(postApprUpdate.budget.approvedRevisionId).toBe(revision.id);
+
+      // Revisão 1 permanece aprovada e intacta
+      const rev1 = await prisma.budgetRevision.findUnique({ where: { id: revision.id } });
+      expect(rev1?.status).toBe("approved");
+      expect(rev1?.finalTotal.toString()).toBe("250");
+    });
+
+    it("SERVICE-APPROVE-TRANSACTION-01: approveBudgetRevision cria OP e re-aprovação atualiza mesma OP via whitelist", async () => {
+      // 1. Cria orçamento com revisão 1
+      const { budget, revision: rev1 } = await createBudget({
+        workspaceId: FIXTURES.wsAlpha,
+        createdById: FIXTURES.ownerA.userId,
+        clientId: FIXTURES.clientA,
+        vehiclePlate: "PO-TRAN-01",
+        grossTotal: 300.0,
+      });
+
+      // 2. Primeira aprovação -> Cria ProductionOrder (1:0..1)
+      const resApprove1 = await approveBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        rev1.id,
+        FIXTURES.ownerA.userId
+      );
+      expect(resApprove1.productionOrder).toBeDefined();
+      expect(resApprove1.productionOrder.budgetId).toBe(budget.id);
+      expect(resApprove1.productionOrder.budgetRevisionId).toBe(rev1.id);
+      expect(resApprove1.productionOrder.status).toBe("in_production");
+
+      const poId = resApprove1.productionOrder.id;
+
+      // 3. Cria revisão 2
+      const resRev2 = await updateBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        rev1.id,
+        FIXTURES.ownerA.userId,
+        { grossTotal: 600.0, vehicleSnapshot: { plate: "PO-TRAN-01-REV2" } }
+      );
+
+      // 4. Re-aprovação da revisão 2 -> Atualiza a MESMA OP conforme whitelist
+      const resApprove2 = await approveBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        resRev2.revision.id,
+        FIXTURES.ownerA.userId
+      );
+      expect(resApprove2.productionOrder.id).toBe(poId);
+      expect(resApprove2.productionOrder.budgetRevisionId).toBe(resRev2.revision.id);
+      expect(resApprove2.productionOrder.status).toBe("in_production"); // status preservado
+      expect(resApprove2.productionOrder.licensePlate).toBe("PO-TRAN-01-REV2"); // whitelist permitida
+
+      // Confirma que não existe mais de 1 OP para o mesmo budget
+      const poCount = await prisma.productionOrder.count({ where: { budgetId: budget.id } });
+      expect(poCount).toBe(1);
+    });
+
+    it("SERVICE-DELIVERED-LOCK-01: approveBudgetRevision em OP com status delivered retorna erro 422 UnprocessableEntity", async () => {
+      const { budget, revision } = await createBudget({
+        workspaceId: FIXTURES.wsAlpha,
+        createdById: FIXTURES.ownerA.userId,
+        vehiclePlate: "DELIV-01",
+        grossTotal: 150.0,
+      });
+
+      const appr = await approveBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        revision.id,
+        FIXTURES.ownerA.userId
+      );
+
+      // Simula entrega finalizada na oficina
+      await prisma.productionOrder.update({
+        where: { id: appr.productionOrder.id },
+        data: { status: "delivered", deliveredAt: new Date() },
+      });
+
+      // Cria revisão 2
+      const rev2 = await updateBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        revision.id,
+        FIXTURES.ownerA.userId,
+        { grossTotal: 300.0 }
+      );
+
+      // Tentativa de aprovar orçamento com OP já entregue deve lançar UnprocessableEntityError (422)
+      await expect(
+        approveBudgetRevision(
+          FIXTURES.wsAlpha,
+          budget.id,
+          rev2.revision.id,
+          FIXTURES.ownerA.userId
+        )
+      ).rejects.toThrow(UnprocessableEntityError);
+    });
+
+    it("SERVICE-REJECT-01: rejectBudgetRevision registra motivo e bloqueia rejeição de revisão aprovada", async () => {
+      const { budget, revision } = await createBudget({
+        workspaceId: FIXTURES.wsAlpha,
+        createdById: FIXTURES.ownerA.userId,
+        vehiclePlate: "REJ-01",
+      });
+
+      const rejected = await rejectBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        revision.id,
+        FIXTURES.ownerA.userId,
+        "Valor considerado elevado pelo perito"
+      );
+
+      expect(rejected.revision.status).toBe("rejected");
+      expect((rejected.revision.rejection as any).reason).toBe("Valor considerado elevado pelo perito");
+
+      // Cria e aprova nova revisão para testar bloqueio
+      const rev2 = await updateBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        revision.id,
+        FIXTURES.ownerA.userId,
+        { grossTotal: 50.0 }
+      );
+      await approveBudgetRevision(
+        FIXTURES.wsAlpha,
+        budget.id,
+        rev2.revision.id,
+        FIXTURES.ownerA.userId
+      );
+
+      // Tentar rejeitar revisão aprovada deve lançar ConflictError (409)
+      await expect(
+        rejectBudgetRevision(
+          FIXTURES.wsAlpha,
+          budget.id,
+          rev2.revision.id,
+          FIXTURES.ownerA.userId,
+          "Motivo tardio"
+        )
+      ).rejects.toThrow(ConflictError);
+    });
+
+    it("SERVICE-SYNC-LOCAL-01: syncLocalBudgets migra orçamentos legados com idempotência concorrente", async () => {
+      const localItems = [
+        { legacyLocalId: "local-sync-uuid-1", clientName: "Cliente Local 1", vehiclePlate: "LOC-001", grossTotal: 120.0 },
+        { legacyLocalId: "local-sync-uuid-2", clientName: "Cliente Local 2", vehiclePlate: "LOC-002", grossTotal: 250.0 },
+      ];
+
+      // 1. Primeira sincronização
+      const sync1 = await syncLocalBudgets(FIXTURES.wsAlpha, FIXTURES.ownerA.userId, localItems);
+      expect(sync1["local-sync-uuid-1"]).toBeDefined();
+      expect(sync1["local-sync-uuid-2"]).toBeDefined();
+
+      // 2. Segunda sincronização com os mesmos itens (retentativa / concorrência)
+      const sync2 = await syncLocalBudgets(FIXTURES.wsAlpha, FIXTURES.ownerA.userId, localItems);
+      expect(sync2["local-sync-uuid-1"]).toBe(sync1["local-sync-uuid-1"]);
+      expect(sync2["local-sync-uuid-2"]).toBe(sync1["local-sync-uuid-2"]);
+
+      // Confirma que não foram criados orçamentos duplicados no banco
+      const count = await prisma.budget.count({
+        where: {
+          workspaceId: FIXTURES.wsAlpha,
+          legacyLocalId: { in: ["local-sync-uuid-1", "local-sync-uuid-2"] },
+        },
+      });
+      expect(count).toBe(2);
     });
   });
 

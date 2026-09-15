@@ -16,6 +16,22 @@ export class NotFoundError extends Error {
   }
 }
 
+export class ConflictError extends Error {
+  readonly statusCode = 409;
+  constructor(message = "Conflito de estado do recurso.") {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
+export class UnprocessableEntityError extends Error {
+  readonly statusCode = 422;
+  constructor(message = "Entidade improcessável.") {
+    super(message);
+    this.name = "UnprocessableEntityError";
+  }
+}
+
 /**
  * Valida se o targetWorkspaceId corresponde ao workspace ativo resolvido no servidor.
  * Deny-by-default contra BOLA/IDOR horizontal (S5A-003).
@@ -46,6 +62,7 @@ export function assertObjectAccess<
   T extends {
     workspaceId?: string | null;
     assignedUserId?: string | null;
+    technicianUserId?: string | null;
     technicianPersonId?: string | null;
   }
 >(
@@ -66,7 +83,9 @@ export function assertObjectAccess<
     (ctx.membershipRole === "technician" && ctx.scope === "workspace");
 
   if (mustEnforceOwn) {
-    const matchesUser = resource.assignedUserId && resource.assignedUserId === ctx.actorUserId;
+    const matchesUser =
+      (resource.assignedUserId && resource.assignedUserId === ctx.actorUserId) ||
+      (resource.technicianUserId && resource.technicianUserId === ctx.actorUserId);
     const matchesPerson =
       ctx.technicianPersonId &&
       resource.technicianPersonId &&
