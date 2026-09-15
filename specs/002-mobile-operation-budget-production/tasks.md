@@ -108,11 +108,12 @@
 ## T07: Proteção e Adequação de `productionOrders.ts` ao RequestContext
 - **Descrição**: Refatorar `backend/src/routes/productionOrders.ts` para eliminar a dependência de `workspace_id` do cliente e aplicar `resolveRequestContext`.
 - **DoD**:
-  - [ ] `resolveRequestContext` aplicado em 100% das rotas;
-  - [ ] `GET /` e `POST /` utilizam `req.ctx.activeWorkspaceId`;
-  - [ ] `PATCH /:id` e `DELETE /:id` validam tenant e permissão de objeto;
-  - [ ] Validação das regras de atribuição de técnico `TECH-ASSIGN-01` e `TECH-ASSIGN-02`;
-  - [ ] Suporte à criação de ordem direta com `budgetId: null`.
+  - [x] `resolveRequestContext` aplicado em 100% das rotas;
+  - [x] `GET /` e `POST /` utilizam `req.ctx.activeWorkspaceId`;
+  - [x] `PATCH /:id` e `DELETE /:id` validam tenant e permissão de objeto;
+  - [x] Validação das regras de atribuição de técnico `TECH-ASSIGN-01` e `TECH-ASSIGN-02`;
+  - [x] Suporte à criação de ordem direta com `budgetId: null`.
+- **Status de Auditoria**: `T07 PASSED` (100% dos 10 testes de aceitação comportamental do Grupo D GREEN: `PO-CTX-01`, `PO-CTX-02`, `PO-DIRECT-01`, `TECH-ASSIGN-01`, `TECH-ASSIGN-01-SELF`, `TECH-ASSIGN-02`, `TECH-ASSIGN-03`, `PO-TENANT-ISOLATION-01`, `PO-TECH-DELETE-FORBIDDEN`, `BUDGET-TECH-ASSIGN-01`. Total na suíte: 41/41 GREEN).
 
 ---
 

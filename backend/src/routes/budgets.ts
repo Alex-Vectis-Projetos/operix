@@ -16,6 +16,7 @@ import {
   rejectBudgetRevision,
   syncLocalBudgets,
 } from "../services/budgetService.js";
+import { validateTechnicianAssignment } from "./productionOrders.js";
 
 export const budgetsRouter = Router();
 
@@ -361,10 +362,16 @@ budgetsRouter.post("/", async (req: Request, res: Response, next: NextFunction) 
 
     const input = createBudgetSchema.parse(req.body);
 
+    const { technicianUserId } = await validateTechnicianAssignment(
+      ctx,
+      input.technicianUserId
+    );
+
     const { budget, revision } = await createBudget({
       workspaceId: ctx.activeWorkspaceId,
       createdById: ctx.actorUserId,
       ...input,
+      technicianUserId,
     });
 
     const fullBudget = await prisma.budget.findUnique({

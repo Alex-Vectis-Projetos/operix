@@ -1,6 +1,12 @@
-import { Router, type Response } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
+import { requireAuth } from "../middleware/auth.js";
+import { resolveRequestContext, type RequestContext } from "../middleware/requestContext.js";
+import {
+  ForbiddenError,
+  NotFoundError,
+  assertObjectAccess,
+} from "../lib/objectAuth.js";
 import {
   operationalWeekOf,
   flattenServicesFromBudgetNotes,
@@ -9,22 +15,32 @@ import {
 
 export const productionOrdersRouter = Router();
 
+productionOrdersRouter.use(requireAuth);
+productionOrdersRouter.use(resolveRequestContext);
+
 function genCode(): string {
   return `PO-${Date.now().toString(36).toUpperCase()}`;
 }
 
 function mapOrder(o: any) {
+  if (!o) return null;
   return {
     id: o.id,
     workspace_id: o.workspaceId,
+    workspaceId: o.workspaceId,
     code: o.code,
     client_id: o.clientId,
+    clientId: o.clientId,
     client_name: o.clientName,
+    clientName: o.clientName,
     technician_user_id: o.technicianUserId,
+    technicianUserId: o.technicianUserId,
     technician_name: o.technicianName,
+    technicianName: o.technicianName,
     platform: o.platform,
     insurer: o.insurer,
     license_plate: o.licensePlate,
+    licensePlate: o.licensePlate,
     vin: o.vin,
     brand: o.brand,
     model: o.model,
@@ -33,14 +49,28 @@ function mapOrder(o: any) {
     priority: o.priority,
     status: o.status,
     commercial_status: o.commercialStatus,
+    commercialStatus: o.commercialStatus,
     service_order_id: o.serviceOrderId,
-    due_at: o.dueAt?.toISOString() ?? null,
-    started_at: o.startedAt?.toISOString() ?? null,
-    finished_at: o.finishedAt?.toISOString() ?? null,
-    delivered_at: o.deliveredAt?.toISOString() ?? null,
+    serviceOrderId: o.serviceOrderId,
+    budget_id: o.budgetId,
+    budgetId: o.budgetId,
+    budget_revision_id: o.budgetRevisionId,
+    budgetRevisionId: o.budgetRevisionId,
+    due_at: o.dueAt?.toISOString?.() ?? (o.dueAt ? String(o.dueAt) : null),
+    dueAt: o.dueAt?.toISOString?.() ?? (o.dueAt ? String(o.dueAt) : null),
+    started_at: o.startedAt?.toISOString?.() ?? (o.startedAt ? String(o.startedAt) : null),
+    startedAt: o.startedAt?.toISOString?.() ?? (o.startedAt ? String(o.startedAt) : null),
+    finished_at: o.finishedAt?.toISOString?.() ?? (o.finishedAt ? String(o.finishedAt) : null),
+    finishedAt: o.finishedAt?.toISOString?.() ?? (o.finishedAt ? String(o.finishedAt) : null),
+    delivered_at: o.deliveredAt?.toISOString?.() ?? (o.deliveredAt ? String(o.deliveredAt) : null),
+    deliveredAt: o.deliveredAt?.toISOString?.() ?? (o.deliveredAt ? String(o.deliveredAt) : null),
     created_by: o.createdBy,
-    created_at: o.createdAt.toISOString(),
-    updated_at: o.updatedAt.toISOString(),
+    createdBy: o.createdBy,
+    created_at: o.createdAt?.toISOString?.() ?? (o.createdAt ? String(o.createdAt) : null),
+    createdAt: o.createdAt?.toISOString?.() ?? (o.createdAt ? String(o.createdAt) : null),
+    updated_at: o.updatedAt?.toISOString?.() ?? (o.updatedAt ? String(o.updatedAt) : null),
+    updatedAt: o.updatedAt?.toISOString?.() ?? (o.updatedAt ? String(o.updatedAt) : null),
+    photos: Array.isArray(o.photos) ? o.photos : undefined,
   };
 }
 
@@ -48,6 +78,99 @@ function parseDate(v: unknown): Date | null {
   if (!v || v === "") return null;
   const d = new Date(v as string);
   return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Validação e aplicação das regras de atribuição de técnico (TECH-ASSIGN-01 e TECH-ASSIGN-02).
+ */
+export async function validateTechnicianAssignment(
+  ctx: RequestContext,
+  targetTechnicianUserId?: string | null
+): Promise<{ technicianUserId: string | null; technicianName: string | null }> {
+  // Regra TECH-ASSIGN-01: Se o usuário logado for técnico no workspace
+  if (ctx.membershipRole === "technician") {
+    if (targetTechnicianUserId && targetTechnicianUserId !== ctx.actorUserId) {
+      throw new ForbiddenError(
+        "Técnicos só podem atribuir ordens de produção a si mesmos (TECH-ASSIGN-01)."
+      );
+    }
+    // Auto-atribuição forçada para o próprio técnico
+    const appUser = await prisma.appUser.findFirst({
+      where: { authUserId: ctx.actorUserId },
+      include: { user: { select: { fullName: true } } },
+    });
+    return {
+      technicianUserId: ctx.actorUserId,
+      technicianName: appUser?.name || appUser?.user?.fullName || null,
+    };
+  }
+
+  // Se não foi informado técnico por admin/owner:
+  if (!targetTechnicianUserId) {
+    return { technicianUserId: null, technicianName: null };
+  }
+
+  // Se for owner/admin atribuindo a si mesmo:
+  if (targetTechnicianUserId === ctx.actorUserId) {
+    const appUser = await prisma.appUser.findFirst({
+      where: { authUserId: ctx.actorUserId },
+      include: { user: { select: { fullName: true } } },
+    });
+    return {
+      technicianUserId: ctx.actorUserId,
+      technicianName: appUser?.name || appUser?.user?.fullName || null,
+    };
+  }
+
+  // Regra TECH-ASSIGN-02: Apenas owner ou admin podem atribuir outros técnicos membros do mesmo workspace
+  if (
+    ctx.membershipRole !== "owner" &&
+    ctx.membershipRole !== "admin" &&
+    ctx.platformRole !== "platform_admin"
+  ) {
+    throw new ForbiddenError("Apenas administradores ou proprietários podem atribuir técnicos.");
+  }
+
+  // Localiza o AppUser do técnico alvo
+  const targetAppUser = await prisma.appUser.findFirst({
+    where: {
+      OR: [
+        { authUserId: targetTechnicianUserId },
+        { id: targetTechnicianUserId },
+      ],
+    },
+    include: { user: { select: { fullName: true } } },
+  });
+
+  if (!targetAppUser) {
+    throw new ForbiddenError("Técnico selecionado não é membro ativo do workspace.");
+  }
+
+  // Valida se o técnico alvo é membro ativo ou owner do workspace ativo
+  const [membership, workspace] = await Promise.all([
+    prisma.membership.findFirst({
+      where: {
+        workspaceId: ctx.activeWorkspaceId,
+        userId: targetAppUser.id,
+        status: "active",
+      },
+    }),
+    prisma.workspace.findFirst({
+      where: {
+        id: ctx.activeWorkspaceId,
+        ownerUserId: targetAppUser.id,
+      },
+    }),
+  ]);
+
+  if (!membership && !workspace) {
+    throw new ForbiddenError("Técnico selecionado não é membro ativo do workspace.");
+  }
+
+  return {
+    technicianUserId: targetAppUser.authUserId,
+    technicianName: targetAppUser.name || targetAppUser.user?.fullName || null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -528,108 +651,280 @@ async function upsertWeeklogFromProduction(
   }
 }
 
-// GET /production-orders?workspace_id=&status=&technician_user_id=
-productionOrdersRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { workspace_id, status, technician_user_id } = req.query as Record<string, string | undefined>;
-  if (!workspace_id) return res.status(400).json({ message: "workspace_id é obrigatório." });
+// GET /api/production-orders
+productionOrdersRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
 
-  const orders = await prisma.productionOrder.findMany({
-    where: {
-      workspaceId: workspace_id,
-      ...(status ? { status } : {}),
-      ...(technician_user_id ? { technicianUserId: technician_user_id } : {}),
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  return res.json(orders.map(mapOrder));
+    const { status, technician_user_id, technicianUserId, clientId, client_id, q, priority } =
+      req.query as Record<string, string | undefined>;
+
+    const isTechnicianScope =
+      ctx.membershipRole === "technician" && ctx.scope === "workspace";
+
+    const techFilter = isTechnicianScope
+      ? ctx.actorUserId
+      : (technician_user_id || technicianUserId);
+
+    const clientFilter = clientId || client_id;
+
+    const orders = await prisma.productionOrder.findMany({
+      where: {
+        workspaceId: ctx.activeWorkspaceId,
+        ...(status ? { status } : {}),
+        ...(priority ? { priority } : {}),
+        ...(techFilter ? { technicianUserId: techFilter } : {}),
+        ...(clientFilter ? { clientId: clientFilter } : {}),
+        ...(q
+          ? {
+              OR: [
+                { code: { contains: q, mode: "insensitive" } },
+                { clientName: { contains: q, mode: "insensitive" } },
+                { licensePlate: { contains: q, mode: "insensitive" } },
+                { model: { contains: q, mode: "insensitive" } },
+                { brand: { contains: q, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      },
+      include: {
+        photos: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return res.json(orders.map(mapOrder));
+  } catch (error) {
+    return next(error);
+  }
 });
 
-// POST /production-orders
-productionOrdersRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const b = req.body;
-  if (!b.workspace_id) return res.status(400).json({ message: "workspace_id é obrigatório." });
+// GET /api/production-orders/:id
+productionOrdersRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params["id"] as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
 
-  const order = await prisma.productionOrder.create({
-    data: {
-      workspaceId: b.workspace_id,
-      code: b.code || genCode(),
-      clientId: b.client_id ?? null,
-      clientName: b.client_name ?? null,
-      technicianUserId: b.technician_user_id ?? null,
-      technicianName: b.technician_name ?? null,
-      platform: b.platform ?? null,
-      insurer: b.insurer ?? null,
-      licensePlate: b.license_plate ?? null,
-      vin: b.vin ?? null,
-      brand: b.brand ?? null,
-      model: b.model ?? null,
-      color: b.color ?? null,
-      notes: b.notes ?? null,
-      priority: b.priority ?? "normal",
-      status: b.status ?? "new_vehicle",
-      commercialStatus: b.commercial_status ?? null,
-      serviceOrderId: b.service_order_id ?? null,
-      dueAt: parseDate(b.due_at),
-      startedAt: parseDate(b.started_at),
-      finishedAt: parseDate(b.finished_at),
-      deliveredAt: parseDate(b.delivered_at),
-      createdBy: b.created_by ?? req.auth?.userId ?? "",
-    },
-  });
+    const order = await prisma.productionOrder.findUnique({
+      where: { id },
+      include: {
+        photos: true,
+        budget: true,
+        budgetRevision: true,
+      },
+    });
 
-  // Hook automático: WEEKLOG se foi criado já como "Finalizado" (delivered)
-  let weeklog: any = undefined;
-  if (order.status === "delivered") {
-    weeklog = await upsertWeeklogFromProduction(order.id, req.auth?.userId ?? order.createdBy ?? "");
+    if (!order || order.workspaceId !== ctx.activeWorkspaceId) {
+      return res.status(404).json({ message: "Ordem de produção não encontrada." });
+    }
+
+    assertObjectAccess(ctx, order);
+
+    return res.json(mapOrder(order));
+  } catch (error) {
+    return next(error);
   }
-  return res.status(201).json({ ...mapOrder(order), weeklog });
 });
 
-// PATCH /production-orders/:id
-productionOrdersRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const id = req.params["id"] as string;
-  const b = req.body;
+// POST /api/production-orders
+productionOrdersRouter.post("/", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
 
-  const data: Record<string, unknown> = {};
-  if (b.client_id !== undefined) data.clientId = b.client_id || null;
-  if (b.client_name !== undefined) data.clientName = b.client_name || null;
-  if (b.technician_user_id !== undefined) data.technicianUserId = b.technician_user_id || null;
-  if (b.technician_name !== undefined) data.technicianName = b.technician_name || null;
-  if (b.platform !== undefined) data.platform = b.platform || null;
-  if (b.insurer !== undefined) data.insurer = b.insurer || null;
-  if (b.license_plate !== undefined) data.licensePlate = b.license_plate || null;
-  if (b.vin !== undefined) data.vin = b.vin || null;
-  if (b.brand !== undefined) data.brand = b.brand || null;
-  if (b.model !== undefined) data.model = b.model || null;
-  if (b.color !== undefined) data.color = b.color || null;
-  if (b.notes !== undefined) data.notes = b.notes || null;
-  if (b.priority !== undefined) data.priority = b.priority;
-  if (b.status !== undefined) data.status = b.status;
-  if (b.commercial_status !== undefined) data.commercialStatus = b.commercial_status || null;
-  if (b.service_order_id !== undefined) data.serviceOrderId = b.service_order_id || null;
-  if (b.due_at !== undefined) data.dueAt = parseDate(b.due_at);
-  if (b.started_at !== undefined) data.startedAt = parseDate(b.started_at);
-  if (b.finished_at !== undefined) data.finishedAt = parseDate(b.finished_at);
-  if (b.delivered_at !== undefined) data.deliveredAt = parseDate(b.delivered_at);
+    const b = req.body;
 
-  if (Object.keys(data).length === 0) {
-    return res.status(400).json({ message: "Nenhum campo para atualizar." });
+    // Validação da regra de atribuição de técnico (TECH-ASSIGN-01 e TECH-ASSIGN-02)
+    const rawTech = b.technician_user_id ?? b.technicianUserId;
+    const { technicianUserId, technicianName } = await validateTechnicianAssignment(ctx, rawTech);
+
+    // Validação de linhagem de orçamento (production_orders_budget_lineage_check)
+    const rawBudgetId = b.budget_id ?? b.budgetId ?? null;
+    const rawBudgetRevisionId = b.budget_revision_id ?? b.budgetRevisionId ?? null;
+
+    let budgetId: string | null = null;
+    let budgetRevisionId: string | null = null;
+
+    if (rawBudgetId || rawBudgetRevisionId) {
+      if (!rawBudgetId || !rawBudgetRevisionId) {
+        return res.status(400).json({
+          message:
+            "Ambos budgetId e budgetRevisionId devem ser fornecidos para ordens vinculadas a orçamento.",
+        });
+      }
+
+      const budget = await prisma.budget.findUnique({
+        where: { id: rawBudgetId },
+      });
+      if (!budget || budget.workspaceId !== ctx.activeWorkspaceId) {
+        return res.status(404).json({ message: "Orçamento vinculado não encontrado." });
+      }
+
+      budgetId = rawBudgetId;
+      budgetRevisionId = rawBudgetRevisionId;
+    }
+
+    const order = await prisma.productionOrder.create({
+      data: {
+        workspaceId: ctx.activeWorkspaceId,
+        code: b.code || genCode(),
+        clientId: b.client_id ?? b.clientId ?? null,
+        clientName: b.client_name ?? b.clientName ?? null,
+        technicianUserId,
+        technicianName: technicianName || b.technician_name || b.technicianName || null,
+        platform: b.platform ?? null,
+        insurer: b.insurer ?? null,
+        licensePlate: b.license_plate ?? b.licensePlate ?? null,
+        vin: b.vin ?? null,
+        brand: b.brand ?? null,
+        model: b.model ?? null,
+        color: b.color ?? null,
+        notes: b.notes ?? null,
+        priority: b.priority ?? "normal",
+        status: b.status ?? "new_vehicle",
+        commercialStatus: b.commercial_status ?? b.commercialStatus ?? null,
+        serviceOrderId: b.service_order_id ?? b.serviceOrderId ?? null,
+        budgetId,
+        budgetRevisionId,
+        dueAt: parseDate(b.due_at ?? b.dueAt),
+        startedAt: parseDate(b.started_at ?? b.startedAt),
+        finishedAt: parseDate(b.finished_at ?? b.finishedAt),
+        deliveredAt: parseDate(b.delivered_at ?? b.deliveredAt),
+        createdBy: ctx.actorUserId,
+      },
+    });
+
+    let weeklog: any = undefined;
+    if (order.status === "delivered") {
+      weeklog = await upsertWeeklogFromProduction(order.id, ctx.actorUserId);
+    }
+
+    return res.status(201).json({ ...mapOrder(order), weeklog });
+  } catch (error) {
+    return next(error);
   }
-
-  const order = await prisma.productionOrder.update({ where: { id }, data });
-
-  // Hook automático: WEEKLOG (Produção → Finalizado)
-  // Sempre que status = delivered (finalizado), geramos/atualizamos a entrada do WEEKLOG
-  let weeklog: any = undefined;
-  if (order.status === "delivered") {
-    weeklog = await upsertWeeklogFromProduction(order.id, req.auth?.userId ?? order.createdBy ?? "");
-  }
-  return res.json({ ...mapOrder(order), weeklog });
 });
 
-// DELETE /production-orders/:id
-productionOrdersRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const id = req.params["id"] as string;
-  await prisma.productionOrder.delete({ where: { id } });
-  return res.json({ deleted: 1 });
+// PATCH /api/production-orders/:id
+productionOrdersRouter.patch("/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params["id"] as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const existing = await prisma.productionOrder.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== ctx.activeWorkspaceId) {
+      return res.status(404).json({ message: "Ordem de produção não encontrada." });
+    }
+
+    assertObjectAccess(ctx, existing);
+
+    const b = req.body;
+    const data: Record<string, unknown> = {};
+
+    if (b.client_id !== undefined || b.clientId !== undefined) {
+      data.clientId = b.client_id ?? b.clientId ?? null;
+    }
+    if (b.client_name !== undefined || b.clientName !== undefined) {
+      data.clientName = b.client_name ?? b.clientName ?? null;
+    }
+
+    if (b.technician_user_id !== undefined || b.technicianUserId !== undefined) {
+      const rawTech = b.technician_user_id ?? b.technicianUserId;
+      const { technicianUserId, technicianName } = await validateTechnicianAssignment(ctx, rawTech);
+      data.technicianUserId = technicianUserId;
+      data.technicianName = technicianName || b.technician_name || b.technicianName || null;
+    } else if (b.technician_name !== undefined || b.technicianName !== undefined) {
+      data.technicianName = b.technician_name ?? b.technicianName ?? null;
+    }
+
+    if (b.platform !== undefined) data.platform = b.platform || null;
+    if (b.insurer !== undefined) data.insurer = b.insurer || null;
+    if (b.license_plate !== undefined || b.licensePlate !== undefined) {
+      data.licensePlate = b.license_plate ?? b.licensePlate ?? null;
+    }
+    if (b.vin !== undefined) data.vin = b.vin || null;
+    if (b.brand !== undefined) data.brand = b.brand || null;
+    if (b.model !== undefined) data.model = b.model || null;
+    if (b.color !== undefined) data.color = b.color || null;
+    if (b.notes !== undefined) data.notes = b.notes || null;
+    if (b.priority !== undefined) data.priority = b.priority;
+    if (b.status !== undefined) data.status = b.status;
+    if (b.commercial_status !== undefined || b.commercialStatus !== undefined) {
+      data.commercialStatus = b.commercial_status ?? b.commercialStatus ?? null;
+    }
+    if (b.service_order_id !== undefined || b.serviceOrderId !== undefined) {
+      data.serviceOrderId = b.service_order_id ?? b.serviceOrderId ?? null;
+    }
+    if (b.due_at !== undefined || b.dueAt !== undefined) {
+      data.dueAt = parseDate(b.due_at ?? b.dueAt);
+    }
+    if (b.started_at !== undefined || b.startedAt !== undefined) {
+      data.startedAt = parseDate(b.started_at ?? b.startedAt);
+    }
+    if (b.finished_at !== undefined || b.finishedAt !== undefined) {
+      data.finishedAt = parseDate(b.finished_at ?? b.finishedAt);
+    }
+    if (b.delivered_at !== undefined || b.deliveredAt !== undefined) {
+      data.deliveredAt = parseDate(b.delivered_at ?? b.deliveredAt);
+    }
+
+    // Auto-preenchimento de data de entrega se status virou delivered
+    if (data.status === "delivered" && !data.deliveredAt && !existing.deliveredAt) {
+      data.deliveredAt = new Date();
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ message: "Nenhum campo para atualizar." });
+    }
+
+    const order = await prisma.productionOrder.update({ where: { id }, data });
+
+    let weeklog: any = undefined;
+    if (order.status === "delivered") {
+      weeklog = await upsertWeeklogFromProduction(order.id, ctx.actorUserId);
+    }
+
+    return res.json({ ...mapOrder(order), weeklog });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// DELETE /api/production-orders/:id
+productionOrdersRouter.delete("/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params["id"] as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const existing = await prisma.productionOrder.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== ctx.activeWorkspaceId) {
+      return res.status(404).json({ message: "Ordem de produção não encontrada." });
+    }
+
+    assertObjectAccess(ctx, existing);
+
+    // Permissão restrita: apenas administradores, owners e platform_admins podem deletar ordens
+    if (ctx.membershipRole === "technician" || ctx.membershipRole === "member") {
+      throw new ForbiddenError("Permissão insuficiente para excluir ordem de produção.");
+    }
+
+    await prisma.productionOrder.delete({ where: { id } });
+    return res.json({ deleted: 1 });
+  } catch (error) {
+    return next(error);
+  }
 });

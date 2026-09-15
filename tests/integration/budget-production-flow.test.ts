@@ -1342,4 +1342,323 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       expect(count).toBe(1);
     });
   });
+
+  // =========================================================================
+  // Grupo D: Proteção e Adequação de productionOrders.ts ao RequestContext (T07)
+  // =========================================================================
+  describe("Grupo D: Proteção e Adequação de productionOrders.ts ao RequestContext (T07)", () => {
+    it("PO-CTX-01: GET /api/production-orders filtra automaticamente pelo workspace do token, ignorando workspace_id forjado na query", async () => {
+      // Cria uma ordem no Workspace Alpha e outra no Workspace Bravo
+      const orderAlpha = await prisma.productionOrder.create({
+        data: {
+          id: "po-ctx-alpha-01",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "PO-ALPHA-01",
+          clientName: "Cliente Alpha",
+          createdBy: FIXTURES.ownerA.userId,
+        },
+      });
+
+      const orderBravo = await prisma.productionOrder.create({
+        data: {
+          id: "po-ctx-bravo-01",
+          workspaceId: FIXTURES.wsBravo,
+          code: "PO-BRAVO-01",
+          clientName: "Cliente Bravo",
+          createdBy: FIXTURES.ownerB.userId,
+        },
+      });
+
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      // Tenta forjar a query buscando o workspace Bravo
+      const response = await fetch(`${baseUrl}/api/production-orders?workspace_id=${FIXTURES.wsBravo}`, {
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const orders: any[] = await response.json();
+      const ids = orders.map((o) => o.id);
+      expect(ids).toContain(orderAlpha.id);
+      expect(ids).not.toContain(orderBravo.id);
+    });
+
+    it("PO-CTX-02: Técnico com papel technician só visualiza suas próprias ordens de produção (own scope)", async () => {
+      // Ordem atribuída ao Tech A1
+      const orderTechA1 = await prisma.productionOrder.create({
+        data: {
+          id: "po-tech-a1-only",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "PO-TECH-01",
+          technicianUserId: FIXTURES.techA1.userId,
+          createdBy: FIXTURES.ownerA.userId,
+        },
+      });
+
+      // Ordem atribuída ao Tech A2
+      const orderTechA2 = await prisma.productionOrder.create({
+        data: {
+          id: "po-tech-a2-only",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "PO-TECH-02",
+          technicianUserId: FIXTURES.techA2.userId,
+          createdBy: FIXTURES.ownerA.userId,
+        },
+      });
+
+      const tokenTech1 = signAccessToken({
+        id: FIXTURES.techA1.userId,
+        email: FIXTURES.techA1.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/production-orders`, {
+        headers: {
+          Authorization: `Bearer ${tokenTech1}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const orders: any[] = await response.json();
+      const ids = orders.map((o) => o.id);
+      expect(ids).toContain(orderTechA1.id);
+      expect(ids).not.toContain(orderTechA2.id);
+    });
+
+    it("PO-DIRECT-01: POST /api/production-orders cria ordem direta com budgetId: null e budgetRevisionId: null", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/production-orders`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          client_name: "Cliente Direto Balcão",
+          brand: "Toyota",
+          model: "Corolla",
+          license_plate: "DIR-9999",
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body.client_name).toBe("Cliente Direto Balcão");
+      expect(body.budget_id).toBeNull();
+      expect(body.budget_revision_id).toBeNull();
+      expect(body.workspace_id).toBe(FIXTURES.wsAlpha);
+      expect(body.created_by).toBe(FIXTURES.ownerA.userId);
+    });
+
+    it("TECH-ASSIGN-01: Técnico tentando atribuir ordem a outro técnico recebe 403 Forbidden", async () => {
+      const tokenTech1 = signAccessToken({
+        id: FIXTURES.techA1.userId,
+        email: FIXTURES.techA1.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/production-orders`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenTech1}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          client_name: "Cliente Invasão",
+          technicianUserId: FIXTURES.techA2.userId, // Tentativa de atribuir a outro técnico
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.message).toContain("TECH-ASSIGN-01");
+    });
+
+    it("TECH-ASSIGN-01-SELF: Técnico sem informar technicianUserId tem a ordem auto-atribuída a si mesmo", async () => {
+      const tokenTech1 = signAccessToken({
+        id: FIXTURES.techA1.userId,
+        email: FIXTURES.techA1.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/production-orders`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenTech1}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          client_name: "Cliente Auto Atribuído",
+          brand: "Honda",
+          model: "Civic",
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body.technician_user_id).toBe(FIXTURES.techA1.userId);
+    });
+
+    it("TECH-ASSIGN-02: Admin consegue atribuir ordem a técnico membro ativo do mesmo workspace", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/production-orders`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          client_name: "Cliente Atribuído por Admin",
+          technicianUserId: FIXTURES.techA1.userId,
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body.technician_user_id).toBe(FIXTURES.techA1.userId);
+    });
+
+    it("TECH-ASSIGN-03 (FORGED-TECHNICIAN): Admin tentando atribuir técnico de outro workspace recebe 403 Forbidden", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      // Tentativa de atribuir o técnico B (que só pertence ao Workspace Bravo)
+      const response = await fetch(`${baseUrl}/api/production-orders`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          client_name: "Cliente Técnico Forjado",
+          technicianUserId: FIXTURES.techB.userId,
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.message).toContain("não é membro ativo");
+    });
+
+    it("PO-TENANT-ISOLATION-01: Usuário do Workspace A tentando PATCH ou DELETE em ordem do Workspace B recebe 404 Not Found", async () => {
+      const orderBravo = await prisma.productionOrder.create({
+        data: {
+          id: "po-bravo-iso-01",
+          workspaceId: FIXTURES.wsBravo,
+          code: "PO-BRAVO-ISO",
+          clientName: "Cliente Bravo Isolado",
+          createdBy: FIXTURES.ownerB.userId,
+        },
+      });
+
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      // Tentativa de PATCH
+      const patchRes = await fetch(`${baseUrl}/api/production-orders/${orderBravo.id}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ notes: "Invasão" }),
+      });
+      expect(patchRes.status).toBe(404);
+
+      // Tentativa de DELETE
+      const deleteRes = await fetch(`${baseUrl}/api/production-orders/${orderBravo.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+        },
+      });
+      expect(deleteRes.status).toBe(404);
+    });
+
+    it("PO-TECH-DELETE-FORBIDDEN: Técnico tentando deletar ordem de produção recebe 403 Forbidden", async () => {
+      const orderTech = await prisma.productionOrder.create({
+        data: {
+          id: "po-tech-delete-test",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "PO-TECH-DEL",
+          technicianUserId: FIXTURES.techA1.userId,
+          createdBy: FIXTURES.ownerA.userId,
+        },
+      });
+
+      const tokenTech1 = signAccessToken({
+        id: FIXTURES.techA1.userId,
+        email: FIXTURES.techA1.email,
+        role: "user",
+      });
+
+      const deleteRes = await fetch(`${baseUrl}/api/production-orders/${orderTech.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${tokenTech1}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+        },
+      });
+
+      expect(deleteRes.status).toBe(403);
+      const body = await deleteRes.json();
+      expect(body.message).toContain("Permissão insuficiente");
+    });
+
+    it("BUDGET-TECH-ASSIGN-01: Técnico tentando criar orçamento atribuindo a outro técnico recebe 403 Forbidden", async () => {
+      const tokenTech1 = signAccessToken({
+        id: FIXTURES.techA1.userId,
+        email: FIXTURES.techA1.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/budgets`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenTech1}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clientName: "Cliente Tentativa Ilícita",
+          technicianUserId: FIXTURES.techA2.userId,
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.message).toContain("TECH-ASSIGN-01");
+    });
+  });
 });
