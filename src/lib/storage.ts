@@ -6,16 +6,14 @@ const PUBLIC_BUCKETS = new Set(["avatars", "hail-reports", "marketplace", "logos
 
 /**
  * Retorna a URL de acesso a um arquivo armazenado no MinIO via backend.
- * Buckets públicos: sem autenticação.
- * Buckets privados: JWT no query param ?token= (compatível com <img src> e links de download).
+ * Buckets públicos: sem autenticação (/storage/public/:bucket/*).
+ * Buckets privados: endpoint protegido (/storage/file/:bucket/*). Presigned URLs da API devem ser priorizadas.
  */
 export function getFileUrl(bucket: string, path: string): string {
   if (PUBLIC_BUCKETS.has(bucket)) {
     return `${API_URL}/storage/public/${bucket}/${path}`;
   }
-  const token = getAccessToken();
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
-  return `${API_URL}/storage/file/${bucket}/${path}${tokenParam}`;
+  return `${API_URL}/storage/file/${bucket}/${path}`;
 }
 
 /**

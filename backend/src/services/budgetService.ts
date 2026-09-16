@@ -436,13 +436,35 @@ export async function approveBudgetRevision(
       throw new ConflictError("Revisão com status rejeitado não pode ser aprovada diretamente.");
     }
 
-    // Se já estiver aprovada e a OP correspondente já existir, reconcilia idempotentemente
-    if (revision.status === "approved" && budget.approvedRevisionId === revision.id && budget.productionOrder) {
+    // A) Retry idempotente legítimo:
+    // A revisão solicitada é a revisão corrente do orçamento, já está aprovada,
+    // o approvedRevisionId aponta para ela e a ProductionOrder correspondente já existe.
+    if (
+      revision.id === budget.currentRevisionId &&
+      revision.id === budget.approvedRevisionId &&
+      revision.status === "approved" &&
+      budget.productionOrder
+    ) {
       return {
         budget,
         revision,
         productionOrder: budget.productionOrder,
       };
+    }
+
+    // B) Revisão stale (Cenário 1.3):
+    // Se a revisão for mais antiga que a corrente (ex: Rev 1 quando Rev 2 foi criada/corrente;
+    // ou tentativa de downgrade), rejeita com 409 Conflict.
+    const isStale =
+      revision.revisionNumber < budget.currentRevisionNumber ||
+      (budget.currentRevisionId !== null &&
+        revision.revisionNumber === budget.currentRevisionNumber &&
+        revision.id !== budget.currentRevisionId);
+
+    if (isStale) {
+      throw new ConflictError(
+        "Apenas a revisão corrente do orçamento pode ser aprovada. A revisão solicitada está desatualizada (stale)."
+      );
     }
 
     const existingPO = budget.productionOrder;
@@ -520,6 +542,8 @@ export async function approveBudgetRevision(
       where: { id: budget.id },
       data: {
         approvedRevisionId: revision.id,
+        currentRevisionId: revision.id,
+        currentRevisionNumber: Math.max(budget.currentRevisionNumber, revision.revisionNumber),
       },
     });
 
@@ -559,6 +583,18 @@ export async function rejectBudgetRevision(
     const revision = budget.revisions[0];
     if (!revision) {
       throw new NotFoundError("Revisão não encontrada para este orçamento.");
+    }
+
+    const isStale =
+      revision.revisionNumber < budget.currentRevisionNumber ||
+      (budget.currentRevisionId !== null &&
+        revision.revisionNumber === budget.currentRevisionNumber &&
+        revision.id !== budget.currentRevisionId);
+
+    if (isStale) {
+      throw new ConflictError(
+        "Apenas a revisão corrente do orçamento pode ser rejeitada. A revisão solicitada está desatualizada (stale)."
+      );
     }
 
     if (revision.status === "approved") {

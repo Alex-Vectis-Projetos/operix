@@ -20,6 +20,8 @@ export interface ProductionPhoto {
   size_bytes: number | null;
   created_at: string;
   signed_url?: string;
+  url?: string;
+  download_url?: string;
 }
 
 export const PHOTO_CATEGORIES: { value: PhotoCategory; label: string }[] = [
@@ -61,7 +63,7 @@ async function listPhotos(orderId: string): Promise<ProductionPhoto[]> {
   if (!res.ok) throw new Error("Falha ao carregar fotos.");
   const list = (await res.json()) as ProductionPhoto[];
   for (const p of list) {
-    p.signed_url = getFileUrl("production-photos", p.storage_path);
+    p.signed_url = p.url || p.download_url || p.signed_url || "";
   }
   return list;
 }

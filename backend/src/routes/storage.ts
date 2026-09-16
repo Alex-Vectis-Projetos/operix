@@ -10,6 +10,7 @@ import {
   PUBLIC_BUCKETS,
   getPresignedDownloadUrl,
   assertTenantStoragePath,
+  assertAllowedBucket,
 } from "../lib/minio.js";
 import { requireAuth } from "../middleware/auth.js";
 import { resolveRequestContext } from "../middleware/requestContext.js";
@@ -79,7 +80,8 @@ storageRouter.post(
         return res.status(400).json({ message: "Campos obrigatórios: file, bucket, path." });
       }
 
-      // Validação de fronteira de tenant
+      // Validação estrita de bucket allowlist e fronteira de tenant (deny-by-default)
+      assertAllowedBucket(bucket);
       assertTenantStoragePath(ctx, path);
 
       await s3.send(
@@ -119,7 +121,8 @@ storageRouter.post(
         return res.status(400).json({ message: "Campos obrigatórios: bucket, path." });
       }
 
-      // Bloqueio comprovado de acesso cross-tenant a arquivos
+      // Validação estrita de bucket allowlist e fronteira de tenant (deny-by-default)
+      assertAllowedBucket(bucket);
       assertTenantStoragePath(ctx, path);
 
       const ttl = Math.min(Math.max(Number(expiresInSeconds) || 900, 60), 900); // máx 15 min (900s)
@@ -145,7 +148,8 @@ storageRouter.get(
       const bucket = bucketParam(req);
       const filePath = wildcardPath(req);
 
-      // Bloqueio de acesso cross-tenant
+      // Validação estrita de bucket allowlist e fronteira de tenant (deny-by-default)
+      assertAllowedBucket(bucket);
       assertTenantStoragePath(ctx, filePath);
 
       await streamObject(bucket, filePath, res, "private, max-age=900");
@@ -169,7 +173,8 @@ storageRouter.delete("/files", async (req: Request, res: Response, next: NextFun
       return res.status(400).json({ message: "Campos obrigatórios: bucket, paths (array)." });
     }
 
-    // Validação cross-tenant para todos os arquivos
+    // Validação estrita de bucket allowlist e fronteira de tenant (deny-by-default)
+    assertAllowedBucket(bucket);
     for (const p of paths) {
       assertTenantStoragePath(ctx, p);
     }

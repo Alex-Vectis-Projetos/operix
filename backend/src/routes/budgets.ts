@@ -7,6 +7,7 @@ import {
   ForbiddenError,
   NotFoundError,
   ConflictError,
+  assertTenantAccess,
   assertObjectAccess,
 } from "../lib/objectAuth.js";
 import {
@@ -79,13 +80,13 @@ const updateRevisionSchema = z.object({
 });
 
 const approveRevisionSchema = z.object({
-  revisionId: z.string().min(1, "revisionId é obrigatório."),
+  revisionId: z.string().optional(),
   notes: z.string().max(2000).optional(),
   dueAt: z.string().datetime().optional().nullable(),
 });
 
 const rejectRevisionSchema = z.object({
-  revisionId: z.string().min(1, "revisionId é obrigatório."),
+  revisionId: z.string().optional(),
   reason: z.string().min(1, "Motivo da rejeição é obrigatório.").max(1000),
 });
 
@@ -431,6 +432,15 @@ budgetsRouter.put("/:id/revisions/:revisionId", async (req: Request, res: Respon
     const revisionId = String(req.params.revisionId);
     const input = updateRevisionSchema.parse(req.body);
 
+    const budget = await prisma.budget.findFirst({
+      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId, deletedAt: null },
+    });
+    if (!budget) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+    assertTenantAccess(ctx, budget.workspaceId);
+    assertObjectAccess(ctx, budget);
+
     const result = await updateBudgetRevision(
       ctx.activeWorkspaceId,
       budgetId,
@@ -465,9 +475,18 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
     const revisionId = String(req.params.revisionId);
     const input = approveRevisionSchema.parse(req.body);
 
-    if (input.revisionId !== revisionId) {
+    if (input.revisionId && input.revisionId !== revisionId) {
       return res.status(409).json({ message: "revisionId do corpo diverge da rota solicitada." });
     }
+
+    const budget = await prisma.budget.findFirst({
+      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId, deletedAt: null },
+    });
+    if (!budget) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+    assertTenantAccess(ctx, budget.workspaceId);
+    assertObjectAccess(ctx, budget);
 
     const result = await approveBudgetRevision(
       ctx.activeWorkspaceId,
@@ -505,9 +524,18 @@ budgetsRouter.post("/:id/revisions/:revisionId/reject", async (req: Request, res
     const revisionId = String(req.params.revisionId);
     const input = rejectRevisionSchema.parse(req.body);
 
-    if (input.revisionId !== revisionId) {
+    if (input.revisionId && input.revisionId !== revisionId) {
       return res.status(409).json({ message: "revisionId do corpo diverge da rota solicitada." });
     }
+
+    const budget = await prisma.budget.findFirst({
+      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId, deletedAt: null },
+    });
+    if (!budget) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+    assertTenantAccess(ctx, budget.workspaceId);
+    assertObjectAccess(ctx, budget);
 
     const result = await rejectBudgetRevision(
       ctx.activeWorkspaceId,

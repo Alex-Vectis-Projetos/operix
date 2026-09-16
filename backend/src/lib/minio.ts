@@ -142,23 +142,51 @@ export async function getPresignedDownloadUrl(
   }
 }
 
+export const ALLOWED_STORAGE_BUCKETS = [
+  "production-photos",
+  "uploads",
+] as const;
+
+export type AllowedStorageBucket = (typeof ALLOWED_STORAGE_BUCKETS)[number];
+
+export function assertAllowedBucket(bucket: string): void {
+  if (!bucket || !ALLOWED_STORAGE_BUCKETS.includes(bucket as AllowedStorageBucket)) {
+    throw new ForbiddenError(`Bucket '${bucket}' não é permitido para esta operação.`);
+  }
+}
+
 /**
  * Garante que um caminho de storage sob o prefixo 'tenants/{wsId}/...' pertença
  * estritamente ao workspace ativo no RequestContext.
+ * Deny-by-default: rejeita caminhos sem tenants/, caminhos de outros tenants,
+ * path traversal, caracteres nulos e workspaces vazios.
  */
 export function assertTenantStoragePath(ctx: RequestContext, storagePath: string): void {
-  if (!ctx.activeWorkspaceId) {
+  if (!ctx.activeWorkspaceId || typeof ctx.activeWorkspaceId !== "string" || !ctx.activeWorkspaceId.trim()) {
     throw new ForbiddenError("Workspace ativo não definido no contexto.");
   }
 
-  const parts = storagePath.split("/");
-  if (parts[0] === "tenants" && parts[1]) {
-    const pathWorkspaceId = parts[1];
-    if (pathWorkspaceId !== ctx.activeWorkspaceId) {
-      throw new ForbiddenError(
-        "Acesso negado: o arquivo solicitado pertence a outro workspace."
-      );
-    }
+  if (!storagePath || typeof storagePath !== "string") {
+    throw new ForbiddenError("Caminho de arquivo inválido.");
+  }
+
+  // Bloqueio estrito de path traversal
+  if (
+    storagePath.includes("..") ||
+    storagePath.includes("\\") ||
+    storagePath.includes("//") ||
+    storagePath.includes("\0")
+  ) {
+    throw new ForbiddenError("Caminho de arquivo inválido: tentativa de path traversal detectada.");
+  }
+
+  const normalized = storagePath.startsWith("/") ? storagePath.slice(1) : storagePath;
+  const expectedPrefix = `tenants/${ctx.activeWorkspaceId}/`;
+
+  if (!normalized.startsWith(expectedPrefix)) {
+    throw new ForbiddenError(
+      "Acesso negado: o caminho de storage solicitado não pertence ao workspace ativo."
+    );
   }
 }
 
