@@ -165,9 +165,10 @@
 ## T12: Adaptação de `OrderDetailDialog.tsx` e Saneamento de Linter
 - **Descrição**: Atualizar `OrderDetailDialog.tsx` para ler dados diretamente da revisão aprovada via `order.budgetId`, mantendo fallback para `notes` em ordens legadas, e corrigir todos os erros pré-existentes de lint do arquivo.
 - **DoD**:
-  - [ ] Exibição prioritária a partir da relação com `BudgetRevision`;
-  - [ ] Fallback preservado para ordens legadas com orçamento em `notes`;
-  - [ ] Todos os erros de linter em `OrderDetailDialog.tsx` corrigidos.
+  - [x] Exibição prioritária a partir da relação com `BudgetRevision`;
+  - [x] Fallback preservado para ordens legadas com orçamento em `notes`;
+  - [x] Todos os erros de linter em `OrderDetailDialog.tsx` corrigidos.
+- **Status de Auditoria**: `T12 PASSED` (`OrderDetailDialog.tsx` adaptado com consulta reativa `useBudget`, priorização de `BudgetRevision` oficial com peças, serviços, mão de obra e snapshots, fallback preservado para ordens legadas com `notes`, eliminação de hooks condicionais com 0 erros/warnings no ESLint, typecheck frontend/backend e 59/59 testes GREEN).
 
 ---
 

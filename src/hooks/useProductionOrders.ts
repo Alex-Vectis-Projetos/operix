@@ -43,6 +43,10 @@ export interface ProductionOrder {
   finished_at: string | null;
   delivered_at: string | null;
   service_order_id: string | null;
+  budget_id?: string | null;
+  budgetId?: string | null;
+  budget_revision_id?: string | null;
+  budgetRevisionId?: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

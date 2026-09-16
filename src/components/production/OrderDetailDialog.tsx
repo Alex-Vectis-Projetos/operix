@@ -38,6 +38,7 @@ import { OrderTimeline } from "./OrderTimeline";
 import { FileUploadZone } from "@/components/service-orders/FileUploadZone";
 import { useExtractProductionOrder } from "@/hooks/useExtractProductionOrder";
 import { formatBRL } from "./BudgetDialog";
+import { useBudget, type ApiBudget, type ApiBudgetRevision } from "@/hooks/useBudgets";
 
 interface Props {
   order: ProductionOrder | null;
@@ -206,6 +207,146 @@ function hasAnyBudgetData(d: ParsedBudgetData): boolean {
     d.interventionType || d.diagnosis || d.technicalDescription ||
     d.parts.length || d.labor.length || d.totals.total
   );
+}
+
+function emptyParsedBudgetData(): ParsedBudgetData {
+  return {
+    budgetNumber: "",
+    issuedAt: "",
+    client: { name: "", phone: "", email: "", document: "" },
+    vehicle: { brand: "", model: "", plate: "", vin: "", year: "", color: "", km: "" },
+    interventionType: "",
+    diagnosis: "",
+    technicalDescription: "",
+    parts: [],
+    partsSubtotal: 0,
+    labor: [],
+    laborSubtotal: 0,
+    totals: { gross: 0, discount: 0, net: 0, iva: 0, total: 0, discountPct: 0, ivaPct: 0 },
+    origin: "",
+  };
+}
+
+function mapBudgetRevisionToParsed(
+  budget: ApiBudget,
+  revision: ApiBudgetRevision,
+): ParsedBudgetData {
+  const clientSnap = (revision.clientSnapshot ?? revision.client_snapshot ?? {}) as Record<string, any>;
+  const vehicleSnap = (revision.vehicleSnapshot ?? revision.vehicle_snapshot ?? {}) as Record<string, any>;
+
+  const clientName = clientSnap.name || clientSnap.client_name || budget.clientName || budget.client_name || "";
+  const clientPhone = clientSnap.phone || clientSnap.client_phone || clientSnap.contact || "";
+  const clientEmail = clientSnap.email || clientSnap.client_email || "";
+  const clientDocument = clientSnap.document || clientSnap.client_document || clientSnap.doc || clientSnap.cpf || clientSnap.cnpj || "";
+
+  const vehicleBrand = vehicleSnap.brand || vehicleSnap.vehicle_brand || budget.vehicleBrand || budget.vehicle_brand || "";
+  const vehicleModel = vehicleSnap.model || vehicleSnap.vehicle_model || budget.vehicleModel || budget.vehicle_model || "";
+  const vehiclePlate = vehicleSnap.plate || vehicleSnap.vehicle_plate || vehicleSnap.license_plate || budget.vehiclePlate || budget.vehicle_plate || "";
+  const vehicleVin = vehicleSnap.vin || vehicleSnap.vehicle_vin || budget.vehicleVin || budget.vehicle_vin || "";
+  const vehicleYear = vehicleSnap.year ? String(vehicleSnap.year) : (vehicleSnap.vehicle_year ? String(vehicleSnap.vehicle_year) : "");
+  const vehicleColor = vehicleSnap.color || vehicleSnap.vehicle_color || "";
+  const vehicleKm = vehicleSnap.km ? String(vehicleSnap.km) : (vehicleSnap.vehicle_km ? String(vehicleSnap.vehicle_km) : "");
+
+  const interventionList = Array.isArray(revision.interventionTypes) && revision.interventionTypes.length > 0
+    ? revision.interventionTypes
+    : (Array.isArray(revision.intervention_types) && revision.intervention_types.length > 0
+        ? revision.intervention_types
+        : []);
+  const interventionType = interventionList.join(", ") || revision.budgetType || revision.budget_type || "";
+
+  const diagnosis = revision.diagnosis ?? "";
+  const technicalDescription = revision.technicalDescription ?? revision.technical_description ?? "";
+
+  const partsRaw = Array.isArray(revision.parts) ? revision.parts : [];
+  const servicesRaw = Array.isArray(revision.services) ? revision.services : [];
+  const parts: ParsedBudgetLineParts[] = [
+    ...partsRaw.map((p: any) => {
+      const qty = Number(p.quantity ?? p.qty ?? 1) || 0;
+      const unit = Number(p.unit_price ?? p.unitPrice ?? p.unit ?? 0) || 0;
+      const total = Number(p.total ?? (qty * unit)) || 0;
+      return {
+        desc: String(p.description || p.desc || "Peça"),
+        qty,
+        unit,
+        total,
+      };
+    }),
+    ...servicesRaw.map((s: any) => {
+      const qty = Number(s.quantity ?? s.qty ?? 1) || 0;
+      const unit = Number(s.unit_price ?? s.unitPrice ?? s.unit ?? 0) || 0;
+      const total = Number(s.total ?? (qty * unit)) || 0;
+      return {
+        desc: String(s.description || s.desc || "Serviço"),
+        qty,
+        unit,
+        total,
+      };
+    }),
+  ];
+  const partsSubtotal = parts.reduce((acc, curr) => acc + curr.total, 0);
+
+  const laborRaw = Array.isArray(revision.labor) ? revision.labor : [];
+  const labor: ParsedBudgetLineLabor[] = laborRaw.map((l: any) => {
+    const hours = Number(l.hours ?? 0) || 0;
+    const rate = Number(l.hourly_rate ?? l.hourlyRate ?? l.rate ?? 0) || 0;
+    const total = Number(l.total ?? (hours * rate)) || 0;
+    return {
+      desc: String(l.description || l.desc || "Mão de Obra"),
+      hours,
+      rate,
+      total,
+    };
+  });
+  const laborSubtotal = labor.reduce((acc, curr) => acc + curr.total, 0);
+
+  const gross = Number(revision.grossTotal ?? revision.gross_total ?? (partsSubtotal + laborSubtotal)) || 0;
+  const discountPct = Number(revision.discountPct ?? revision.discount_pct ?? 0) || 0;
+  const discount = Number(revision.discountTotal ?? revision.discount_total ?? 0) || 0;
+  const net = Number(revision.netTotal ?? revision.net_total ?? 0) || 0;
+  const ivaPct = Number(revision.taxPct ?? revision.tax_pct ?? 0) || 0;
+  const iva = Number(revision.taxTotal ?? revision.tax_total ?? 0) || 0;
+  const total = Number(revision.finalTotal ?? revision.final_total ?? 0) || 0;
+
+  const revNum = revision.revisionNumber ?? revision.revision_number ?? 1;
+  const statusLabel = revision.status === "approved" ? "Aprovada" : revision.status;
+  const origin = `Orçamento Oficial: ${budget.code} (Revisão ${revNum} · ${statusLabel})`;
+
+  return {
+    budgetNumber: budget.code || "",
+    issuedAt: revision.createdAt || revision.created_at || budget.createdAt || budget.created_at || "",
+    client: {
+      name: clientName,
+      phone: clientPhone,
+      email: clientEmail,
+      document: clientDocument,
+    },
+    vehicle: {
+      brand: vehicleBrand,
+      model: vehicleModel,
+      plate: vehiclePlate,
+      vin: vehicleVin,
+      year: vehicleYear,
+      color: vehicleColor,
+      km: vehicleKm,
+    },
+    interventionType,
+    diagnosis,
+    technicalDescription,
+    parts,
+    partsSubtotal,
+    labor,
+    laborSubtotal,
+    totals: {
+      gross,
+      discount,
+      net,
+      iva,
+      total,
+      discountPct,
+      ivaPct,
+    },
+    origin,
+  };
 }
 
 function fmtDatePTBR(iso: string | null | undefined): string {
@@ -426,7 +567,6 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
   const draftKey = useMemo(
     () => isNew ? `production-draft-new-${resolvedDraftId}` : `production-draft-${order?.id ?? "noop"}`,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isNew, order?.id, resolvedDraftId],
   );
 
@@ -437,12 +577,34 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     600,
   );
 
+  const activeBudgetId = order?.budgetId ?? order?.budget_id ?? null;
+  const { data: budgetData } = useBudget(activeBudgetId);
+
+  const activeRevision = useMemo(() => {
+    if (!budgetData) return null;
+    const targetRevId = order?.budgetRevisionId ?? order?.budget_revision_id ?? null;
+    if (targetRevId && Array.isArray(budgetData.revisions)) {
+      const found = budgetData.revisions.find((r) => r.id === targetRevId);
+      if (found) return found;
+    }
+    return (
+      budgetData.approvedRevision ??
+      budgetData.approved_revision ??
+      budgetData.currentRevision ??
+      budgetData.current_revision ??
+      null
+    );
+  }, [budgetData, order?.budgetRevisionId, order?.budget_revision_id]);
+
   const initialParsedBudget = useMemo(() => {
+    if (budgetData && activeRevision) {
+      return mapBudgetRevisionToParsed(budgetData, activeRevision);
+    }
     if (!order?.notes) return null;
     const { budget } = splitBudgetOnlyAfterExecution(order.notes);
     if (!budget) return null;
     return parseBudgetSerialized(budget);
-  }, [order?.notes]);
+  }, [budgetData, activeRevision, order?.notes]);
 
   const [execution, setExecution] = useState<ServiceExecution | null>(() => {
     if (!order?.notes) return null;
@@ -450,18 +612,19 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   });
 
   useEffect(() => {
-    const internal = stripBudgetAndExecutionForInternal(order?.notes ?? "");
+    if (!order) return;
+    const internal = stripBudgetAndExecutionForInternal(order.notes ?? "");
     setInternalNotes(internal);
-    setForm(order ?? {});
+    setForm(order);
     setActiveTab("ficha");
     setPromotedId(null);
-    const decoded = tryDecodeExecution(order?.notes);
+    const decoded = tryDecodeExecution(order.notes);
     if (decoded) {
       setExecution(decoded);
     } else {
-      const budgetP = splitBudgetOnlyAfterExecution(order?.notes).budget;
+      const budgetP = splitBudgetOnlyAfterExecution(order.notes).budget;
       const data = budgetP ? parseBudgetSerialized(budgetP) : null;
-      const fallbackTech = order?.technician_name ?? null;
+      const fallbackTech = order.technician_name ?? null;
       const initial: ServiceExecution = {
         service_done: false,
         steps: (data?.labor?.length ?? 0) > 0
@@ -473,24 +636,28 @@ export function OrderDetailDialog({ order, onClose }: Props) {
         overall_notes: [],
       };
       setExecution(
-        initial.steps.length ? initial : (order?.notes ? null : { service_done: false, steps: [], overall_notes: [] }),
+        initial.steps.length ? initial : (order.notes ? null : { service_done: false, steps: [], overall_notes: [] }),
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id]);
 
-  if (!order) return null;
-
   const parsed = useMemo(() => {
-    const { budget } = splitBudgetOnlyAfterExecution(order.notes);
-    return parseBudgetSerialized(budget);
-  }, [order.notes]);
-
-  const budgetHydrated = hasAnyBudgetData(parsed);
+    if (budgetData && activeRevision) {
+      return mapBudgetRevisionToParsed(budgetData, activeRevision);
+    }
+    if (order?.notes) {
+      const { budget } = splitBudgetOnlyAfterExecution(order.notes);
+      if (budget) {
+        return parseBudgetSerialized(budget);
+      }
+    }
+    return emptyParsedBudgetData();
+  }, [budgetData, activeRevision, order?.notes]);
 
   const executionSafe: ServiceExecution = useMemo(() => {
     if (execution) return execution;
-    const fallbackTech = (form.technician_name ?? order.technician_name ?? null);
+    const fallbackTech = (form.technician_name ?? order?.technician_name ?? null);
     const parsedBudget = initialParsedBudget ?? parsed;
     const derivedSteps =
       parsedBudget?.labor?.length
@@ -503,8 +670,11 @@ export function OrderDetailDialog({ order, onClose }: Props) {
       steps: derivedSteps,
       overall_notes: [],
     };
-  }, [execution, form.technician_name, order.technician_name, initialParsedBudget, parsed]);
+  }, [execution, form.technician_name, order?.technician_name, initialParsedBudget, parsed]);
 
+  if (!order) return null;
+
+  const budgetHydrated = hasAnyBudgetData(parsed);
   const serviceDoneLocked = executionSafe.service_done;
 
   const displayClientName =
@@ -743,21 +913,23 @@ export function OrderDetailDialog({ order, onClose }: Props) {
       return;
     }
     try {
-      let budgetId: string | null = null;
-      try {
-        const rawMap = localStorage.getItem("budget-to-production-order-v1");
-        if (rawMap) {
-          const parsed = JSON.parse(rawMap) as unknown;
-          if (parsed && typeof parsed === "object") {
-            for (const [bid, oid] of Object.entries(parsed as Record<string, string>)) {
-              if (oid === order.id) {
-                budgetId = bid;
-                break;
+      let budgetId: string | null = order.budgetId || order.budget_id || null;
+      if (!budgetId) {
+        try {
+          const rawMap = localStorage.getItem("budget-to-production-order-v1");
+          if (rawMap) {
+            const parsedMap = JSON.parse(rawMap) as unknown;
+            if (parsedMap && typeof parsedMap === "object") {
+              for (const [bid, oid] of Object.entries(parsedMap as Record<string, string>)) {
+                if (oid === order.id) {
+                  budgetId = bid;
+                  break;
+                }
               }
             }
           }
-        }
-      } catch {}
+        } catch {}
+      }
       if (!budgetId) {
         toast.error("Vínculo orçamento ↔ OS não encontrado. Não foi possível solicitar correção.");
         return;
