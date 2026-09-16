@@ -153,11 +153,12 @@
 ## T11: Adaptação das Telas `BudgetPanel.tsx` e `BudgetDialog.tsx`
 - **Descrição**: Conectar as telas de orçamento à API remota, migrando o salvamento para o PostgreSQL, enviando `revisionId` explícito nas aprovações/rejeições e apontando o autocomplete de clientes para `/api/clients`.
 - **DoD**:
-  - [ ] Orçamentos listados em `BudgetPanel.tsx` vêm da API;
-  - [ ] `BudgetDialog.tsx` salva e versiona via API remota;
-  - [ ] Assinatura salva imagem no MinIO e metadados no banco;
-  - [ ] Autocomplete de cliente busca de `/api/clients` com criação rápida;
-  - [ ] Ajustes de CSS responsivo para visualização sem quebras em 360px.
+  - [x] Orçamentos listados em `BudgetPanel.tsx` vêm da API;
+  - [x] `BudgetDialog.tsx` salva e versiona via API remota;
+  - [x] Assinatura salva imagem no MinIO e metadados no banco;
+  - [x] Autocomplete de cliente busca de `/api/clients` com criação rápida;
+  - [x] Ajustes de CSS responsivo para visualização sem quebras em 360px.
+- **Status de Auditoria**: `T11 PASSED` (`BudgetPanel.tsx` conectado a `useBudgets`, salvamento e versionamento no PostgreSQL, upload de assinatura para o MinIO, autocomplete apontado para `/api/clients` com criação rápida inline, rolagem horizontal responsiva da tabela para 360px, typecheck e testes 100% GREEN).
 
 ---
 

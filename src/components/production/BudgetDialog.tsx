@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { uploadBudgetPhoto } from "@/lib/apiBudgets";
 import {
   Dialog,
   DialogContent,
@@ -1177,36 +1178,90 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   // ─── Integração Cliente → Orçamento ───
   type BudgetClient = {
     id: string;
-    kind: "professional" | "particular";
+    kind?: "professional" | "particular";
     name: string;
-    customer_display_num: number | null;
-    customer_display_id: string | null;
-    siren: string | null;
-    siret: string | null;
-    tva_intracom: string | null;
-    tax_id: string | null;
-    email: string | null;
-    phone: string | null;
-    address: string | null;
-    address_complement: string | null;
-    postal_code: string | null;
-    city: string | null;
-    country: string | null;
+    customer_display_num?: number | null;
+    customer_display_id?: string | null;
+    siren?: string | null;
+    siret?: string | null;
+    tva_intracom?: string | null;
+    tax_id?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    address_complement?: string | null;
+    postal_code?: string | null;
+    city?: string | null;
+    country?: string | null;
   };
   const { workspaceId } = useWorkspace();
+  const qc = useQueryClient();
   const { data: clientsData } = useQuery({
-    queryKey: ["ops-billing-clients"],
+    queryKey: ["clients", workspaceId],
     queryFn: async () => {
-      const url = workspaceId
-        ? `/billing/admin/ops/clients?active_only=false&workspace_id=${encodeURIComponent(workspaceId)}`
-        : "/billing/admin/ops/clients?active_only=false";
-      const data = await apiRequest<{ clients: BudgetClient[]; balances?: Record<string, number> }>(url);
-      return data.clients ?? [];
+      const data = await apiRequest<{ clients: any[] }>("/clients");
+      return (data.clients ?? []).map((c: any) => ({
+        id: c.id,
+        kind: "particular" as const,
+        name: c.name,
+        customer_display_num: null,
+        customer_display_id: c.displayCode || c.display_code || null,
+        siren: null,
+        siret: null,
+        tva_intracom: null,
+        tax_id: null,
+        email: c.contactEmail || c.contact_email || null,
+        phone: c.contactPhone || c.contact_phone || null,
+        address: c.address || null,
+        address_complement: null,
+        postal_code: null,
+        city: null,
+        country: null,
+      }));
     },
   });
   const allClients = useMemo<BudgetClient[]>(() => clientsData ?? [], [clientsData]);
   const [clientSearchOpen, setClientSearchOpen] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState("");
+
+  const handleQuickCreateClient = async (name: string) => {
+    if (!name.trim()) return;
+    try {
+      const res = await apiRequest<{ client: any }>("/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const c = res.client;
+      const formatted: BudgetClient = {
+        id: c.id,
+        kind: "particular",
+        name: c.name,
+        customer_display_num: null,
+        customer_display_id: c.displayCode || c.display_code || null,
+        siren: null,
+        siret: null,
+        tva_intracom: null,
+        tax_id: null,
+        email: c.contactEmail || c.contact_email || null,
+        phone: c.contactPhone || c.contact_phone || null,
+        address: c.address || null,
+        address_complement: null,
+        postal_code: null,
+        city: null,
+        country: null,
+      };
+      applyClientToBudget(formatted);
+      qc.invalidateQueries({ queryKey: ["clients"] });
+      toast.success(
+        langDisplay === "fr"
+          ? `Client "${name}" créé avec succès`
+          : `Cliente "${name}" criado com sucesso!`
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao criar cliente.");
+    }
+  };
   const filteredClients = useMemo(() => {
     if (!clientSearchQuery.trim()) return allClients;
     const q = clientSearchQuery.toLowerCase();
@@ -1869,7 +1924,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     canvasDrawingRef.current.drawing = false;
   };
 
-  const approveWithSignature = () => {
+  const approveWithSignature = async () => {
     if (isLocked) return;
     const name = signatureSignerName.trim();
     if (!name) {
@@ -1894,6 +1949,29 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       return;
     }
     const signedAt = new Date().toISOString();
+
+    let resolvedSignatureData = dataUrl;
+    if (form.id && !form.id.startsWith("local-") && dataUrl) {
+      try {
+        const parts = dataUrl.split(",");
+        const mime = parts[0].match(/:(.*?);/)?.[1] || "image/png";
+        const bstr = atob(parts[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) u8arr[n] = bstr.charCodeAt(n);
+        const blob = new Blob([u8arr], { type: mime });
+        const resPhoto = await uploadBudgetPhoto(form.id, blob, {
+          category: "signature",
+          caption: `Assinatura de ${name}`,
+        });
+        if (resPhoto.photo?.url || resPhoto.photo?.download_url) {
+          resolvedSignatureData = resPhoto.photo.url || resPhoto.photo.download_url || resPhoto.photo.storagePath;
+        }
+      } catch (err) {
+        console.warn("Upload de foto de assinatura no MinIO não concluído:", err);
+      }
+    }
+
     const finalDraft: Budget = {
       ...form,
       status: "approved",
@@ -1902,7 +1980,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         signerName: name,
         signerType: signatureSignerType,
         signedAt,
-        signatureData: dataUrl,
+        signatureData: resolvedSignatureData,
         confirmationMethod: "DRAWN_SIGNATURE",
         budgetNumberAtMoment: form.number || null,
         finalValueAtMoment: totals.total,
@@ -1910,7 +1988,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       updated_at: signedAt,
     };
     setFormSafe(finalDraft);
-    try { onSave({ ...finalDraft, updated_at: new Date().toISOString() }); } catch {}
+    try { await onSave({ ...finalDraft, updated_at: new Date().toISOString() }); } catch {}
     try {
       window.dispatchEvent(new CustomEvent("budget:approved-for-production", {
         detail: { budgetId: finalDraft.id },
@@ -2481,10 +2559,26 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                           autoFocus
                         />
                         <CommandList>
-                          <CommandEmpty>
-                            {langDisplay === "fr"
-                              ? "Aucun client trouvé."
-                              : "Nenhum cliente encontrado."}
+                          <CommandEmpty className="p-4 text-center">
+                            <p className="text-xs text-muted-foreground mb-2">
+                              {langDisplay === "fr"
+                                ? "Aucun client trouvé."
+                                : "Nenhum cliente encontrado."}
+                            </p>
+                            {clientSearchQuery.trim() ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                className="w-full text-xs gap-1.5"
+                                onClick={() => handleQuickCreateClient(clientSearchQuery)}
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                                {langDisplay === "fr"
+                                  ? `Créer le client "${clientSearchQuery.trim()}"`
+                                  : `Cadastrar cliente "${clientSearchQuery.trim()}"`}
+                              </Button>
+                            ) : null}
                           </CommandEmpty>
                           <CommandGroup>
                             <ScrollArea className="max-h-[340px]">

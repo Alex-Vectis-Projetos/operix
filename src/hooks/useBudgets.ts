@@ -12,6 +12,7 @@ import {
   getBudgetPhotos,
   uploadBudgetPhoto,
   deleteBudgetPhoto,
+  deleteBudget,
   type ApiBudget,
   type ApiBudgetRevision,
   type ApiBudgetPhoto,
@@ -153,6 +154,19 @@ export function useBudgets(filters?: BudgetFilters) {
     },
   });
 
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      return deleteBudget(id);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["budgets"] });
+      toast.success("Orçamento excluído com sucesso.");
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Erro ao excluir orçamento.");
+    },
+  });
+
   return {
     ...query,
     budgets: query.data ?? [],
@@ -160,6 +174,7 @@ export function useBudgets(filters?: BudgetFilters) {
     updateRevision,
     approve,
     reject,
+    remove,
   };
 }
 

@@ -737,3 +737,43 @@ budgetsRouter.delete(
     }
   }
 );
+
+/**
+ * DELETE /api/budgets/:id
+ * Soft delete do orçamento com validação de tenant e permissão de objeto.
+ */
+budgetsRouter.delete("/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const budgetId = String(req.params.id);
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const budget = await prisma.budget.findUnique({
+      where: { id: budgetId },
+      include: { productionOrder: true },
+    });
+
+    if (!budget || budget.deletedAt || budget.workspaceId !== ctx.activeWorkspaceId) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+
+    if (ctx) {
+      assertObjectAccess(ctx, budget);
+    }
+
+    if (budget.productionOrder && budget.productionOrder.status !== "delivered") {
+      return res.status(409).json({ message: "Não é possível excluir orçamento com ordem de produção vinculada ativa." });
+    }
+
+    await prisma.budget.update({
+      where: { id: budgetId },
+      data: { deletedAt: new Date() },
+    });
+
+    return res.status(200).json({ success: true, id: budgetId });
+  } catch (error) {
+    return next(error);
+  }
+});

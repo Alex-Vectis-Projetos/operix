@@ -32,6 +32,8 @@ import {
   downloadBudgetHtml as sharedDownloadBudgetHtml,
 } from "@/lib/budgetPdfUtils";
 import { LocalBudgetsSyncBanner } from "./LocalBudgetsSyncBanner";
+import { useBudgets } from "@/hooks/useBudgets";
+import { apiBudgetToLocalBudget, localBudgetToApiPayload } from "@/lib/apiBudgets";
 
 const STORAGE_KEY = "budgets-local-v1";
 const BUDGET_TO_ORDER_MAP_KEY = "budget-to-production-order-v1";
@@ -71,28 +73,24 @@ interface Props {
 export function BudgetPanel({ onOpenOrder }: Props) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Budget | null>(null);
-  const [items, setItems] = useState<Budget[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<null | "total" | "draft" | "approved" | "rejected">(null);
   const { data: productionOrders, create: createOrder } = useProductionOrders();
   const { langDisplay } = useLanguage();
 
+  const {
+    budgets: apiBudgets,
+    create: createBudgetMutation,
+    updateRevision: updateRevisionMutation,
+    approve: approveBudgetMutation,
+    remove: removeBudgetMutation,
+  } = useBudgets();
+
+  const items = useMemo<Budget[]>(() => {
+    return (apiBudgets || []).map(apiBudgetToLocalBudget);
+  }, [apiBudgets]);
+
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as unknown;
-        if (Array.isArray(parsed)) {
-          setItems(
-            parsed
-              .filter((b) => b && typeof b === "object")
-              .map((b: any) => ({ ...b })),
-          );
-        }
-      }
-    } catch {
-      // storage não disponível ou corrompido
-    }
     try {
       const rawMap = localStorage.getItem(BUDGET_TO_ORDER_MAP_KEY);
       if (rawMap) {
@@ -294,39 +292,44 @@ export function BudgetPanel({ onOpenOrder }: Props) {
     }
   };
 
-  const handleSave = (b: Budget) => {
-    const found = items.findIndex((x) => x.id === b.id);
-    if (found >= 0) {
-      const existing = items[found];
-      const existingIsHardLocked = existing.status === "approved" || existing.status === "rejected";
-      const incomingRequestsUnlock = b.status === "correction_needed";
-      const existingAlreadyEditable = existing.status === "correction_needed";
-      if (existingIsHardLocked && !incomingRequestsUnlock && !existingAlreadyEditable) {
-        if (
-          existing.status !== b.status ||
-          existing.signature?.finalValueAtMoment !== b.signature?.finalValueAtMoment
-        ) {
-          toast.error(
-            existing.status === "approved"
-              ? "Orçamento aprovado não pode ser alterado."
-              : "Orçamento rejeitado não pode ser alterado.",
-          );
+  const handleSave = async (b: Budget) => {
+    try {
+      const payload = localBudgetToApiPayload(b);
+      const existing = (apiBudgets || []).find((x) => x.id === b.id);
+
+      if (existing) {
+        const revId =
+          existing.currentRevisionId ||
+          existing.current_revision_id ||
+          existing.currentRevision?.id ||
+          existing.current_revision?.id;
+
+        if (!revId) {
+          toast.error("Identificador de revisão não localizado para este orçamento.");
           return;
         }
-        const finExisting = computeTotalsFor(existing).total;
-        const finIncoming = computeTotalsFor(b).total;
-        if (existing.status === "approved" && Math.abs(finExisting - finIncoming) > 0.009) {
-          toast.error("Orçamento aprovado: valores financeiros não podem ser alterados.");
-          return;
+
+        await updateRevisionMutation.mutateAsync({
+          budgetId: b.id,
+          revisionId: revId,
+          patch: payload,
+        });
+
+        if (b.status === "approved" && existing.approvedRevisionId !== revId) {
+          await approveBudgetMutation.mutateAsync({
+            budgetId: b.id,
+            revisionId: revId,
+            options: { notes: b.diagnosis || undefined },
+          });
         }
+      } else {
+        await createBudgetMutation.mutateAsync(payload);
       }
+      setOpen(false);
+      setEditing(null);
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao salvar orçamento.");
     }
-    const next =
-      found >= 0
-        ? items.map((x) => (x.id === b.id ? b : x))
-        : [b, ...items];
-    next.sort((a, z) => (z.updated_at || "").localeCompare(a.updated_at || ""));
-    persist(next);
   };
 
   const openNew = () => {
@@ -353,15 +356,18 @@ export function BudgetPanel({ onOpenOrder }: Props) {
     } catch {}
   };
 
-  const removeBudget = (id: string) => {
+  const removeBudget = async (id: string) => {
     if (!confirm("Remover este orçamento?")) return;
-    persist(items.filter((x) => x.id !== id));
-    if (mapping[id]) {
-      const next = { ...mapping };
-      delete next[id];
-      persistMapping(next);
+    try {
+      await removeBudgetMutation.mutateAsync(id);
+      if (mapping[id]) {
+        const next = { ...mapping };
+        delete next[id];
+        persistMapping(next);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao remover orçamento.");
     }
-    toast.message("Orçamento removido");
   };
 
   const computeTotalsFor = (b: Budget) => {
@@ -540,25 +546,28 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         toast.warning("Orçamento precisa estar Aprovado para enviar à Produção.");
         return;
       }
-      const existingOrderId = mapping[b.id];
-      if (existingOrderId) {
-        const existing = Array.isArray(productionOrders)
-          ? productionOrders.find((o) => o.id === existingOrderId)
-          : undefined;
-        if (existing) {
-          toast.message("Orçamento já enviado — abrindo a Ordem existente em Produção.");
-          onOpenOrder?.(existing);
-          return;
-        }
-        const next = { ...mapping };
-        delete next[b.id];
-        persistMapping(next);
+      const existing = (apiBudgets || []).find((x) => x.id === b.id);
+      const revId =
+        existing?.approvedRevisionId ||
+        existing?.approved_revision_id ||
+        existing?.currentRevisionId ||
+        existing?.current_revision_id;
+
+      if (!revId) {
+        toast.error("Revisão aprovada não localizada.");
+        return;
       }
-      await sendToProductionAsync(b, mapping);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Falha ao enviar orçamento para Produção.",
-      );
+
+      const res = await approveBudgetMutation.mutateAsync({
+        budgetId: b.id,
+        revisionId: revId,
+      });
+
+      if (res.productionOrder) {
+        if (onOpenOrder) onOpenOrder(res.productionOrder);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Falha ao enviar orçamento para Produção.");
     }
   };
 
@@ -627,7 +636,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         <EmptyState onNew={openNew} />
       ) : (
         <Card className="border-border/50">
-          <CardContent className="p-0">
+          <CardContent className="p-0 overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -722,18 +731,18 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                             <FileDown className="h-3.5 w-3.5 mr-1" />
                             {langDisplay === "fr" ? "Télécharger" : "Baixar"}
                           </Button>
-                          {!(b.status === "approved" || b.status === "rejected") ? (
+                          {b.status !== "rejected" ? (
                             <Button size="sm" variant="outline" onClick={() => openEdit(b)}>
-                              Editar
+                              {b.status === "approved" ? "Revisar" : "Editar"}
                             </Button>
                           ) : null}
-                          {b.status === "approved" && !mapping[b.id] ? (
+                          {b.status === "approved" && !(b as any).productionOrder && !(b as any).production_order && !mapping[b.id] ? (
                             <Button
                               size="sm"
                               variant="outline"
                               className="gap-1.5 text-indigo-700 border-indigo-500/40 hover:bg-indigo-500/10 dark:text-indigo-400"
                               onClick={() => sendToProduction(b)}
-                              disabled={createOrder.isPending}
+                              disabled={approveBudgetMutation.isPending}
                             >
                               <ArrowRightLeft className="h-3.5 w-3.5" />
                               Enviar p/ Produção

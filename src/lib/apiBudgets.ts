@@ -286,3 +286,133 @@ export function deleteBudgetPhoto(
     method: "DELETE",
   });
 }
+
+export function deleteBudget(id: string): Promise<{ success: boolean; id: string }> {
+  return apiRequest<{ success: boolean; id: string }>(`/budgets/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function apiBudgetToLocalBudget(api: ApiBudget): any {
+  const rev = api.currentRevision || api.current_revision;
+  const clientSnap = rev?.clientSnapshot || rev?.client_snapshot || {};
+  const vehicleSnap = rev?.vehicleSnapshot || rev?.vehicle_snapshot || {};
+  const dossierSnap = rev?.dossierSnapshot || rev?.dossier_snapshot || {};
+
+  return {
+    id: api.id,
+    number: api.code,
+    issued_at: rev?.createdAt || rev?.created_at || api.createdAt || api.created_at || new Date().toISOString(),
+    status: (rev?.status || "draft") as any,
+    budget_type: (rev?.budgetType || rev?.budget_type || "pdr") as any,
+
+    client_id: api.clientId || api.client_id || clientSnap.id || undefined,
+    client_display_id: clientSnap.display_id || clientSnap.customer_display_id || undefined,
+    client_name: api.clientName || api.client_name || clientSnap.name || "Cliente",
+    client_phone: clientSnap.phone || undefined,
+    client_email: clientSnap.email || undefined,
+    client_document: clientSnap.document || undefined,
+
+    address_number: clientSnap.address?.number || undefined,
+    address_street: clientSnap.address?.street || undefined,
+    address_complement: clientSnap.address?.complement || undefined,
+    address_postal: clientSnap.address?.postal || undefined,
+    address_city: clientSnap.address?.city || undefined,
+    address_country: clientSnap.address?.country || undefined,
+
+    dossier_claim_number: dossierSnap.claim_number || undefined,
+    dossier_expert_number: dossierSnap.expert_number || undefined,
+    dossier_insurance_company: dossierSnap.insurance_company || undefined,
+    dossier_garage_name: dossierSnap.garage_name || undefined,
+
+    vehicle_brand: api.vehicleBrand || api.vehicle_brand || vehicleSnap.brand || undefined,
+    vehicle_model: api.vehicleModel || api.vehicle_model || vehicleSnap.model || undefined,
+    vehicle_plate: api.vehiclePlate || api.vehicle_plate || vehicleSnap.plate || undefined,
+    vehicle_vin: api.vehicleVin || api.vehicle_vin || vehicleSnap.vin || undefined,
+    vehicle_year: vehicleSnap.year || undefined,
+    vehicle_color: vehicleSnap.color || undefined,
+    vehicle_km: vehicleSnap.km || undefined,
+
+    intervention_types: rev?.interventionTypes || rev?.intervention_types || [],
+    diagnosis: rev?.diagnosis || undefined,
+    technical_description: rev?.technicalDescription || rev?.technical_description || undefined,
+
+    discount_pct: Number(rev?.discountPct ?? rev?.discount_pct ?? 0),
+    iva_pct: Number(rev?.taxPct ?? rev?.tax_pct ?? 0),
+
+    parts: rev?.parts || [],
+    services: rev?.services || [],
+    labor: rev?.labor || [],
+
+    vehicle_view_state: null,
+    mechanical_selections: [],
+
+    signature_ready: !!rev?.signature?.signed,
+    signature: rev?.signature || {
+      signed: false,
+      signerName: "",
+      signerType: "",
+      signedAt: null,
+      signatureData: null,
+      confirmationMethod: null,
+      budgetNumberAtMoment: null,
+      finalValueAtMoment: null,
+    },
+    rejection: rev?.rejection || { rejected: false, rejectedAt: null, rejectedBy: null, reason: null },
+    created_at: api.createdAt || api.created_at || new Date().toISOString(),
+    updated_at: api.updatedAt || api.updated_at || new Date().toISOString(),
+  };
+}
+
+export function localBudgetToApiPayload(b: any): CreateBudgetInput {
+  return {
+    clientId: b.client_id || null,
+    clientName: b.client_name || null,
+    vehiclePlate: b.vehicle_plate || null,
+    vehicleVin: b.vehicle_vin || null,
+    vehicleBrand: b.vehicle_brand || null,
+    vehicleModel: b.vehicle_model || null,
+    currencyCode: "EUR",
+    budgetType: b.budget_type || "pdr",
+    clientSnapshot: {
+      id: b.client_id,
+      display_id: b.client_display_id,
+      name: b.client_name,
+      phone: b.client_phone,
+      email: b.client_email,
+      document: b.client_document,
+      address: {
+        number: b.address_number,
+        street: b.address_street,
+        complement: b.address_complement,
+        postal: b.address_postal,
+        city: b.address_city,
+        country: b.address_country,
+      },
+    },
+    vehicleSnapshot: {
+      brand: b.vehicle_brand,
+      model: b.vehicle_model,
+      plate: b.vehicle_plate,
+      vin: b.vehicle_vin,
+      year: b.vehicle_year,
+      color: b.vehicle_color,
+      km: b.vehicle_km,
+    },
+    dossierSnapshot: {
+      claim_number: b.dossier_claim_number,
+      expert_number: b.dossier_expert_number,
+      insurance_company: b.dossier_insurance_company,
+      garage_name: b.dossier_garage_name,
+    },
+    parts: b.parts || [],
+    services: b.services || [],
+    labor: b.labor || [],
+    interventionTypes: b.intervention_types || [],
+    diagnosis: b.diagnosis || null,
+    technicalDescription: b.technical_description || null,
+    discountPct: b.discount_pct || 0,
+    taxPct: b.iva_pct || 0,
+    notes: b.notes || null,
+  };
+}
