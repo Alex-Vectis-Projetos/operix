@@ -143,9 +143,10 @@
 ## T10: Cliente Frontend e Hook de Orçamentos (`apiBudgets.ts` e `useBudgets.ts`)
 - **Descrição**: Criar cliente HTTP no frontend e hook TanStack Query para orçamentos, eliminando `localStorage` como fonte da verdade.
 - **DoD**:
-  - [ ] `apiBudgets.ts` tipado para listar, criar, revisar, rejeitar, aprovar e enviar fotos com `revisionId` explícito;
-  - [ ] `useBudgets.ts` fornece queries e mutations com toast e invalidação automática de cache;
-  - [ ] Sincronização de tipos de estado e revisão com o backend.
+  - [x] `apiBudgets.ts` tipado para listar, criar, revisar, rejeitar, aprovar e enviar fotos com `revisionId` explícito;
+  - [x] `useBudgets.ts` fornece queries e mutations com toast e invalidação automática de cache;
+  - [x] Sincronização de tipos de estado e revisão com o backend.
+- **Status de Auditoria**: `T10 PASSED` (Tipagem estrita em `apiBudgets.ts`, hooks `useBudgets`, `useBudget`, `useBudgetRevisions`, `useBudgetPhotos` em `useBudgets.ts`, propagação de `X-Workspace-Id` em `api.ts`, 8/8 testes unitários passando em `src/test/apiBudgets.test.ts` e 51/51 testes de integração GREEN).
 
 ---
 

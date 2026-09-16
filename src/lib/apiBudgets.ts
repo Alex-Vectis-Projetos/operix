@@ -1,12 +1,64 @@
 import { apiRequest } from "@/lib/api";
 
+export type BudgetStatus = "draft" | "submitted" | "approved" | "rejected";
+export type BudgetType = "pdr" | "smart" | "detailing" | "bodywork" | "mechanic" | "other";
+
+export interface CreateBudgetInput {
+  clientId?: string | null;
+  clientName?: string | null;
+  vehiclePlate?: string | null;
+  vehicleVin?: string | null;
+  vehicleBrand?: string | null;
+  vehicleModel?: string | null;
+  technicianUserId?: string | null;
+  legacyLocalId?: string | null;
+  currencyCode?: string;
+  budgetType?: BudgetType | string;
+  clientSnapshot?: Record<string, any> | null;
+  vehicleSnapshot?: Record<string, any> | null;
+  dossierSnapshot?: Record<string, any> | null;
+  parts?: any[];
+  services?: any[];
+  labor?: any[];
+  interventionTypes?: string[];
+  diagnosis?: string | null;
+  technicalDescription?: string | null;
+  notes?: string | null;
+  grossTotal?: number | string;
+  discountPct?: number | string;
+  taxPct?: number | string;
+}
+
+export interface UpdateBudgetRevisionInput {
+  currencyCode?: string;
+  budgetType?: BudgetType | string;
+  clientSnapshot?: Record<string, any> | null;
+  vehicleSnapshot?: Record<string, any> | null;
+  dossierSnapshot?: Record<string, any> | null;
+  parts?: any[];
+  services?: any[];
+  labor?: any[];
+  interventionTypes?: string[];
+  diagnosis?: string | null;
+  technicalDescription?: string | null;
+  notes?: string | null;
+  grossTotal?: number | string;
+  discountPct?: number | string;
+  taxPct?: number | string;
+}
+
+export interface ApproveBudgetRevisionOptions {
+  notes?: string;
+  dueAt?: string | null;
+}
+
 export interface ApiBudgetRevision {
   id: string;
   budgetId: string;
   budget_id: string;
   revisionNumber: number;
   revision_number: number;
-  status: "draft" | "submitted" | "approved" | "rejected";
+  status: BudgetStatus;
   currencyCode: string;
   currency_code: string;
   budgetType: string;
@@ -129,7 +181,7 @@ export function getBudgetRevisions(id: string): Promise<{ revisions: ApiBudgetRe
   return apiRequest<{ revisions: ApiBudgetRevision[] }>(`/budgets/${id}/revisions`);
 }
 
-export function createBudget(payload: Record<string, any>): Promise<{
+export function createBudget(payload: CreateBudgetInput): Promise<{
   budget: ApiBudget;
   revision: ApiBudgetRevision;
 }> {
@@ -143,7 +195,7 @@ export function createBudget(payload: Record<string, any>): Promise<{
 export function updateBudgetRevision(
   budgetId: string,
   revisionId: string,
-  patch: Record<string, any>
+  patch: UpdateBudgetRevisionInput
 ): Promise<{
   budget: ApiBudget;
   revision: ApiBudgetRevision;
@@ -162,7 +214,7 @@ export function updateBudgetRevision(
 export function approveBudgetRevision(
   budgetId: string,
   revisionId: string,
-  options?: { notes?: string; dueAt?: string | null }
+  options?: ApproveBudgetRevisionOptions
 ): Promise<{
   budget: ApiBudget;
   revision: ApiBudgetRevision;
@@ -208,6 +260,22 @@ export function syncLocalBudgets(
 
 export function getBudgetPhotos(id: string): Promise<{ photos: ApiBudgetPhoto[] }> {
   return apiRequest<{ photos: ApiBudgetPhoto[] }>(`/budgets/${id}/photos`);
+}
+
+export function uploadBudgetPhoto(
+  budgetId: string,
+  file: File | Blob,
+  meta?: { category?: string; caption?: string }
+): Promise<{ photo: ApiBudgetPhoto }> {
+  const formData = new FormData();
+  formData.append("file", file, (file as File).name || "photo.jpg");
+  if (meta?.category) formData.append("category", meta.category);
+  if (meta?.caption) formData.append("caption", meta.caption);
+
+  return apiRequest<{ photo: ApiBudgetPhoto }>(`/budgets/${budgetId}/photos`, {
+    method: "POST",
+    body: formData,
+  });
 }
 
 export function deleteBudgetPhoto(

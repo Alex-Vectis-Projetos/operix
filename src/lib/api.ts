@@ -42,6 +42,11 @@ export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promis
     headers.set("Authorization", `Bearer ${token}`);
   }
 
+  const selectedWs = typeof window !== "undefined" ? localStorage.getItem("selected_workspace_id") : null;
+  if (selectedWs && !headers.has("X-Workspace-Id")) {
+    headers.set("X-Workspace-Id", selectedWs);
+  }
+
   try {
     const response = await fetch(`${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`, {
       ...init,
