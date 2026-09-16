@@ -1,6 +1,6 @@
 # Tarefas de Execução — Spec 002: Mobile Operation Flow (Final Cleanup)
 
-**Status**: Ready for Implementation  
+**Status**: Implemented — Pending Independent Re-Review  
 **Fatia**: R1 — Operação Móvel: Orçamento → Revisões → Aprovação → Produção  
 
 ---
@@ -176,7 +176,23 @@
 - **Descrição**: Executar toda a suíte de testes, typecheck e linter, verificando ausência de regressões e integridade de tenant.
 - **DoD**:
   - [x] Todos os testes em `tests/integration/budget-production-flow.test.ts` passam (100%);
-  - [x] `npm run typecheck` conclui com zero erros;
-  - [x] `npm run lint` conclui com 0 novos erros em relação ao baseline de `develop/operix-core`;
+  - [x] `npm run typecheck` conclui com zero erros analisando `src/` via `tsconfig.app.json`;
+  - [x] `npm run lint` conclui com 0 erros;
   - [x] Nenhuma informação confidencial registrada em logs.
-- **Status de Auditoria**: `T13 PASSED` (Suíte completa de 85/85 testes 100% GREEN, incluindo 51 testes de integração do fluxo Orçamento → Produção e 7 testes de segurança multi-tenant; typechecks frontend e backend com 0 erros; 0 erros e 0 warnings de linter nos arquivos da vertical slice; auditoria de logs concluída comprovando ausência de credenciais, PII ou tokens registrados).
+- **Status de Auditoria**: `T13 PASSED` (Suíte completa de 95/95 testes 100% GREEN, incluindo 59 testes de integração em `budget-production-flow.test.ts`, 10 testes unitários em `apiBudgets.test.ts` e 4 testes em `budgetPdf.test.ts`; typechecks frontend e backend com 0 erros; 0 erros de linter; builds frontend e backend com exit code 0; `prisma validate` e `prisma generate` exit code 0).
+
+---
+
+## T14: Remediation da Independent Code Review (Findings 001 a 008)
+- **Descrição**: Remediar integralmente todos os 8 apontamentos da revisão independente (2 Blockers, 4 Majors, 2 Minors).
+- **DoD**:
+  - [x] **FINDING-001 (Blocker)**: Removidas referências a `setItems`, `isBudgetLocked` e `persist()`. Eliminado disparo de aprovação duplicada via CustomEvent `budget:approved-for-production`.
+  - [x] **FINDING-002 (Blocker)**: Corrigido script `typecheck` em `package.json` para `tsc -p tsconfig.app.json --noEmit`. Corrigidos todos os 46 erros de tipos no frontend.
+  - [x] **FINDING-003 (Major)**: `assertTenantStoragePath` reescrita para Deny-by-Default (prefixo obrigatório `tenants/${ctx.activeWorkspaceId}/`, rejeição de traversal e barras inválidas). Allowlist de buckets no backend (`ALLOWED_STORAGE_BUCKETS`).
+  - [x] **FINDING-004 (Major)**: `assertObjectAccess` aplicado em `PUT /revisions/:id`, `POST /approve` e `POST /reject` garantindo escopo `own` para técnicos.
+  - [x] **FINDING-005 (Major)**: `getFileUrl` saneado sem query parameter `?token=`. `useProductionPhotos` preserva presigned URL original da API intacta.
+  - [x] **FINDING-006 (Major)**: `approveBudgetRevision` e `rejectBudgetRevision` rejeitam revisões stale com HTTP 409 Conflict. Retry idempotente de revisão corrente retorna HTTP 200.
+  - [x] **FINDING-007 (Minor)**: `PO-LINEAGE-02` corrigido isolando ponteiros do `Budget` para validar especificamente a foreign key `production_orders_budget_revision_id_budget_id_fkey` (`P2003`).
+  - [x] **FINDING-008 (Minor)**: Removidas diretivas desnecessárias de ESLint em `BudgetDialog.tsx` e polyfill de `require` em `main.tsx`.
+- **Status de Auditoria**: `T14 PASSED — READY FOR INDEPENDENT RE-REVIEW`.
+

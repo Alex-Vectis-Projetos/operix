@@ -1,7 +1,7 @@
 # Decisões de Arquitetura e Design — Spec 002 (Final Cleanup)
 
-**Data**: 2026-09-14  
-**Status**: Ready for Implementation  
+**Data**: 2026-09-16  
+**Status**: Implemented — Pending Independent Re-Review  
 **Fatia**: R1 — Operação Móvel: Orçamento → Revisões → Aprovação → Produção  
 
 ---
@@ -165,3 +165,32 @@ Todos os caminhos do MinIO utilizam estritamente identificadores UUID canônicos
 - **T00 Baseline Gate**: Obrigatório validar histórico de migrations do zero antes de aplicar a nova migration.
 - **Linter**: Critério de **0 novos erros de linter** em relação à branch `develop/operix-core`.
 - Como `OrderDetailDialog.tsx` é alterado nesta fatia, todos os seus erros de lint existentes são saneados.
+
+---
+
+## 11. Remediation da Independent Review (Segurança, Estado e Integridade)
+
+### Decisões
+1. **BudgetPanel Runtime & Aprovação Canônica Única (FINDING-001 & DUPLICATE APPROVAL)**:
+   - Eliminação completa de referências residuais a `setItems`, `isBudgetLocked` e `persist()`.
+   - Remoção do disparo do CustomEvent `budget:approved-for-production` que causava aprovação dupla.
+   - Fluxo autoritativo único: UI → mutation `approveBudgetRevision` → backend → query invalidation.
+2. **Typecheck Real e Exaustivo no Frontend (FINDING-002)**:
+   - Script `"typecheck"` em `package.json` atualizado para `"tsc -p tsconfig.app.json --noEmit"`.
+   - Saneamento de todas as inconsistências de tipos em `BudgetPanel`, `apiBudgets`, `InvoicesScreen`, `EmbeddedFileManager` e outros componentes, atingindo 0 erros.
+3. **Isolamento Estrito de Storage Deny-by-Default e Allowlist de Buckets (FINDING-003)**:
+   - `assertTenantStoragePath` configurado como deny-by-default (prefixo obrigatório `tenants/${ctx.activeWorkspaceId}/`). Bloqueio estrito de path traversal (`..`, `\`, `//`, `\0`).
+   - Allowlist explícita de buckets permitidos (`ALLOWED_STORAGE_BUCKETS = ["production-photos", "uploads"]`). Rejeição com 403 Forbidden para qualquer outro bucket.
+4. **Autorização a Nível de Objeto para Técnicos em Revisões (FINDING-004)**:
+   - `PUT /revisions/:id`, `POST /approve`, `POST /reject` carregam o `Budget` com filtro tenant e invocam `assertObjectAccess(ctx, budget)`.
+   - Técnicos com `scope: own` só podem editar, aprovar ou rejeitar orçamentos explicitamente atribuídos a eles (`technicianUserId`).
+5. **Consumo Direto de Presigned URLs de Fotos (FINDING-005)**:
+   - Remoção de query param `?token=` em `getFileUrl`.
+   - `useProductionPhotos` consome diretamente a `url` / `download_url` pré-assinada retornada pelo servidor MinIO.
+6. **Controle Estrito de Revisões Stale e Idempotência (FINDING-006 & ACCEPTANCE-1.3)**:
+   - `approveBudgetRevision` e `rejectBudgetRevision` validam se a revisão solicitada é a revisão corrente.
+   - Tentativa de aprovar ou rejeitar revisão mais antiga/stale (ou downgrade) retorna HTTP 409 Conflict.
+   - Retry de aprovação da revisão aprovada corrente retorna a mesma OP com HTTP 200 de forma idempotente.
+7. **Isolamento de Foreign Key no Teste de Linhagem (FINDING-007)**:
+   - Teste `PO-LINEAGE-02` neutraliza os ponteiros `currentRevisionId` e `approvedRevisionId` do `Budget` antes de tentar excluir a `BudgetRevision`, comprovando que a restrição é especificamente imposta pela foreign key `production_orders_budget_revision_id_budget_id_fkey` (código Prisma `P2003`).
+
