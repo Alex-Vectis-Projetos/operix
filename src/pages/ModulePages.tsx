@@ -1184,7 +1184,7 @@ import { useRole } from "@/hooks/useRole";
 import { AddExistingUserPanel } from "@/components/users/AddExistingUserPanel";
 
 export function UsersPage() {
-  const { t, formatDate, formatDateTime } = useLanguage();
+  const { t, formatDate } = useLanguage();
   const { user } = useAuth();
   const { workspaceId, workspaceName } = useWorkspace();
   const queryClient = useQueryClient();
@@ -1275,7 +1275,7 @@ export function UsersPage() {
 
   const formatLastAccess = (value: string | null) => {
     if (!value) return "Nunca";
-    return formatDateTime ? formatDateTime(value) : formatDate(value);
+    return formatDate(value);
   };
 
   if (!workspaceId) {

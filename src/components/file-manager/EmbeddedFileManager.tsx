@@ -1028,7 +1028,7 @@ export async function storeFileInDocuments(
       data: { entityType, module, storagePath, size: file.size, mime: resolvedMime, targetYear: targetYear ?? null },
     });
 
-    const { error: uploadErr } = await withPromiseTimeout<{ error: null }>(
+    const { error: uploadErr } = await withPromiseTimeout<{ error: Error | null }>(
       uploadFile("uploads", storagePath, file, resolvedMime).then(() => ({ error: null })),
       10000,
       "documents_storage_upload",

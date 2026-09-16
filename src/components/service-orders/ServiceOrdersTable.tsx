@@ -816,7 +816,7 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
         }}
         order={operDocOrder}
         currentUserId={user?.id ?? null}
-        currentUserName={user?.displayName || user?.name || user?.email || null}
+        currentUserName={user?.fullName || user?.email || null}
         onSaved={(latest) => {
           // Atualiza a lista no cache do react-query para refletir o operational_document novo
           queryClient.invalidateQueries({ queryKey: ["service-orders"] });

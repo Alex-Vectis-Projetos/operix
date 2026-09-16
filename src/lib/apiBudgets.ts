@@ -76,6 +76,7 @@ export interface ApiBudgetRevision {
   intervention_types?: string[];
   diagnosis?: string | null;
   technicalDescription?: string | null;
+  technical_description?: string | null;
   grossTotal: string | number;
   gross_total: string | number;
   discountPct: string | number;

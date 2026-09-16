@@ -143,7 +143,7 @@ export type BudgetSignature = {
   signerType: BudgetSignerType | "";
   signedAt: string | null;
   signatureData: string | null;
-  confirmationMethod: "DRAWN_SIGNATURE" | "EXPLICIT_CONFIRMATION" | null;
+  confirmationMethod: "DRAWN_SIGNATURE" | "EXPLICIT_CONFIRMATION" | "IMPLICIT_BY_SEND_TO_CLIENT" | null;
   budgetNumberAtMoment: string | null;
   finalValueAtMoment: number | null;
 };
@@ -1858,7 +1858,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       setRejectionRejectedBy("");
       setTimeout(() => clearSignatureCanvas(), 0);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial?.id, form.client_name, form.dossier_insurance_company]);
 
   useEffect(() => {
@@ -1869,7 +1868,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       setTimeout(() => clearSignatureCanvas(), 30);
     });
     return () => window.cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, step]);
 
   const clearSignatureCanvas = () => {
@@ -1989,11 +1987,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     };
     setFormSafe(finalDraft);
     try { await onSave({ ...finalDraft, updated_at: new Date().toISOString() }); } catch {}
-    try {
-      window.dispatchEvent(new CustomEvent("budget:approved-for-production", {
-        detail: { budgetId: finalDraft.id },
-      }));
-    } catch {}
     toast.success(langDisplay === "fr" ? "Devis approuvé · Bloqué" : "Orçamento aprovado · Bloqueado.");
   };
 
@@ -2032,11 +2025,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     setConfirmNoSignatureOpen(false);
     setConfirmNoSignatureChecked(false);
     try { onSave({ ...finalDraft, updated_at: new Date().toISOString() }); } catch {}
-    try {
-      window.dispatchEvent(new CustomEvent("budget:approved-for-production", {
-        detail: { budgetId: finalDraft.id },
-      }));
-    } catch {}
     toast.success(langDisplay === "fr" ? "Devis approuvé · Bloqué" : "Orçamento aprovado · Bloqueado.");
   };
 
@@ -2070,11 +2058,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     const alreadyApproved =
       form.status === "approved" && form.signature?.signed && !!form.signature?.finalValueAtMoment;
     if (alreadyApproved) {
-      try {
-        window.dispatchEvent(new CustomEvent("budget:approved-for-production", {
-          detail: { budgetId: form.id },
-        }));
-      } catch {}
       return;
     }
     const signerFromClient =
@@ -2082,7 +2065,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       confirmNoSignatureName.trim() ||
       signatureSignerName.trim() ||
       "Cliente";
-    const signerType = confirmNoSignatureType || signatureSignerType || "client_representative";
+    const signerType: BudgetSignerType = confirmNoSignatureType || signatureSignerType || "authorized";
     const finalDraft: Budget = {
       ...form,
       status: "approved",
@@ -2100,11 +2083,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     };
     setFormSafe(finalDraft);
     try { onSave({ ...finalDraft, updated_at: new Date().toISOString() }); } catch {}
-    try {
-      window.dispatchEvent(new CustomEvent("budget:approved-for-production", {
-        detail: { budgetId: finalDraft.id },
-      }));
-    } catch {}
   };
 
   const sendToClient = () => {
@@ -3903,7 +3881,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {(Object.keys(BUDGET_TYPE_LABELS) as BudgetType[]).map((t) => {
-                const optIcon =
+                const OptIcon =
                   t === "mechanics" ? Wrench :
                   t === "body_paint" ? Palette :
                   t === "pdr" ? Hammer : BoxIcon;
@@ -3923,7 +3901,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                     )}
                   >
                     <span className="shrink-0 mt-0.5">
-                      {optIcon ? <optIcon className="h-5 w-5" /> : null}
+                      {OptIcon ? <OptIcon className="h-5 w-5" /> : null}
                     </span>
                     <span className="flex flex-col">
                       <span className="font-semibold text-sm leading-tight">{btLabel(t, langDisplay)}</span>
@@ -4494,7 +4472,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                   />
                 </Field>
                 <Field label={langDisplay === "fr" ? "Type de signataire" : "Tipo de signatário"}>
-                  <Select value={confirmNoSignatureType} onValueChange={(v) => setConfirmNoSignatureType(v)}>
+                  <Select value={confirmNoSignatureType} onValueChange={(v) => setConfirmNoSignatureType(v as BudgetSignerType)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {SIGNER_TYPE_OPTIONS.map((opt) => (
@@ -4577,7 +4555,7 @@ function Section({
   children,
   actions,
 }: {
-  title: string;
+  title: React.ReactNode;
   children: React.ReactNode;
   actions?: React.ReactNode;
 }) {

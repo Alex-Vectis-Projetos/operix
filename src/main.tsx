@@ -102,9 +102,6 @@ import { installAuthBreaker } from "./lib/authBreaker";
     (gw.crypto as Crypto) ||
     ((gw.crypto = {
       getRandomValues: (arr: Uint8Array) => {
-        if (typeof require === "function") {
-          return require("node:crypto").webcrypto.getRandomValues(arr);
-        }
         for (let i = 0; i < arr.length; i++) arr[i] = (Math.random() * 256) | 0;
         return arr;
       },

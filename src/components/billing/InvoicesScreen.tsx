@@ -386,10 +386,9 @@ export default function InvoicesScreen() {
     queryFn: async () => {
       const data = await apiRequest<{ invoices: Invoice[] }>("/billing/admin/ops/invoices");
       const today = new Date().toISOString().slice(0, 10);
-      // Auto-derive overdue: pending/partial invoices whose due_date has passed
-      return (data.invoices ?? []).map((r: Invoice) => {
+      return (data.invoices ?? []).map((r: Invoice): Invoice => {
         if ((r.status === "pending" || r.status === "partial") && r.due_date && r.due_date < today) {
-          return { ...r, status: "overdue" };
+          return { ...r, status: "overdue" as InvoiceStatus };
         }
         return r;
       });

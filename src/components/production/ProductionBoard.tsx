@@ -596,7 +596,7 @@ function OrderCard({
                   value={order.status}
                   onValueChange={(v) => onChangeStatus(v as ProductionStatus)}
                 >
-                  <SelectTrigger size="sm" className="h-8">
+                  <SelectTrigger className="h-8">
                     <SelectValue placeholder="Selecionar status..." />
                   </SelectTrigger>
                   <SelectContent>

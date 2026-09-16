@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,7 @@ import {
   emptyBudget,
   formatBRL,
   getBudgetInterventions,
+  resolveInterventionDisplayLang,
   type Budget,
   type BudgetStatus,
 } from "./BudgetDialog";
@@ -76,7 +78,9 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<null | "total" | "draft" | "approved" | "rejected">(null);
   const { data: productionOrders, create: createOrder } = useProductionOrders();
-  const { langDisplay } = useLanguage();
+  const { lang } = useLanguage();
+  const langDisplay = resolveInterventionDisplayLang(lang);
+  const queryClient = useQueryClient();
 
   const {
     budgets: apiBudgets,
@@ -89,8 +93,6 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const items = useMemo<Budget[]>(() => {
     return (apiBudgets || []).map(apiBudgetToLocalBudget);
   }, [apiBudgets]);
-
-  const sendToProductionRef = useRef<((b: Budget, mappingSnapshot: Record<string, string>) => Promise<void>) | null>(null);
 
   useEffect(() => {
     try {
@@ -111,38 +113,8 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       const ce = ev as CustomEvent<{ budgetId: string; reason?: string }>;
       const budgetId = ce.detail?.budgetId;
       if (!budgetId) return;
-      setItems((prev) => {
-        const next = prev.map((b) => {
-          if (b.id !== budgetId) return b;
-          const updated: Budget = {
-            ...b,
-            status: "draft",
-            updated_at: new Date().toISOString(),
-            signature: b.signature
-              ? {
-                  ...b.signature,
-                  finalValueAtMoment: undefined as any,
-                  confirmedAt: undefined as any,
-                  signerName: undefined as any,
-                  signedAt: undefined as any,
-                }
-              : b.signature,
-            rejection: ce.detail?.reason
-              ? {
-                  rejected: true,
-                  rejectedAt: new Date().toISOString(),
-                  rejectedBy: "Produção",
-                  reason: `Retornado da Produção: ${ce.detail.reason}`,
-                }
-              : b.rejection,
-          };
-          return updated;
-        });
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        } catch {}
-        return next;
-      });
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      queryClient.invalidateQueries({ queryKey: ["production_orders"] });
       setMapping((prev) => {
         if (!prev[budgetId]) return prev;
         const next = { ...prev };
@@ -155,38 +127,18 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       toast.message(`Orçamento ${budgetId.slice(0, 8)} retornado para Rascunho.`);
     };
     window.addEventListener("budget:correction-requested", handleCorrectionRequest);
+
     const handleProductionReturnToBudget = (ev: Event) => {
       const ce = ev as CustomEvent<{ productionOrderId: string }>;
       const orderId = ce.detail?.productionOrderId;
       if (!orderId) return;
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      queryClient.invalidateQueries({ queryKey: ["production_orders"] });
       setMapping((currentMap) => {
         const budgetId = Object.keys(currentMap).find(
           (k) => currentMap[k] === orderId,
         );
         if (budgetId) {
-          setItems((prev) => {
-            const next = prev.map((b) => {
-              if (b.id !== budgetId) return b;
-              return {
-                ...b,
-                status: "draft",
-                updated_at: new Date().toISOString(),
-                signature: b.signature
-                  ? {
-                      ...b.signature,
-                      finalValueAtMoment: undefined as any,
-                      confirmedAt: undefined as any,
-                      signerName: undefined as any,
-                      signedAt: undefined as any,
-                    }
-                  : b.signature,
-              };
-            });
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-            } catch {}
-            return next;
-          });
           const next = { ...currentMap };
           delete next[budgetId];
           try {
@@ -201,38 +153,15 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       "production:return-to-budget",
       handleProductionReturnToBudget,
     );
-    const handleBudgetApprovedAutoSendToProduction = (ev: Event) => {
-      const ce = ev as CustomEvent<{ budgetId: string }>;
-      const budgetId = ce.detail?.budgetId;
-      if (!budgetId) return;
-      setItems((snapshot) => {
-        const b = snapshot.find((x) => x.id === budgetId);
-        if (b && isBudgetLocked(b)) {
-          setMapping((mp) => {
-            if (mp[b.id]) return mp;
-            void sendToProductionRef.current?.(b, mp);
-            return mp;
-          });
-        }
-        return snapshot;
-      });
-    };
-    window.addEventListener(
-      "budget:approved-for-production",
-      handleBudgetApprovedAutoSendToProduction,
-    );
+
     return () => {
       window.removeEventListener("budget:correction-requested", handleCorrectionRequest);
       window.removeEventListener(
         "production:return-to-budget",
         handleProductionReturnToBudget,
       );
-      window.removeEventListener(
-        "budget:approved-for-production",
-        handleBudgetApprovedAutoSendToProduction,
-      );
     };
-  }, []);
+  }, [queryClient]);
 
   const totals = useMemo(() => {
     return items.reduce(
@@ -276,15 +205,6 @@ export function BudgetPanel({ onOpenOrder }: Props) {
     );
   }, [items]);
 
-  const persist = (next: Budget[]) => {
-    setItems(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // quota excedida etc.
-    }
-  };
-
   const persistMapping = (next: Record<string, string>) => {
     setMapping(next);
     try {
@@ -318,14 +238,29 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         });
 
         if (b.status === "approved" && existing.approvedRevisionId !== revId) {
-          await approveBudgetMutation.mutateAsync({
+          const res = await approveBudgetMutation.mutateAsync({
             budgetId: b.id,
             revisionId: revId,
             options: { notes: b.diagnosis || undefined },
           });
+          if (res?.productionOrder && onOpenOrder) {
+            onOpenOrder(res.productionOrder);
+          }
         }
       } else {
-        await createBudgetMutation.mutateAsync(payload);
+        const created = await createBudgetMutation.mutateAsync(payload);
+        const createdBudgetId = created.budget.id;
+        const createdRevId = created.budget.currentRevisionId || created.revision.id;
+        if (b.status === "approved" && createdRevId) {
+          const res = await approveBudgetMutation.mutateAsync({
+            budgetId: createdBudgetId,
+            revisionId: createdRevId,
+            options: { notes: b.diagnosis || undefined },
+          });
+          if (res?.productionOrder && onOpenOrder) {
+            onOpenOrder(res.productionOrder);
+          }
+        }
       }
       setOpen(false);
       setEditing(null);
@@ -402,146 +337,6 @@ export function BudgetPanel({ onOpenOrder }: Props) {
     const iva = (net * Math.max(0, Number(b.iva_pct) || 0)) / 100;
     return { parts: p, services: sv, labor: l, gross, disc, net, iva, total: net + iva };
   };
-
-  const BUDGET_NOTES_DELIMITER = "--- DADOS DO ORÇAMENTO (NÃO REMOVER ESTA LINHA) ---";
-
-  const buildNotesFromBudget = (b: Budget): string => {
-    const t = computeTotalsFor(b);
-    const lines: string[] = [];
-    lines.push(`Orçamento: ${b.number || "—"}`);
-    lines.push(`Data emissão: ${b.issued_at || "—"}`);
-    lines.push("");
-    lines.push("=== CLIENTE ===");
-    lines.push(`Nome: ${b.client_name || "—"}`);
-    lines.push(`Contacto: ${b.client_phone || "—"}`);
-    lines.push(`E-mail: ${b.client_email || "—"}`);
-    lines.push(`Documento: ${b.client_document || "—"}`);
-    lines.push("");
-    lines.push("=== VEÍCULO ===");
-    lines.push(`Marca: ${b.vehicle_brand || "—"}`);
-    lines.push(`Modelo: ${b.vehicle_model || "—"}`);
-    lines.push(`Matrícula: ${b.vehicle_plate || "—"}`);
-    lines.push(`VIN: ${b.vehicle_vin || "—"}`);
-    lines.push(`Ano: ${b.vehicle_year || "—"}`);
-    lines.push(`Cor: ${b.vehicle_color || "—"}`);
-    lines.push(`KM: ${b.vehicle_km || "—"}`);
-    lines.push("");
-    lines.push("=== INTERVENÇÃO ===");
-    const intervs = getBudgetInterventions(b);
-    if (intervs.length > 0) {
-      intervs.forEach((iv, idx) => lines.push(`${idx + 1}. ${iv}`));
-    } else {
-      lines.push("—");
-    }
-    lines.push("");
-    lines.push("=== DIAGNÓSTICO ===");
-    lines.push(b.diagnosis || "—");
-    lines.push("");
-    lines.push("=== DESCRIÇÃO TÉCNICA ===");
-    lines.push(b.technical_description || "—");
-    lines.push("");
-    lines.push("=== PEÇAS / MATERIAIS ===");
-    if (b.parts && b.parts.length) {
-      b.parts.forEach((p, i) => {
-        const q = Math.max(0, Number(p.quantity) || 0);
-        const u = Math.max(0, Number(p.unit_price) || 0);
-        lines.push(
-          `${i + 1}. ${p.description || "Peça sem descrição"} · Qtd ${q} × ${formatBRL(u)} = ${formatBRL(q * u)}`,
-        );
-      });
-    } else {
-      lines.push("Nenhuma peça lançada.");
-    }
-    lines.push(`Subtotal Peças: ${formatBRL(t.parts)}`);
-    lines.push("");
-    lines.push("=== SERVIÇOS ===");
-    const servicesArr: Array<{
-      description?: string;
-      quantity?: number;
-      unit_price?: number;
-    }> = Array.isArray((b as any).services) ? (b as any).services : [];
-    if (servicesArr.length > 0) {
-      servicesArr.forEach((s, i) => {
-        const q = Math.max(0, Number(s.quantity) || 0);
-        const u = Math.max(0, Number(s.unit_price) || 0);
-        lines.push(
-          `${i + 1}. ${s.description || "Serviço sem descrição"} · Qtd ${q} × ${formatBRL(u)} = ${formatBRL(q * u)}`,
-        );
-      });
-    } else {
-      lines.push("Nenhum serviço lançado.");
-    }
-    lines.push(`Subtotal Serviços: ${formatBRL(t.services)}`);
-    lines.push("");
-    lines.push("=== MÃO DE OBRA ===");
-    if (b.labor && b.labor.length) {
-      b.labor.forEach((l, i) => {
-        const h = Math.max(0, Number(l.hours) || 0);
-        const r = Math.max(0, Number(l.hourly_rate) || 0);
-        lines.push(
-          `${i + 1}. ${l.description || "Serviço sem descrição"} · ${h}h × ${formatBRL(r)}/h = ${formatBRL(h * r)}`,
-        );
-      });
-    } else {
-      lines.push("Nenhum serviço lançado.");
-    }
-    lines.push(`Subtotal Mão de Obra: ${formatBRL(t.labor)}`);
-    lines.push("");
-    lines.push("=== TOTAIS ===");
-    lines.push(`Subtotal (Peças + Serviços + M.O.): ${formatBRL(t.gross)}`);
-    lines.push(`Desconto (${Number(b.discount_pct || 0).toFixed(2)}%): - ${formatBRL(t.disc)}`);
-    lines.push(`Base tributável: ${formatBRL(t.net)}`);
-    lines.push(`IVA (${Number(b.iva_pct || 0).toFixed(2)}%): + ${formatBRL(t.iva)}`);
-    lines.push(`TOTAL DO ORÇAMENTO: ${formatBRL(t.total)}`);
-    lines.push("");
-    lines.push(
-      `Origem: Orçamento Aprovado (ID ${b.id}) convertido em Ordem de Produção. Dados originais preservados no módulo Orçamentos.`,
-    );
-    return lines.join("\n");
-  };
-
-  const sendToProductionAsync = async (b: Budget, mappingSnapshot: Record<string, string>) => {
-    try {
-      if (b.status !== "approved") return;
-      const existingOrderId = mappingSnapshot[b.id];
-      if (existingOrderId) return;
-      const t = computeTotalsFor(b);
-      const payload: Partial<ProductionOrder> & {
-        priority?: ProductionPriority;
-        status?: ProductionStatus;
-      } = {
-        client_id: b.client_id?.trim() ? b.client_id : null,
-        client_name: b.client_name?.trim() ? b.client_name : null,
-        license_plate: b.vehicle_plate?.trim().toUpperCase() || null,
-        vin: b.vehicle_vin?.trim().toUpperCase() || null,
-        brand: b.vehicle_brand?.trim() || null,
-        model: b.vehicle_model?.trim() || null,
-        color: b.vehicle_color?.trim() || null,
-        platform: `Orçamento ${b.number || "(sem número)"} · Total ${formatBRL(t.total)}`,
-        insurer: (() => {
-          const list = getBudgetInterventions(b);
-          const joined = list.join(", ");
-          return list.length > 0 ? (joined.length > 255 ? joined.slice(0, 254) : joined) : null;
-        })(),
-        notes: `\n${BUDGET_NOTES_DELIMITER}\n\n${buildNotesFromBudget(b)}`,
-        status: "in_production",
-        priority: "normal",
-        due_at: b.issued_at ? new Date(b.issued_at).toISOString() : null,
-      };
-      const created = await createOrder.mutateAsync(payload);
-      const nextMapping = { ...mappingSnapshot, [b.id]: created.id };
-      persistMapping(nextMapping);
-      toast.success(
-        `Orçamento ${b.number || "(sem número)"} aprovado → Produção · OS ${created.code} criada.`,
-      );
-      onOpenOrder?.(created);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Falha ao enviar orçamento para Produção.",
-      );
-    }
-  };
-  sendToProductionRef.current = sendToProductionAsync;
 
   const sendToProduction = async (b: Budget) => {
     try {
