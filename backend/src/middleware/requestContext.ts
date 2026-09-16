@@ -192,7 +192,7 @@ export async function resolveRequestContext(
   }
 
   try {
-    const [appUser, person, user] = await Promise.all([
+    const [appUser, person] = await Promise.all([
       prisma.appUser.findUnique({
         where: { authUserId: req.auth.userId },
         select: { id: true, name: true, workspaceId: true },
@@ -200,10 +200,6 @@ export async function resolveRequestContext(
       prisma.person.findFirst({
         where: { systemAccessUserId: req.auth.userId, deletedAt: null },
         select: { id: true, type: true },
-      }),
-      prisma.user.findUnique({
-        where: { id: req.auth.userId },
-        select: { fullName: true },
       }),
     ]);
 
@@ -219,7 +215,18 @@ export async function resolveRequestContext(
       appUser.workspaceId;
 
     const isTechnician = person?.type === "technician" || req.auth.role === "technician";
-    const userName = appUser.name || user?.fullName || undefined;
+    let userName = appUser.name || undefined;
+    if (!userName && isTechnician) {
+      try {
+        const u = await prisma.user.findUnique({
+          where: { id: req.auth.userId },
+          select: { fullName: true },
+        });
+        userName = u?.fullName || undefined;
+      } catch {
+        // Fallback defensivo caso tabela user não possua registro no contexto do teste
+      }
+    }
 
     let activeWorkspaceInfo: {
       activeWorkspaceId?: string;

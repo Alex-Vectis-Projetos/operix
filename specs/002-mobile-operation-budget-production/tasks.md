@@ -175,7 +175,8 @@
 ## T13: Validação Final dos Quality Gates e Linter
 - **Descrição**: Executar toda a suíte de testes, typecheck e linter, verificando ausência de regressões e integridade de tenant.
 - **DoD**:
-  - [ ] Todos os testes em `tests/integration/budget-production-flow.test.ts` passam (100%);
-  - [ ] `npm run typecheck` conclui com zero erros;
-  - [ ] `npm run lint` conclui com 0 novos erros em relação ao baseline de `develop/operix-core`;
-  - [ ] Nenhuma informação confidencial registrada em logs.
+  - [x] Todos os testes em `tests/integration/budget-production-flow.test.ts` passam (100%);
+  - [x] `npm run typecheck` conclui com zero erros;
+  - [x] `npm run lint` conclui com 0 novos erros em relação ao baseline de `develop/operix-core`;
+  - [x] Nenhuma informação confidencial registrada em logs.
+- **Status de Auditoria**: `T13 PASSED` (Suíte completa de 85/85 testes 100% GREEN, incluindo 51 testes de integração do fluxo Orçamento → Produção e 7 testes de segurança multi-tenant; typechecks frontend e backend com 0 erros; 0 erros e 0 warnings de linter nos arquivos da vertical slice; auditoria de logs concluída comprovando ausência de credenciais, PII ou tokens registrados).

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +89,8 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const items = useMemo<Budget[]>(() => {
     return (apiBudgets || []).map(apiBudgetToLocalBudget);
   }, [apiBudgets]);
+
+  const sendToProductionRef = useRef<((b: Budget, mappingSnapshot: Record<string, string>) => Promise<void>) | null>(null);
 
   useEffect(() => {
     try {
@@ -208,7 +210,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         if (b && isBudgetLocked(b)) {
           setMapping((mp) => {
             if (mp[b.id]) return mp;
-            void sendToProductionAsync(b, mp);
+            void sendToProductionRef.current?.(b, mp);
             return mp;
           });
         }
@@ -539,6 +541,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       );
     }
   };
+  sendToProductionRef.current = sendToProductionAsync;
 
   const sendToProduction = async (b: Budget) => {
     try {
