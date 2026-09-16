@@ -200,10 +200,10 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
 
     const { ZodError } = await import("zod");
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-      if (err instanceof ZodError) {
+      if (err instanceof ZodError || err?.name === "ZodError") {
         return res.status(400).json({ message: "Payload inválido.", issues: err.issues });
       }
-      const statusCode = err?.statusCode || (err instanceof ForbiddenError ? 403 : 500);
+      const statusCode = err?.statusCode || (err instanceof ForbiddenError || err?.name === "ForbiddenError" ? 403 : 500);
       res.status(statusCode).json({ message: err?.message || "Internal error" });
     });
 
@@ -679,13 +679,35 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
     });
 
     it("PO-LINEAGE-02: Excluir BudgetRevision referenciada por ProductionOrder é bloqueado por ON DELETE RESTRICT", async () => {
-      // A OP 'po-valid-integrity' criada no teste PO-03 referencia revision1 (r1111111-1111-4111-8111-111111111111)
-      // Tentativa de deletar fisicamente a BudgetRevision deve ser sumariamente bloqueada pelo PostgreSQL
-      await expect(
-        prisma.budgetRevision.delete({
+      // Neutraliza os ponteiros de Budget (currentRevisionId e approvedRevisionId) para isolar
+      // estritamente o bloqueio da Foreign Key da ProductionOrder (production_orders_budget_revision_id_budget_id_fkey)
+      await prisma.budget.update({
+        where: { id: "b1111111-1111-4111-8111-111111111111" },
+        data: {
+          currentRevisionId: null,
+          approvedRevisionId: null,
+        },
+      });
+
+      try {
+        await prisma.budgetRevision.delete({
           where: { id: "r1111111-1111-4111-8111-111111111111" },
-        })
-      ).rejects.toThrow();
+        });
+        expect.unreachable("Deveria ter falhado por restrição de FK da ProductionOrder");
+      } catch (err: any) {
+        // Valida que a falha é especificamente violação de FK (P2003) da production_orders
+        expect(err.code).toBe("P2003");
+        expect(err.message).toMatch(/production_orders_budget_revision_id_budget_id_fkey|production_orders/i);
+      } finally {
+        // Restaura ponteiros no Budget para integridade dos testes subsequentes
+        await prisma.budget.update({
+          where: { id: "b1111111-1111-4111-8111-111111111111" },
+          data: {
+            currentRevisionId: "r1111111-1111-4111-8111-111111111111",
+            approvedRevisionId: "r1111111-1111-4111-8111-111111111111",
+          },
+        });
+      }
     });
   });
 
@@ -1259,6 +1281,14 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         },
       });
 
+      await prisma.budget.update({
+        where: { id: "b-approve-flow" },
+        data: {
+          currentRevisionId: "r-new-rev-2",
+          currentRevisionNumber: 2,
+        },
+      });
+
       const tokenA = signAccessToken({
         id: FIXTURES.ownerA.userId,
         email: FIXTURES.ownerA.email,
@@ -1338,6 +1368,363 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       // No banco de dados, nunca pode haver mais de 1 OP
       const count = await prisma.productionOrder.count({ where: { budgetId: budget.id } });
       expect(count).toBe(1);
+    });
+
+    // =========================================================================
+    // FINDING-006 & ACCEPTANCE-1.3: Conflito de Revisão Stale e Idempotência
+    // =========================================================================
+    it("ACCEPTANCE-1.3: Tentativa de aprovar revisão stale (Rev 1 quando Rev 2 é current) retorna 409 Conflict", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      // 1. Criar Orçamento com Rev 1 e aprová-la
+      const budget = await prisma.budget.create({
+        data: {
+          id: "b-stale-test-13",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "ORC-STALE-13",
+          createdById: FIXTURES.ownerA.userId,
+          currentRevisionNumber: 1,
+        },
+      });
+
+      const rev1 = await prisma.budgetRevision.create({
+        data: {
+          id: "r-stale-rev-1",
+          budgetId: budget.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "Cliente Stale" },
+          vehicleSnapshot: { plate: "STL-0001" },
+          grossTotal: 1000.0,
+          netTotal: 1000.0,
+          finalTotal: 1000.0,
+          createdById: FIXTURES.ownerA.userId,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: budget.id },
+        data: { currentRevisionId: rev1.id },
+      });
+
+      // Aprova Rev 1 inicialmente (gera OP)
+      const approveRev1Res = await fetch(`${baseUrl}/api/budgets/${budget.id}/revisions/${rev1.id}/approve`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ revisionId: rev1.id }),
+      });
+      expect(approveRev1Res.status).toBe(200);
+      const approveRev1Body = await approveRev1Res.json();
+      const initialOpId = approveRev1Body.productionOrder.id;
+
+      // 2. Criar Rev 2 como draft e torná-la current
+      const rev2 = await prisma.budgetRevision.create({
+        data: {
+          id: "r-stale-rev-2",
+          budgetId: budget.id,
+          revisionNumber: 2,
+          status: "draft",
+          clientSnapshot: { name: "Cliente Stale" },
+          vehicleSnapshot: { plate: "STL-0001", notes: "Modificado na Rev 2" },
+          grossTotal: 1200.0,
+          netTotal: 1200.0,
+          finalTotal: 1200.0,
+          createdById: FIXTURES.ownerA.userId,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: budget.id },
+        data: {
+          currentRevisionId: rev2.id,
+          currentRevisionNumber: 2,
+        },
+      });
+
+      // 3. Tentar aprovar Rev 1 (stale) novamente
+      const staleApproveRes = await fetch(`${baseUrl}/api/budgets/${budget.id}/revisions/${rev1.id}/approve`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ revisionId: rev1.id }),
+      });
+
+      // Assert 409 Conflict
+      expect(staleApproveRes.status).toBe(409);
+      const staleBody = await staleApproveRes.json();
+      expect(staleBody.message).toMatch(/stale|desatualizada/i);
+
+      // Invariantes mantidas: approvedRevisionId permanece rev1 e OP continua apontando para rev1
+      const budgetAfterStale = await prisma.budget.findUnique({
+        where: { id: budget.id },
+        include: { productionOrder: true },
+      });
+      expect(budgetAfterStale?.approvedRevisionId).toBe(rev1.id);
+      expect(budgetAfterStale?.productionOrder?.id).toBe(initialOpId);
+      expect(budgetAfterStale?.productionOrder?.budgetRevisionId).toBe(rev1.id);
+
+      // Tentar rejeitar Rev 1 (stale) também retorna 409 Conflict
+      const staleRejectRes = await fetch(`${baseUrl}/api/budgets/${budget.id}/revisions/${rev1.id}/reject`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ reason: "Tentativa de rejeição stale" }),
+      });
+      expect(staleRejectRes.status).toBe(409);
+
+      // 4. Aprovação legítima de Rev 2 sucede (200)
+      const approveRev2Res = await fetch(`${baseUrl}/api/budgets/${budget.id}/revisions/${rev2.id}/approve`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ revisionId: rev2.id }),
+      });
+      expect(approveRev2Res.status).toBe(200);
+
+      // 5. Retry idempotente da Rev 2 retorna 200 e mesma OP sem duplicidade
+      const retryApproveRev2 = await fetch(`${baseUrl}/api/budgets/${budget.id}/revisions/${rev2.id}/approve`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ revisionId: rev2.id }),
+      });
+      expect(retryApproveRev2.status).toBe(200);
+      const retryBody = await retryApproveRev2.json();
+      expect(retryBody.productionOrder.id).toBe(initialOpId);
+
+      const opCount = await prisma.productionOrder.count({ where: { budgetId: budget.id } });
+      expect(opCount).toBe(1);
+    });
+
+    // =========================================================================
+    // FINDING-004: Autorização a Nível de Objeto (assertObjectAccess) para Técnicos
+    // =========================================================================
+    it("TECH-BUDGET-EDIT-OWN & TECH-BUDGET-EDIT-OTHER: Técnico só altera revisão de orçamento atribuído a ele", async () => {
+      // Budget atribuído ao Técnico A1
+      const budgetA1 = await prisma.budget.create({
+        data: {
+          id: "b-tech-edit-test",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "ORC-TECH-EDIT",
+          technicianUserId: FIXTURES.techA1.userId,
+          createdById: FIXTURES.ownerA.userId,
+          currentRevisionNumber: 1,
+        },
+      });
+
+      const revA1 = await prisma.budgetRevision.create({
+        data: {
+          id: "r-tech-edit-rev",
+          budgetId: budgetA1.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "Cliente A1" },
+          vehicleSnapshot: { plate: "TEC-0001" },
+          grossTotal: 500.0,
+          netTotal: 500.0,
+          finalTotal: 500.0,
+          createdById: FIXTURES.techA1.userId,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: budgetA1.id },
+        data: { currentRevisionId: revA1.id },
+      });
+
+      const tokenTechA1 = signAccessToken({
+        id: FIXTURES.techA1.userId,
+        email: FIXTURES.techA1.email,
+        role: "user",
+      });
+
+      const tokenTechA2 = signAccessToken({
+        id: FIXTURES.techA2.userId,
+        email: FIXTURES.techA2.email,
+        role: "user",
+      });
+
+      // 1. TECH-BUDGET-EDIT-OTHER: Técnico A2 tenta editar orçamento atribuído ao Técnico A1 -> 403 Forbidden
+      const resOther = await fetch(`${baseUrl}/api/budgets/${budgetA1.id}/revisions/${revA1.id}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokenTechA2}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ grossTotal: 600.0 }),
+      });
+      expect(resOther.status).toBe(403);
+
+      // 2. TECH-BUDGET-EDIT-OWN: Técnico A1 edita o próprio orçamento -> 200 OK
+      const resOwn = await fetch(`${baseUrl}/api/budgets/${budgetA1.id}/revisions/${revA1.id}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokenTechA1}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ grossTotal: 550.0 }),
+      });
+      expect(resOwn.status).toBe(200);
+    });
+
+    it("TECH-BUDGET-APPROVE-OWN & TECH-BUDGET-APPROVE-OTHER: Técnico só aprova orçamento atribuído a ele", async () => {
+      const budgetApprove = await prisma.budget.create({
+        data: {
+          id: "b-tech-approve-test",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "ORC-TECH-APP",
+          technicianUserId: FIXTURES.techA1.userId,
+          createdById: FIXTURES.ownerA.userId,
+          currentRevisionNumber: 1,
+        },
+      });
+
+      const revApprove = await prisma.budgetRevision.create({
+        data: {
+          id: "r-tech-approve-rev",
+          budgetId: budgetApprove.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "Cliente A1" },
+          vehicleSnapshot: { plate: "TEC-0002" },
+          grossTotal: 700.0,
+          netTotal: 700.0,
+          finalTotal: 700.0,
+          createdById: FIXTURES.techA1.userId,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: budgetApprove.id },
+        data: { currentRevisionId: revApprove.id },
+      });
+
+      const tokenTechA1 = signAccessToken({
+        id: FIXTURES.techA1.userId,
+        email: FIXTURES.techA1.email,
+        role: "user",
+      });
+
+      const tokenTechA2 = signAccessToken({
+        id: FIXTURES.techA2.userId,
+        email: FIXTURES.techA2.email,
+        role: "user",
+      });
+
+      // 1. TECH-BUDGET-APPROVE-OTHER: Técnico A2 tenta aprovar orçamento de A1 -> 403 Forbidden
+      const resOther = await fetch(`${baseUrl}/api/budgets/${budgetApprove.id}/revisions/${revApprove.id}/approve`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenTechA2}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ revisionId: revApprove.id }),
+      });
+      expect(resOther.status).toBe(403);
+
+      // 2. TECH-BUDGET-APPROVE-OWN: Técnico A1 aprova o próprio orçamento -> 200 OK
+      const resOwn = await fetch(`${baseUrl}/api/budgets/${budgetApprove.id}/revisions/${revApprove.id}/approve`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenTechA1}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ revisionId: revApprove.id }),
+      });
+      expect(resOwn.status).toBe(200);
+    });
+
+    it("TECH-BUDGET-REJECT-OWN & TECH-BUDGET-REJECT-OTHER: Técnico só rejeita orçamento atribuído a ele", async () => {
+      const budgetReject = await prisma.budget.create({
+        data: {
+          id: "b-tech-reject-test",
+          workspaceId: FIXTURES.wsAlpha,
+          code: "ORC-TECH-REJ",
+          technicianUserId: FIXTURES.techA1.userId,
+          createdById: FIXTURES.ownerA.userId,
+          currentRevisionNumber: 1,
+        },
+      });
+
+      const revReject = await prisma.budgetRevision.create({
+        data: {
+          id: "r-tech-reject-rev",
+          budgetId: budgetReject.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "Cliente A1" },
+          vehicleSnapshot: { plate: "TEC-0003" },
+          grossTotal: 400.0,
+          netTotal: 400.0,
+          finalTotal: 400.0,
+          createdById: FIXTURES.techA1.userId,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: budgetReject.id },
+        data: { currentRevisionId: revReject.id },
+      });
+
+      const tokenTechA1 = signAccessToken({
+        id: FIXTURES.techA1.userId,
+        email: FIXTURES.techA1.email,
+        role: "user",
+      });
+
+      const tokenTechA2 = signAccessToken({
+        id: FIXTURES.techA2.userId,
+        email: FIXTURES.techA2.email,
+        role: "user",
+      });
+
+      // 1. TECH-BUDGET-REJECT-OTHER: Técnico A2 tenta rejeitar orçamento de A1 -> 403 Forbidden
+      const resOther = await fetch(`${baseUrl}/api/budgets/${budgetReject.id}/revisions/${revReject.id}/reject`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenTechA2}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ reason: "Tentativa não autorizada" }),
+      });
+      expect(resOther.status).toBe(403);
+
+      // 2. TECH-BUDGET-REJECT-OWN: Técnico A1 rejeita o próprio orçamento -> 200 OK
+      const resOwn = await fetch(`${baseUrl}/api/budgets/${budgetReject.id}/revisions/${revReject.id}/reject`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenTechA1}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ reason: "Cliente recusou presencialmente" }),
+      });
+      expect(resOwn.status).toBe(200);
     });
   });
 
@@ -1812,7 +2199,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
 
       expect(response.status).toBe(403);
       const body = await response.json();
-      expect(body.message).toContain("outro workspace");
+      expect(body.message).toMatch(/outro workspace|não pertence ao workspace ativo/i);
     });
 
     it("PHOTO-CROSS-TENANT-DELETE-01: Usuário do Workspace A tentando deletar foto de OP do Workspace B recebe 404", async () => {
@@ -1897,6 +2284,137 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       expect(data.photos[0].url).toBeDefined();
       expect(typeof data.photos[0].url).toBe("string");
       expect(data.photos[0].download_url).toBe(data.photos[0].url);
+    });
+
+    // =========================================================================
+    // FINDING-003: Validações Estritas de Storage (Deny-by-Default, Traversal e Buckets)
+    // =========================================================================
+    it("STORAGE-PATH-DENY-01: path sem tenants/ é rejeitado com 403", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/storage/presigned-download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket: "production-photos",
+          path: "photos/arbitrary-unprefixed.jpg",
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.message).toMatch(/não pertence ao workspace ativo|Acesso negado/i);
+    });
+
+    it("STORAGE-PATH-DENY-02: path com tenant diferente é rejeitado com 403", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/storage/presigned-download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket: "production-photos",
+          path: `tenants/${FIXTURES.wsBravo}/photos/photo.jpg`,
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.message).toMatch(/não pertence ao workspace ativo|outro workspace/i);
+    });
+
+    it("STORAGE-BUCKET-01: bucket fora da allowlist server-side é rejeitado com 403", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      const response = await fetch(`${baseUrl}/api/storage/presigned-download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket: "unauthorized-system-bucket",
+          path: `tenants/${FIXTURES.wsAlpha}/photos/photo.jpg`,
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.message).toMatch(/não é permitido|não autorizado ao bucket/i);
+    });
+
+    it("STORAGE-TRAVERSAL-01: path traversal com .. ou barras incorretas é rejeitado com 403", async () => {
+      const tokenA = signAccessToken({
+        id: FIXTURES.ownerA.userId,
+        email: FIXTURES.ownerA.email,
+        role: "user",
+      });
+
+      // 1. Path traversal clássico com ..
+      const res1 = await fetch(`${baseUrl}/api/storage/presigned-download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket: "production-photos",
+          path: `tenants/${FIXTURES.wsAlpha}/../../../etc/passwd`,
+        }),
+      });
+      expect(res1.status).toBe(403);
+
+      // 2. Path com barra invertida
+      const res2 = await fetch(`${baseUrl}/api/storage/presigned-download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket: "production-photos",
+          path: `tenants\\${FIXTURES.wsAlpha}\\photo.jpg`,
+        }),
+      });
+      expect(res2.status).toBe(403);
+
+      // 3. Path com barras duplas //
+      const res3 = await fetch(`${baseUrl}/api/storage/presigned-download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenA}`,
+          "X-Workspace-Id": FIXTURES.wsAlpha,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket: "production-photos",
+          path: `tenants/${FIXTURES.wsAlpha}//photo.jpg`,
+        }),
+      });
+      expect(res3.status).toBe(403);
     });
   });
 

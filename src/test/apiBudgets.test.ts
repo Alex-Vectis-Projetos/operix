@@ -182,4 +182,48 @@ describe("apiBudgets client contract tests (T10)", () => {
     expect(url).toContain("/budgets/b-1/photos/ph-1");
     expect(options.method).toBe("DELETE");
   });
+
+  // =========================================================================
+  // REMEDIATION: FINDING-001 (DUPLICATE APPROVAL) & FINDING-005 (PRESIGNED URLS)
+  // =========================================================================
+  it("SINGLE-APPROVE-01: approval executes exactly one API call with no duplicate event re-dispatch", async () => {
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => ({
+        budget: { id: "b-single", approvedRevisionId: "rev-1" },
+        revision: { id: "rev-1", status: "approved" },
+        productionOrder: { id: "po-single", code: "PO-SINGLE" },
+      }),
+    });
+
+    const eventSpy = vi.fn();
+    window.addEventListener("budget:approved-for-production", eventSpy);
+
+    const res = await approveBudgetRevision("b-single", "rev-1", { notes: "Aprovação autoritativa única" });
+
+    expect(res.productionOrder.id).toBe("po-single");
+    // Exatamente uma chamada HTTP ao backend autoritativo
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [callUrl, callOpts] = (global.fetch as any).mock.calls[0];
+    expect(callUrl).toContain("/budgets/b-single/revisions/rev-1/approve");
+    expect(callOpts.method).toBe("POST");
+
+    // Prova que nenhum CustomEvent 'budget:approved-for-production' foi disparado para provocar segunda aprovação
+    expect(eventSpy).not.toHaveBeenCalled();
+    window.removeEventListener("budget:approved-for-production", eventSpy);
+  });
+
+  it("PRESIGNED-URL-01: getFileUrl never appends ?token= to private or public paths", async () => {
+    const { getFileUrl } = await import("@/lib/storage");
+
+    const privateUrl = getFileUrl("production-photos", "tenants/ws-1/photo.jpg");
+    expect(privateUrl).not.toContain("?token=");
+    expect(privateUrl).toContain("/storage/file/production-photos/tenants/ws-1/photo.jpg");
+
+    const publicUrl = getFileUrl("avatars", "user-1.jpg");
+    expect(publicUrl).not.toContain("?token=");
+    expect(publicUrl).toContain("/storage/public/avatars/user-1.jpg");
+  });
 });
+
