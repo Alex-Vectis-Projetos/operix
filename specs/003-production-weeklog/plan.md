@@ -275,12 +275,12 @@ FASE 4: API CANÔNICA, SUBMISSÃO, VALIDAÇÃO EM LOTE E RETIFICAÇÃO (T05, T06
   - Validação em lote versionada (sequence+1), bloqueio batch-self-validation e staging de assinatura MinIO (PNG exclusivo)
   - Ciclo de retificação versionada com sequence+1 e self-FK
 
-FASE 5: SANEAMENTO LEGADO, BACKFILL & FRONTEND UX (T08 DONE, T09, T10)
+FASE 5: SANEAMENTO LEGADO, BACKFILL & FRONTEND UX (T08 DONE, T09 DONE, T10)
   - [x] T08: Saneamento integral de serviceOrders.ts (pure read-only em GET, RequestContext router-level, eliminação total de mutações em GET, 410 em POST/PUT, 409 em mutações de projeções canônicas, 409 em PATCH/DELETE de arquivo histórico, remoção total do hook de PaymentOrder)
   - [x] T08 Targeted Hardening: Bloqueio total de PATCH em legacy archive (409 LEGACY_ARCHIVE_IMMUTABLE), precedência de titularidade canônica no escopo do técnico e checagem estrita de status delivered no backfill
   - [x] T08: Script de backfill determinístico seguro backend/scripts/backfillLegacyServiceOrders.ts com --dry-run padrão, qualify-or-skip estrito e relatório JSON
   - [x] T08: Suíte de testes dedicada tests/integration/service-orders-legacy-sanitization.test.ts (17/17 GREEN)
-  - [ ] T09: apiWeeklogs, useWeeklogs, botão finalizar em OP
+  - [x] T09: apiWeeklogs, useWeeklogs, botão finalizar em OP com preflight checks e mapeamento de erros de domínio, saneamento de mutações legadas descontinuadas no frontend
   - [ ] T10: WeeklogValidationDialog com submitForValidation, canvas HTML5 (PNG) e histórico imutável
 
 FASE 6: QUALITY GATES & VERIFICAÇÃO INTEGRADA (T11)
