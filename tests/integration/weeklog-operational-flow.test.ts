@@ -10,6 +10,7 @@ import {
   ConflictError,
   UnprocessableEntityError,
 } from "../../backend/src/lib/objectAuth.js";
+import { operationalWeekOf } from "../../backend/src/lib/weekUtils.js";
 import { Prisma } from "@prisma/client";
 
 // Configurações de ambiente mínimas para testes
@@ -92,6 +93,10 @@ const FIXTURES_003 = {
   clientBravo: {
     id: "30000000-0000-4000-8000-000000000003",
     name: "Cliente Bravo Externo",
+  },
+  clientPersonal: {
+    id: "30000000-0000-4000-8000-000000000004",
+    name: "Cliente Autônomo Personal",
   },
   sites: {
     central: "SITE-CENTRAL-01",
@@ -208,6 +213,14 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         id: FIXTURES_003.clientBravo.id,
         workspaceId: FIXTURES_003.wsBravo,
         name: FIXTURES_003.clientBravo.name,
+      },
+    });
+
+    await prisma.client.create({
+      data: {
+        id: FIXTURES_003.clientPersonal.id,
+        workspaceId: FIXTURES_003.wsPersonal,
+        name: FIXTURES_003.clientPersonal.name,
       },
     });
 
@@ -478,7 +491,7 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
       await expect(
         prisma.weeklogEntry.create({
           data: {
-            id: "wle-struct-02-dup",
+            id: "wle-struct-01-dup",
             weeklogId: wl.id,
             workspaceId: FIXTURES_003.wsAlpha,
             productionOrderId: po.id,
@@ -494,19 +507,52 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
     });
 
     it("T01-STRUCT-02: Self-FK rectificationOriginEntryId vincula WeeklogEntry com ON DELETE RESTRICT", async () => {
-      const entryOriginal = await prisma.weeklogEntry.findUniqueOrThrow({
-        where: { id: "wle-struct-01" },
+      const po = await prisma.productionOrder.create({
+        data: {
+          id: "po-struct-02",
+          workspaceId: FIXTURES_003.wsAlpha,
+          code: "PO-STRUCT-02",
+          clientId: FIXTURES_003.clientA.id,
+          executionSequence: 1,
+          currencyCode: "EUR",
+          operationalSiteKey: FIXTURES_003.sites.central,
+        },
+      });
+
+      const wl = await prisma.weeklog.create({
+        data: {
+          id: "wl-struct-02",
+          workspaceId: FIXTURES_003.wsAlpha,
+          startsOn: new Date("2026-08-10T00:00:00Z"),
+          endsOn: new Date("2026-08-16T23:59:59Z"),
+          clientId: FIXTURES_003.clientA.id,
+          siteKey: FIXTURES_003.sites.central,
+          week: "2026-W33",
+          weekNumber: 33,
+          yearReference: 2026,
+        },
+      });
+
+      const entryOriginal = await prisma.weeklogEntry.create({
+        data: {
+          id: "wle-struct-02-orig",
+          weeklogId: wl.id,
+          workspaceId: FIXTURES_003.wsAlpha,
+          productionOrderId: po.id,
+          executionSequence: 1,
+          technicianUserId: FIXTURES_003.techA1.userId,
+          technicianName: "Tech A1",
+          clientId: FIXTURES_003.clientA.id,
+          currencyCode: "EUR",
+          deliveredAt: new Date(),
+        },
       });
 
       // Criar entry de sequência 2 apontando para a entry 1
-      const po = await prisma.productionOrder.findUniqueOrThrow({
-        where: { id: "po-struct-01" },
-      });
-
       const entryRework = await prisma.weeklogEntry.create({
         data: {
           id: "wle-struct-02-rework",
-          weeklogId: entryOriginal.weeklogId,
+          weeklogId: wl.id,
           workspaceId: FIXTURES_003.wsAlpha,
           productionOrderId: po.id,
           executionSequence: 2,
@@ -531,10 +577,24 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
     });
 
     it("T01-STRUCT-03: @@unique([workspaceId, startsOn, clientId, siteKey]) impede cabeçalhos semanais duplicados", async () => {
+      await prisma.weeklog.create({
+        data: {
+          id: "wl-struct-03-orig",
+          workspaceId: FIXTURES_003.wsAlpha,
+          startsOn: new Date("2026-08-10T00:00:00Z"),
+          endsOn: new Date("2026-08-16T23:59:59Z"),
+          clientId: FIXTURES_003.clientA.id,
+          siteKey: FIXTURES_003.sites.central,
+          week: "2026-W33",
+          weekNumber: 33,
+          yearReference: 2026,
+        },
+      });
+
       await expect(
         prisma.weeklog.create({
           data: {
-            id: "wl-struct-dup",
+            id: "wl-struct-03-dup",
             workspaceId: FIXTURES_003.wsAlpha,
             startsOn: new Date("2026-08-10T00:00:00Z"),
             endsOn: new Date("2026-08-16T23:59:59Z"),
@@ -549,15 +609,29 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
     });
 
     it("T01-STRUCT-04: @@unique([weeklogId, validationSequence]) versiona validações do lote", async () => {
+      const wl = await prisma.weeklog.create({
+        data: {
+          id: "wl-struct-04",
+          workspaceId: FIXTURES_003.wsAlpha,
+          startsOn: new Date("2026-08-10T00:00:00Z"),
+          endsOn: new Date("2026-08-16T23:59:59Z"),
+          clientId: FIXTURES_003.clientA.id,
+          siteKey: FIXTURES_003.sites.central,
+          week: "2026-W33",
+          weekNumber: 33,
+          yearReference: 2026,
+        },
+      });
+
       const val1 = await prisma.weeklogValidation.create({
         data: {
-          id: "val-struct-01",
-          weeklogId: "wl-struct-01",
+          id: "val-struct-04-seq1",
+          weeklogId: wl.id,
           workspaceId: FIXTURES_003.wsAlpha,
           validationSequence: 1,
           validatorUserId: FIXTURES_003.validatorClientA.userId,
           validationMethod: "authenticated_confirmation",
-          coverageSnapshot: ["wle-struct-01"],
+          coverageSnapshot: ["wle-struct-04"],
         },
       });
       expect(val1.validationSequence).toBe(1);
@@ -566,13 +640,13 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
       await expect(
         prisma.weeklogValidation.create({
           data: {
-            id: "val-struct-02-dup",
-            weeklogId: "wl-struct-01",
+            id: "val-struct-04-seq1-dup",
+            weeklogId: wl.id,
             workspaceId: FIXTURES_003.wsAlpha,
             validationSequence: 1,
             validatorUserId: FIXTURES_003.validatorClientA.userId,
             validationMethod: "authenticated_confirmation",
-            coverageSnapshot: ["wle-struct-01"],
+            coverageSnapshot: ["wle-struct-04"],
           },
         })
       ).rejects.toThrow();
@@ -1009,82 +1083,55 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
 
     // -----------------------------------------------------------------------
     // B.2 - Determinismo Temporal, Fuso Horário e Boundaries
+    // Testes diretos do utilitário canônico operationalWeekOf (backend/src/lib/weekUtils.ts)
     // -----------------------------------------------------------------------
     describe("B.2 Determinismo Temporal e Boundaries", () => {
-      it("WEEK-BOUNDARY-01: A transição de Domingo 00:00:00 a Sábado 23:59:59 respeita o fuso horário configurado no workspace", async () => {
+      it("WEEK-BOUNDARY-01: A transição de Domingo 00:00:00 a Sábado 23:59:59 respeita o fuso horário configurado no workspace", () => {
         // Domingo em Europe/Paris (UTC+2 no verão) às 00:00:01 local corresponde a Sábado 22:00:01 UTC
-        const res = await fetch(`${baseUrl}/api/weeklogs/calculate-boundary`, {
-          method: "POST",
-          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
-          body: JSON.stringify({
-            timestamp: "2026-08-16T00:00:01+02:00",
-            timezone: "Europe/Paris",
-          }),
-        });
+        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
+        const result = operationalWeekOf("2026-08-16T00:00:01+02:00", "Europe/Paris");
 
-        expect(res.status).toBe(200);
-        const data = await res.json();
-        expect(data.startsOn).toBe("2026-08-15T22:00:00.000Z"); // Domingo 00:00 local em UTC
+        expect(result.startsOn.toISOString()).toBe("2026-08-15T22:00:00.000Z"); // Domingo 00:00:00 local em UTC
+        expect(result.endsOn.toISOString()).toBe("2026-08-22T21:59:59.999Z"); // Sábado 23:59:59.999 local em UTC
+        expect(result.week).toBe("2026-W33");
       });
 
-      it("WEEK-DST-SPRING-01: Transição com salto de 23h na Primavera calcula início e término sem perder ordens no boundary", async () => {
-        const res = await fetch(`${baseUrl}/api/weeklogs/calculate-boundary`, {
-          method: "POST",
-          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
-          body: JSON.stringify({
-            timestamp: "2026-03-29T02:30:00+01:00", // Domingo da virada de horário de verão em Paris
-            timezone: "Europe/Paris",
-          }),
-        });
+      it("WEEK-DST-SPRING-01: Transição com salto de 23h na Primavera calcula início e término sem perder ordens no boundary", () => {
+        // Domingo 29/03/2026 da virada de horário de verão em Paris (salto 02:00 -> 03:00)
+        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
+        const result = operationalWeekOf("2026-03-29T02:30:00+01:00", "Europe/Paris");
 
-        expect(res.status).toBe(200);
-        const data = await res.json();
-        expect(data.week).toBe("2026-W13");
+        expect(result.startsOn.toISOString()).toBe("2026-03-28T23:00:00.000Z"); // Domingo 00:00 local (UTC+1)
+        expect(result.week).toBe("2026-W13");
+        expect(result.weekNumber).toBe(13);
       });
 
-      it("WEEK-DST-FALL-01: Transição com repetição de 25h no Outono mantém consistência estrita de timestamps UTC", async () => {
-        const res = await fetch(`${baseUrl}/api/weeklogs/calculate-boundary`, {
-          method: "POST",
-          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
-          body: JSON.stringify({
-            timestamp: "2026-10-25T02:30:00+02:00", // Domingo do retorno de horário de verão em Paris
-            timezone: "Europe/Paris",
-          }),
-        });
+      it("WEEK-DST-FALL-01: Transição com repetição de 25h no Outono mantém consistência estrita de timestamps UTC", () => {
+        // Domingo 25/10/2026 do retorno de horário de verão em Paris (repetição 03:00 -> 02:00)
+        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
+        const result = operationalWeekOf("2026-10-25T02:30:00+02:00", "Europe/Paris");
 
-        expect(res.status).toBe(200);
-        const data = await res.json();
-        expect(data.week).toBe("2026-W43");
+        expect(result.startsOn.toISOString()).toBe("2026-10-24T22:00:00.000Z"); // Domingo 00:00 local (UTC+2)
+        expect(result.week).toBe("2026-W43");
+        expect(result.weekNumber).toBe(43);
       });
 
-      it("WEEK-YEAR-BOUNDARY-01: Semana que cruza 31/12 e 01/01 resolve startsOn e yearReference de forma determinística", async () => {
-        const res = await fetch(`${baseUrl}/api/weeklogs/calculate-boundary`, {
-          method: "POST",
-          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
-          body: JSON.stringify({
-            timestamp: "2026-12-31T23:59:00+01:00",
-            timezone: "Europe/Paris",
-          }),
-        });
+      it("WEEK-YEAR-BOUNDARY-01: Semana que cruza 31/12 e 01/01 resolve startsOn e yearReference de forma determinística", () => {
+        // 31/12/2026 (quinta-feira) em Paris
+        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
+        const result = operationalWeekOf("2026-12-31T23:59:00+01:00", "Europe/Paris");
 
-        expect(res.status).toBe(200);
-        const data = await res.json();
-        expect(data.yearReference).toBe(2026);
+        expect(result.yearReference).toBe(2026);
+        expect(result.startsOn.toISOString()).toBe("2026-12-26T23:00:00.000Z"); // Domingo 27/12 00:00 local (UTC+1)
       });
 
-      it("WEEK-INVALID-TIMEZONE-01: Workspace com fuso IANA inválido aciona fallback seguro e determinístico para UTC", async () => {
-        const res = await fetch(`${baseUrl}/api/weeklogs/calculate-boundary`, {
-          method: "POST",
-          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
-          body: JSON.stringify({
-            timestamp: "2026-08-12T14:00:00Z",
-            timezone: "Invalid/Fictional_Zone",
-          }),
-        });
+      it("WEEK-INVALID-TIMEZONE-01: Workspace com fuso IANA inválido aciona fallback seguro e determinístico para UTC", () => {
+        // Quarta-feira 12/08/2026 com timezone inválido
+        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
+        const result = operationalWeekOf("2026-08-12T14:00:00Z", "Invalid/Fictional_Zone");
 
-        expect(res.status).toBe(200);
-        const data = await res.json();
-        expect(data.resolvedTimezone).toBe("UTC");
+        expect(result.startsOn.toISOString()).toBe("2026-08-09T00:00:00.000Z"); // Domingo 00:00 UTC
+        expect(result.week).toBe("2026-W32");
       });
     });
 
@@ -1109,11 +1156,22 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         });
 
         // Usuário do Workspace B tenta acessar GET /api/weeklogs/:id
-        const res = await fetch(`${baseUrl}/api/weeklogs/${wlA.id}`, {
+        const resGet = await fetch(`${baseUrl}/api/weeklogs/${wlA.id}`, {
           headers: getAuthHeader(FIXTURES_003.ownerB, FIXTURES_003.wsBravo),
         });
+        expect([403, 404]).toContain(resGet.status);
+        const dataGet = await resGet.json();
+        expect(dataGet.message).toBeDefined();
 
-        expect([403, 404]).toContain(res.status);
+        // E também ao tentar validar POST /api/weeklogs/:id/validate
+        const resVal = await fetch(`${baseUrl}/api/weeklogs/${wlA.id}/validate`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerB, FIXTURES_003.wsBravo),
+          body: JSON.stringify({ validationMethod: "authenticated_confirmation" }),
+        });
+        expect([403, 404]).toContain(resVal.status);
+        const dataVal = await resVal.json();
+        expect(dataVal.message).toBeDefined();
       });
 
       it("TECH-OWN-01: Técnico com scope own só visualiza e opera suas próprias entradas de WEEKLOG atribuídas", async () => {
@@ -1485,7 +1543,7 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
             workspaceId: FIXTURES_003.wsPersonal,
             startsOn: new Date("2026-08-10T00:00:00Z"),
             endsOn: new Date("2026-08-16T23:59:59Z"),
-            clientId: FIXTURES_003.clientA.id,
+            clientId: FIXTURES_003.clientPersonal.id,
             siteKey: FIXTURES_003.sites.central,
             week: "2026-W33",
             weekNumber: 33,
@@ -1563,6 +1621,9 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         const validation = await prisma.weeklogValidation.findFirst({ where: { weeklogId: wl.id } });
         expect(validation?.validationMethod).toBe("authenticated_confirmation");
         expect(validation?.validatorUserId).toBe(FIXTURES_003.validatorClientA.userId);
+        expect(validation?.validatedAt).toBeInstanceOf(Date);
+        expect(validation?.validationSequence).toBe(1);
+        expect(Array.isArray(validation?.coverageSnapshot)).toBe(true);
       });
 
       it("SIGNATURE-IMMUTABLE-AFTER-VALIDATION-01: Imutabilidade de assinatura pós-validação com HTTP 409 Conflict", async () => {
@@ -1897,79 +1958,68 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
             workspaceId: FIXTURES_003.wsAlpha,
             code: "PO-MULT-01",
             clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
             currencyCode: "EUR",
-            executionSequence: 3,
+            performedServices: [{ description: "Serviço Inicial", amount: "100.00" }],
+            executionSequence: 1,
             status: "in_production",
           },
         });
 
-        const wl = await prisma.weeklog.create({
-          data: {
-            id: "wl-rect-mult",
-            workspaceId: FIXTURES_003.wsAlpha,
-            startsOn: new Date("2026-08-10T00:00:00Z"),
-            endsOn: new Date("2026-08-16T23:59:59Z"),
-            clientId: FIXTURES_003.clientA.id,
-            siteKey: FIXTURES_003.sites.central,
-            week: "2026-W33",
-            weekNumber: 33,
-            yearReference: 2026,
-          },
+        // 1. Finaliza ciclo 1
+        const resFin1 = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
         });
+        expect(resFin1.status).toBe(200);
+        const data1 = await resFin1.json();
+        const entry1Id = data1.weeklogEntry.id;
+        const wlId = data1.weeklogEntry.weeklogId;
 
-        const e1 = await prisma.weeklogEntry.create({
-          data: {
-            id: "wle-mult-1",
-            weeklogId: wl.id,
-            workspaceId: FIXTURES_003.wsAlpha,
-            productionOrderId: po.id,
-            executionSequence: 1,
-            technicianUserId: FIXTURES_003.techA1.userId,
-            technicianName: "Tech A1",
-            clientId: FIXTURES_003.clientA.id,
-            currencyCode: "EUR",
-            deliveredAt: new Date("2026-08-11T10:00:00Z"),
-            validationStatus: "rectification_requested",
-          },
+        // 2. Solicita retificação do ciclo 1
+        const resRect1 = await fetch(`${baseUrl}/api/weeklogs/${wlId}/entries/${entry1Id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ rectificationReason: "Retrabalho 1" }),
         });
+        expect(resRect1.status).toBe(200);
 
-        const e2 = await prisma.weeklogEntry.create({
-          data: {
-            id: "wle-mult-2",
-            weeklogId: wl.id,
-            workspaceId: FIXTURES_003.wsAlpha,
-            productionOrderId: po.id,
-            executionSequence: 2,
-            technicianUserId: FIXTURES_003.techA1.userId,
-            technicianName: "Tech A1",
-            clientId: FIXTURES_003.clientA.id,
-            currencyCode: "EUR",
-            deliveredAt: new Date("2026-08-12T10:00:00Z"),
-            validationStatus: "rectification_requested",
-            isRectification: true,
-            rectificationOriginEntryId: e1.id,
-          },
+        // 3. Finaliza ciclo 2
+        const resFin2 = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
         });
+        expect(resFin2.status).toBe(200);
+        const data2 = await resFin2.json();
+        const entry2Id = data2.weeklogEntry.id;
 
-        const e3 = await prisma.weeklogEntry.create({
-          data: {
-            id: "wle-mult-3",
-            weeklogId: wl.id,
-            workspaceId: FIXTURES_003.wsAlpha,
-            productionOrderId: po.id,
-            executionSequence: 3,
-            technicianUserId: FIXTURES_003.techA1.userId,
-            technicianName: "Tech A1",
-            clientId: FIXTURES_003.clientA.id,
-            currencyCode: "EUR",
-            deliveredAt: new Date("2026-08-13T10:00:00Z"),
-            validationStatus: "pending",
-            isRectification: true,
-            rectificationOriginEntryId: e2.id,
-          },
+        // 4. Solicita retificação do ciclo 2
+        const resRect2 = await fetch(`${baseUrl}/api/weeklogs/${wlId}/entries/${entry2Id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ rectificationReason: "Retrabalho 2" }),
         });
+        expect(resRect2.status).toBe(200);
 
+        // 5. Finaliza ciclo 3
+        const resFin3 = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(resFin3.status).toBe(200);
+        const data3 = await resFin3.json();
+        const entry3Id = data3.weeklogEntry.id;
+
+        const e1 = await prisma.weeklogEntry.findUniqueOrThrow({ where: { id: entry1Id } });
+        const e2 = await prisma.weeklogEntry.findUniqueOrThrow({ where: { id: entry2Id } });
+        const e3 = await prisma.weeklogEntry.findUniqueOrThrow({ where: { id: entry3Id } });
+
+        expect(e1.executionSequence).toBe(1);
+        expect(e1.rectificationOriginEntryId).toBeNull();
+        expect(e2.executionSequence).toBe(2);
         expect(e2.rectificationOriginEntryId).toBe(e1.id);
+        expect(e3.executionSequence).toBe(3);
         expect(e3.rectificationOriginEntryId).toBe(e2.id);
       });
 
@@ -2025,11 +2075,15 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
           },
         });
 
-        await fetch(`${baseUrl}/api/weeklogs/${wl.id}/validate`, {
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/validate`, {
           method: "POST",
           headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
           body: JSON.stringify({ validationMethod: "authenticated_confirmation" }),
         });
+        expect(res.status).toBe(200);
+
+        const updatedWl = await prisma.weeklog.findUniqueOrThrow({ where: { id: wl.id } });
+        expect(updatedWl.status).toBe("validated");
 
         const finalPaymentOrdersCount = await prisma.paymentOrder.count({
           where: { workspaceId: FIXTURES_003.wsAlpha },
