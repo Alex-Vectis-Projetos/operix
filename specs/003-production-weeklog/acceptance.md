@@ -4,11 +4,11 @@
 **Branch**: `feat/003-production-weeklog`  
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-17  
-**Total de Cenários**: 45 cenários de aceitação formal  
+**Total de Cenários**: 51 cenários de aceitação formal (45 base + 6 invariantes T04)  
 
 ---
 
-## 1. Matriz de Cenários e Invariantes (45 Cenários)
+## 1. Matriz de Cenários e Invariantes (51 Cenários)
 
 | ID do Cenário | Invariante / Regra de Negócio | Comportamento Esperado |
 |---|---|---|
@@ -57,6 +57,12 @@
 | **DIRECT-OP-NO-SITE-01** | Bloqueio de OP sem local operacional | Tentativa de finalizar ordem de produção sem `operationalSiteKey` resolvido/persistido retorna HTTP 422 Unprocessable Entity (`OPERATIONAL_SITE_REQUIRED`). |
 | **FINALIZE-NO-CURRENCY-01** | Bloqueio de OP sem código de moeda | Tentativa de finalizar ordem sem moeda canônica definida (`currencyCode`) retorna HTTP 422 Unprocessable Entity (`CURRENCY_REQUIRED`). |
 | **VALIDATOR-BATCH-SELF-01** | Bloqueio de auto-validação em lote | Validador autenticado que executou qualquer uma das ordens incluídas no `coverageSnapshot` do lote recebe HTTP 403 Forbidden. |
+| **FINALIZE-CROSS-TENANT-01** | Isolamento tenant na finalização | Ator de Workspace B tentando finalizar OP de Workspace A recebe HTTP 404/403. |
+| **FINALIZE-TECH-OWN-01** | Ownership estrito de técnico | Técnico A tentando finalizar OP atribuída a Técnico B recebe HTTP 403 Forbidden. |
+| **FINALIZE-SNAPSHOT-DECIMAL-01** | Precisão monetária decimal | Cálculos de itens múltiplos utilizam Prisma.Decimal exato sem perda de ponto flutuante. |
+| **FINALIZE-HEADER-RACE-01** | Race condition de cabeçalho | OPs distintas finalizadas concorrentemente para o mesmo lote semanal utilizam o mesmo Weeklog. |
+| **FINALIZE-ROLLBACK-01** | Rollback atômico em falha | Falha ao gravar WeeklogEntry desfaz a transação e deixa ProductionOrder intacta. |
+| **FINALIZE-P2002-UNRELATED-01** | Propagação de P2002 não-relacionado | Erro P2002 de constraint externa à idempotência é relançado sem mascaramento. |
 
 ---
 

@@ -11,7 +11,7 @@ import {
   UnprocessableEntityError,
 } from "../../backend/src/lib/objectAuth.js";
 import { operationalWeekOf } from "../../backend/src/lib/weekUtils.js";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../../backend/src/services/weeklogService.js";
 
 // Configurações de ambiente mínimas para testes
 process.env.NODE_ENV = "test";
@@ -1078,6 +1078,214 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         const e2 = await prisma.weeklogEntry.findFirstOrThrow({ where: { productionOrderId: poConc2.id } });
 
         expect(e1.weeklogId).toBe(e2.weeklogId);
+      });
+
+      it("FINALIZE-CROSS-TENANT-01: Ator de B não finaliza OP de A", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-cross-tenant-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-XT-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Reparo", amount: "100.00" }],
+            status: "in_production",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerB, FIXTURES_003.wsBravo),
+        });
+
+        expect([403, 404]).toContain(res.status);
+
+        const check = await prisma.productionOrder.findUniqueOrThrow({ where: { id: po.id } });
+        expect(check.status).toBe("in_production");
+      });
+
+      it("FINALIZE-TECH-OWN-01: Tech A não finaliza OP de Tech B", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-tech-own-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-TO-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Reparo", amount: "100.00" }],
+            status: "in_production",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA2, FIXTURES_003.wsAlpha),
+        });
+
+        expect(res.status).toBe(403);
+
+        const check = await prisma.productionOrder.findUniqueOrThrow({ where: { id: po.id } });
+        expect(check.status).toBe("in_production");
+      });
+
+      it("FINALIZE-SNAPSHOT-DECIMAL-01: Cálculo Decimal é exato", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-decimal-exact-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-DEC-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [
+              { name: "S1", quantity: 3, unitPrice: "33.33", total: "99.99" },
+              { name: "S2", quantity: 1, unitPrice: "0.01", total: "0.01" },
+            ],
+            status: "in_production",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(Number(data.weeklogEntry.totalAmount)).toBe(100.0);
+      });
+
+      it("FINALIZE-HEADER-RACE-01: POs diferentes concorrentes usam mesmo header", async () => {
+        const poA = await prisma.productionOrder.create({
+          data: {
+            id: "po-race-a-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RACE-A",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "A", amount: "50.00" }],
+            status: "in_production",
+          },
+        });
+        const poB = await prisma.productionOrder.create({
+          data: {
+            id: "po-race-b-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RACE-B",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "B", amount: "60.00" }],
+            status: "in_production",
+          },
+        });
+
+        const headers = getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha);
+        const [resA, resB] = await Promise.all([
+          fetch(`${baseUrl}/api/production-orders/${poA.id}/finalize`, { method: "POST", headers }),
+          fetch(`${baseUrl}/api/production-orders/${poB.id}/finalize`, { method: "POST", headers }),
+        ]);
+
+        expect(resA.status).toBe(200);
+        expect(resB.status).toBe(200);
+
+        const entryA = await prisma.weeklogEntry.findFirstOrThrow({ where: { productionOrderId: poA.id } });
+        const entryB = await prisma.weeklogEntry.findFirstOrThrow({ where: { productionOrderId: poB.id } });
+        expect(entryA.weeklogId).toBe(entryB.weeklogId);
+
+        const headersCount = await prisma.weeklog.count({
+          where: {
+            workspaceId: FIXTURES_003.wsAlpha,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+          },
+        });
+        expect(headersCount).toBe(1);
+      });
+
+      it("FINALIZE-ROLLBACK-01: Falha ao criar WeeklogEntry deixa PO não-delivered", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rollback-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RB-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Overflow", amount: "999999999999.00" }],
+            status: "in_production",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+
+        expect(res.status).toBe(500);
+
+        const poAfter = await prisma.productionOrder.findUniqueOrThrow({ where: { id: po.id } });
+        expect(poAfter.status).toBe("in_production");
+        expect(poAfter.deliveredAt).toBeNull();
+
+        const entryAfter = await prisma.weeklogEntry.findFirst({
+          where: { productionOrderId: po.id },
+        });
+        expect(entryAfter).toBeNull();
+      });
+
+      it("FINALIZE-P2002-UNRELATED-01: P2002 não relacionado não é engolido como idempotência", async () => {
+        const { finalizeProductionOrder } = await import("../../backend/src/services/weeklogService.js");
+        const ctx = {
+          actorUserId: FIXTURES_003.techA1.userId,
+          activeWorkspaceId: FIXTURES_003.wsAlpha,
+          membershipRole: "technician" as const,
+          scope: "workspace" as const,
+        };
+
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-unrelated-p2002",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-UP2",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Reparo", amount: "100.00" }],
+            status: "in_production",
+          },
+        });
+
+        const fakeP2002 = new Prisma.PrismaClientKnownRequestError(
+          "Unique constraint failed on the fields: (`email`)",
+          {
+            code: "P2002",
+            clientVersion: "5.x",
+            meta: { target: ["email"] },
+          }
+        );
+
+        const originalTransaction = prisma.$transaction;
+        // @ts-expect-error test simulation of unrelated P2002
+        prisma.$transaction = async () => {
+          throw fakeP2002;
+        };
+
+        try {
+          await expect(finalizeProductionOrder(ctx as any, po.id)).rejects.toThrow(fakeP2002);
+        } finally {
+          prisma.$transaction = originalTransaction;
+        }
       });
     });
 
