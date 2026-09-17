@@ -4,12 +4,12 @@
 **Branch**: `feat/003-production-weeklog`  
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-17  
-**Total de Cenários**: 80 cenários de aceitação formal (45 base + 11 hardening T04 + 9 T05 + 2 hardening T05 + 13 hardening T06)  
-*(Nota: A suíte de testes de integração executa 85 testes no total: 80 cenários comportamentais de aceitação + 5 testes puramente estruturais de schema/invariantes de banco)*  
+**Total de Cenários**: 89 cenários de aceitação formal (45 base + 11 hardening T04 + 9 T05 + 2 hardening T05 + 13 hardening T06 + 9 hardening T07)  
+*(Nota: A suíte de testes de integração executa 94 testes no total: 89 cenários comportamentais de aceitação + 5 testes puramente estruturais de schema/invariantes de banco)*  
 
 ---
 
-## 1. Matriz de Cenários e Invariantes (80 Cenários Comportamentais)
+## 1. Matriz de Cenários e Invariantes (89 Cenários Comportamentais)
 
 | ID do Cenário | Invariante / Regra de Negócio | Comportamento Esperado |
 |---|---|---|
@@ -92,6 +92,15 @@
 | **SIGNATURE-FINAL-PATH-01** | Promoção atômica de staging para definitivo | Validação com assinatura manuscrita promove staging temporário para chave definitiva vinculada à Validation Round. |
 | **SIGNATURE-DB-COMMIT-FAILURE-01** | Resiliência a falha de commit após storage | Falha de commit no banco após cópia no storage não corrompe DB e retry converge para a mesma chave final determinística. |
 | **SIGNATURE-STORAGE-UNAVAILABLE-01** | Falha de storage sem fallback silencioso | Falha de storage em produção aciona erro explícito 422, mantendo round pendente e signatureStoragePath null. |
+| **RECTIFICATION-IDEMPOTENT-01** | Retry idempotente de retificação | Retries de mesma intenção em retificação retornam HTTP 200 com idempotent: true sem forquilha de execução. |
+| **RECTIFICATION-CONCURRENT-01** | Concorrência real na retificação | Múltiplas requisições simultâneas via Promise.all resultam em exatamente executionSequence = 2 (nunca 3). |
+| **RECTIFICATION-STALE-ENTRY-01** | Bloqueio de retificação em execução defasada | Tentativa de retificar entry histórica quando já existe execução posterior retorna HTTP 409 Conflict. |
+| **RECTIFICATION-CROSS-TENANT-01** | Isolamento tenant na retificação | Tentativa de retificar entry de outro tenant ou indicar técnico cross-tenant retorna HTTP 404/403. |
+| **RECTIFICATION-INACTIVE-TECH-01** | Bloqueio de técnico inativo na retificação | Atribuição de técnico com membership inativa é rejeitada com HTTP 403 Forbidden. |
+| **RECTIFICATION-ROLLBACK-01** | Atomicidade e rollback de retificação | Falha na transação PostgreSQL restaura estado original da entry e da ProductionOrder sem efeitos parciais. |
+| **RECTIFICATION-ROUND-IMMUTABLE-01** | Imutabilidade de Validation Round | Retificação não modifica registros, coverage, métodos ou assinaturas de Validation Rounds concluídas. |
+| **RECTIFICATION-RESUBMIT-01** | Exigência de nova Validation Round | Retrabalho re-finalizado possui status pending e exige nova submissão criando Validation Round 2. |
+| **RECTIFICATION-NO-FINANCE-01** | Fronteira estrita financeira na retificação | Reabertura e re-finalização não geram PaymentOrder, listName ou mutação em saldos financeiros. |
 
 ---
 
@@ -293,3 +302,102 @@ Cenário: Tentativa de sobrescrever assinatura em lote validado é recusada
   Quando um operador tenta enviar novo upload em "POST /api/weeklogs/WL-500/signature-upload"
   Então o backend recusa a operação retornando HTTP 409 Conflict
 ```
+
+---
+
+### Cenário RECTIFICATION-IDEMPOTENT-01: Retry Idempotente da Mesma Solicitação
+```gherkin
+Cenário: Retries repetidos da mesma solicitação de retificação retornam HTTP 200 de forma idempotente
+  Dado uma entrada "ENTRY-601" com solicitação de retificação já consumada ("executionSequence: 2", "rectificationOriginId: ENTRY-601")
+  Quando o chamador reenvia "POST /api/weeklogs/WL-601/entries/ENTRY-601/rectify" com o mesmo motivo e mesma atribuição
+  Então o backend responde com HTTP 200 e "idempotent: true"
+  E a ordem não é avançada acidentalmente para "executionSequence: 3"
+```
+
+---
+
+### Cenário RECTIFICATION-CONCURRENT-01: Concorrência Real com Lock Pessimista
+```gherkin
+Cenário: Duas solicitações simultâneas de retificação via Promise.all resultam em exatamente uma reabertura
+  Dado uma entrada finalizada "ENTRY-602" na sequência 1
+  Quando duas requisições concorrentes de retificação são disparadas simultaneamente sobre "ENTRY-602"
+  Então a ordem de produção reabre exatamente com "executionSequence: 2" (nunca 3)
+  E "rectificationOriginId" aponta exclusivamente para "ENTRY-602"
+  E a entrada original permanece em "validationStatus: rectification_requested"
+```
+
+---
+
+### Cenário RECTIFICATION-STALE-ENTRY-01: Bloqueio de Retificação em Execução Defasada
+```gherkin
+Cenário: Tentativa de retificar entry histórica quando já existe execução posterior é rejeitada
+  Dado uma ordem com execução 1 retificada originando execução 2 já finalizada
+  Quando um operador tenta retificar novamente a entrada da sequência 1
+  Então o backend recusa a operação retornando HTTP 409 Conflict ("STALE_RECTIFICATION_ENTRY")
+```
+
+---
+
+### Cenário RECTIFICATION-CROSS-TENANT-01: Isolamento de Tenant em Retificação
+```gherkin
+Cenário: Tentativa de retificar entrada de outro workspace ou atribuir técnico de outro tenant é bloqueada
+  Dado uma entrada de WEEKLOG pertencente ao Workspace A
+  Quando um usuário do Workspace B tenta disparar "POST /api/weeklogs/WL-A/entries/ENTRY-A/rectify"
+  Então o backend recusa com HTTP 404/403
+  Dado outro cenário onde um admin do Workspace A tenta indicar técnico com membership exclusiva do Workspace B
+  Quando a solicitação de retificação é enviada
+  Então o backend recusa com HTTP 403 Forbidden
+```
+
+---
+
+### Cenário RECTIFICATION-INACTIVE-TECH-01: Bloqueio de Técnico com Membership Inativa
+```gherkin
+Cenário: Tentativa de atribuir técnico com membership inativa/revogada é recusada
+  Dado um usuário com membership inativa ("isActive: false") no workspace
+  Quando um gestor tenta retificar a ordem atribuindo o retrabalho a esse técnico
+  Então o backend recusa a operação retornando HTTP 403 Forbidden
+```
+
+---
+
+### Cenário RECTIFICATION-ROLLBACK-01: Transação Atômica e Rollback Total
+```gherkin
+Cenário: Falha de banco durante o fluxo de retificação restaura estado integral
+  Dado uma entrada e ordem finalizadas na sequência 1
+  Quando ocorre uma falha no banco de dados antes da conclusão da transação de retificação
+  Então a entrada permanece em seu status original
+  E a ordem de produção permanece "delivered" na sequência 1 sem mutações parciais
+```
+
+---
+
+### Cenário RECTIFICATION-ROUND-IMMUTABLE-01: Imutabilidade de Validation Round
+```gherkin
+Cenário: Solicitação de retificação mantém intacta a Validation Round histórica
+  Dado um lote que concluiu a Validation Round 1 com assinatura em MinIO
+  Quando uma entrada do lote é retificada
+  Então a Validation Round 1 mantém rigorosamente seu "id", "coverageSnapshot", "validatorUserId", "signatureStoragePath" e hash
+```
+
+---
+
+### Cenário RECTIFICATION-RESUBMIT-01: Exigência de Nova Validation Round para Retrabalho
+```gherkin
+Cenário: Entrada de retrabalho re-finalizada nasce com validationStatus pending e exige nova rodada
+  Dado que a ordem retificada foi concluída na sequência 2
+  Quando a nova entrada é gerada no lote
+  Então seu status é "pending" (não herda approved/rejected da sequência 1)
+  E quando "submitForValidation" é executado, uma nova Validation Round com "validationSequence: 2" é criada
+```
+
+---
+
+### Cenário RECTIFICATION-NO-FINANCE-01: Zero Efeitos Financeiros Colaterais
+```gherkin
+Cenário: O ciclo de retificação, reabertura e re-finalização não produz side-effects financeiros
+  Dado uma ordem retificada e retrabalhada
+  Quando as transações de retificação e re-finalização são executadas
+  Então nenhuma "PaymentOrder" é gerada e nenhuma mutação em listas ou saldos financeiros ocorre
+```
+
