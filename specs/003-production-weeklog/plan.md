@@ -276,9 +276,10 @@ FASE 4: API CANÔNICA, SUBMISSÃO, VALIDAÇÃO EM LOTE E RETIFICAÇÃO (T05, T06
   - Ciclo de retificação versionada com sequence+1 e self-FK
 
 FASE 5: SANEAMENTO LEGADO, BACKFILL & FRONTEND UX (T08 DONE, T09, T10)
-  - [x] T08: Saneamento integral de serviceOrders.ts (pure read-only em GET, RequestContext router-level, eliminação total de mutações em GET, 410 em POST/PUT, 409 em mutações de projeções canônicas, remoção total do hook de PaymentOrder)
+  - [x] T08: Saneamento integral de serviceOrders.ts (pure read-only em GET, RequestContext router-level, eliminação total de mutações em GET, 410 em POST/PUT, 409 em mutações de projeções canônicas, 409 em PATCH/DELETE de arquivo histórico, remoção total do hook de PaymentOrder)
+  - [x] T08 Targeted Hardening: Bloqueio total de PATCH em legacy archive (409 LEGACY_ARCHIVE_IMMUTABLE), precedência de titularidade canônica no escopo do técnico e checagem estrita de status delivered no backfill
   - [x] T08: Script de backfill determinístico seguro backend/scripts/backfillLegacyServiceOrders.ts com --dry-run padrão, qualify-or-skip estrito e relatório JSON
-  - [x] T08: Suíte de testes dedicada tests/integration/service-orders-legacy-sanitization.test.ts (14/14 GREEN)
+  - [x] T08: Suíte de testes dedicada tests/integration/service-orders-legacy-sanitization.test.ts (17/17 GREEN)
   - [ ] T09: apiWeeklogs, useWeeklogs, botão finalizar em OP
   - [ ] T10: WeeklogValidationDialog com submitForValidation, canvas HTML5 (PNG) e histórico imutável
 
@@ -288,3 +289,31 @@ FASE 6: QUALITY GATES & VERIFICAÇÃO INTEGRADA (T11)
   - npm run lint (0 novos erros)
   - npm run build (0 erros)
 ```
+
+---
+
+## 8. Frontend Consumers After T08
+
+Matriz de inventário estático de todos os call sites do frontend e classificação de compatibilidade após o saneamento de T08:
+
+| Arquivo | Linha | Método HTTP | Endpoint | Ação de UI | Status Pós-T08 | Destino de Migração |
+|---|:---:|:---:|---|---|:---:|---|
+| `src/pages/ServiceOrdersPage.tsx` | 52 | GET | `/service-orders` | Leitura do grid de ordens legadas / WEEKLOG | **STILL COMPATIBLE** | Somente leitura Legacy Archive / Migrar para `useWeeklogs` em T09 |
+| `src/pages/ServiceOrdersPage.tsx` | 194 | POST | `/service-orders` | Salvar ordens extraídas do OCR | **BROKEN BY T08** (410) | T09 / T10 (Fluxo canônico OP $\rightarrow$ Finalize) |
+| `src/pages/ServiceOrdersPage.tsx` | 265 | DELETE | `/service-orders/by-year/:year` | Excluir histórico por ano | **BROKEN BY T08** (410) | Remover / Substituir por governança Spec 004 |
+| `src/components/production/DraftsPanel.tsx` | 85 | GET | `/service-orders` | Leitura de ordens com status draft | **STILL COMPATIBLE** | T09 (Migrar para consulta de ProductionOrder drafts) |
+| `src/components/production/DraftsPanel.tsx` | 108 | PUT | `/service-orders/:id` | Confirmar rascunho de ordem | **BROKEN BY T08** (410) | T09 (Transição canônica em ProductionOrder) |
+| `src/components/production/DraftsPanel.tsx` | 119 | DELETE | `/service-orders/:id` | Excluir rascunho | **BROKEN BY T08** (409) | T09 (Exclusão canônica em ProductionOrder) |
+| `src/components/service-orders/WeeklogOperationalDocumentDialog.tsx` | 353 | PATCH | `/service-orders/:id` | Salvar documento operacional ou registrar validação legada | **BROKEN BY T08** (409) | T10 (Substituído por `POST /api/weeklogs/:id/validate`) |
+| `src/components/service-orders/ServiceOrdersTable.tsx` | 232 | DELETE | `/service-orders/:id` | Excluir ordem individual | **BROKEN BY T08** (409) | T09/T10 (Desabilitar ação em UI para projeção e arquivo) |
+| `src/components/service-orders/ServiceOrdersTable.tsx` | 243 | DELETE | `/service-orders/:id` | Exclusão em lote | **BROKEN BY T08** (409) | T09/T10 (Desabilitar ação em UI) |
+| `src/pages/PaymentOrdersPage.tsx` | 27 | GET | `/service-orders/clients` | Listar clientes de faturamento | **STILL COMPATIBLE** | Futura Spec 004 / Manter read-only |
+| `src/components/payment-orders/PaymentOrdersTable.tsx` | 13 | GET | `/service-orders/clients` | Dropdown de clientes | **STILL COMPATIBLE** | Futura Spec 004 / Manter read-only |
+| `src/components/profit/ProfitDistribution.tsx` | 4 | GET | `/service-orders` | Cálculo de distribuição de lucros | **STILL COMPATIBLE** | Read-only compatível |
+| `src/components/dashboard/ActiveMap.tsx` | 87 | GET | `/service-orders` | Visualização geográfica de ordens | **STILL COMPATIBLE** | Read-only compatível |
+| `src/components/dashboard/OperationalMap.tsx` | 198 | GET | `/service-orders` | Visualização geográfica operacional | **STILL COMPATIBLE** | Read-only compatível |
+| `src/hooks/useAgingAlerts.ts` | 36 | GET | `/service-orders` | Alertas de aging operacional | **STILL COMPATIBLE** | Read-only compatível |
+| `src/hooks/useOperationalKpis.ts` | 41 | GET | `/service-orders` | Métricas operacionais | **STILL COMPATIBLE** | Read-only compatível |
+| `src/hooks/useOperationalSignals.ts` | 54, 71, 100, 117 | GET | `/service-orders` | Sinais de anomalia operacional | **STILL COMPATIBLE** | Read-only compatível |
+| `src/hooks/usePaymentOrders.ts` | 309 | GET | `/service-orders` | Consulta de ordens vinculadas | **STILL COMPATIBLE** | Futura Spec 004 |
+

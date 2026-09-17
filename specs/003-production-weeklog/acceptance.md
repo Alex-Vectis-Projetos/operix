@@ -603,4 +603,38 @@ Cenário: Script de backfill não gera registros financeiros nem mutações em l
   Então o número de PaymentOrders permanece rigorosamente o mesmo de antes da execução
 ```
 
+---
+
+### Cenário LEGACY-SO-PATCH-ARCHIVE-BLOCKED-01: Bloqueio Total de PATCH em Arquivo Histórico
+```gherkin
+Cenário: Qualquer tentativa de PATCH em ServiceOrder sem WeeklogEntry vinculada (legacyArchive = true) retorna 409
+  Dado uma ServiceOrder do arquivo histórico sem vínculo com WeeklogEntry
+  Quando o cliente tenta enviar qualquer payload de mutação via "PATCH /api/service-orders/:id"
+  Então o backend recusa categoricamente a operação com HTTP 409 Conflict ("LEGACY_ARCHIVE_IMMUTABLE")
+  E o registro permanece rigorosamente inalterado no banco de dados
+```
+
+---
+
+### Cenário LEGACY-SO-TECH-OWN-CANONICAL-LINK-01: Precedência de Titularidade Canônica no Escopo do Técnico
+```gherkin
+Cenário: Técnico com escopo own visualiza projeções canônicas onde é titular da WeeklogEntry mesmo com campos legados divergentes
+  Dado uma ServiceOrder cujos campos legados assignedUserId/userId pertençam a outro técnico
+  Mas cuja WeeklogEntry canônica associada possua technicianUserId correspondente ao técnico solicitante
+  Quando o técnico requisita "GET /api/service-orders"
+  Então o backend utiliza o vínculo canônico como autoridade de titularidade e retorna a ordem
+  E ordens de arquivo histórico de terceiros sem vínculo canônico permanecem estritamente filtradas
+```
+
+---
+
+### Cenário LEGACY-BACKFILL-NOT-DELIVERED-SKIP-01: Pulo Seguro de Ordens de Produção Não Concluídas
+```gherkin
+Cenário: ProductionOrder sem status delivered ou sem deliveredAt preenchido é ignorada no backfill
+  Dado uma ServiceOrder cuja única ProductionOrder associada possui status "in_progress" ou "deliveredAt: null"
+  Quando o script de backfill é executado com --apply
+  Então o registro é catalogado em skippedNotDelivered com motivo "PRODUCTION_ORDER_NOT_DELIVERED"
+  E nenhuma WeeklogEntry é criada e o status da ProductionOrder não é auto-corrigido
+```
+
 
