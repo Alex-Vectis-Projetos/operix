@@ -275,11 +275,12 @@ FASE 4: API CANÔNICA, SUBMISSÃO, VALIDAÇÃO EM LOTE E RETIFICAÇÃO (T05, T06
   - Validação em lote versionada (sequence+1), bloqueio batch-self-validation e staging de assinatura MinIO (PNG exclusivo)
   - Ciclo de retificação versionada com sequence+1 e self-FK
 
-FASE 5: SANEAMENTO LEGADO, BACKFILL & FRONTEND UX (T08, T09, T10)
-  - Saneamento de serviceOrders.ts e Downstream Legacy Projection Adapter
-  - Script idempotente scripts/backfill-legacy-service-orders.ts com --dry-run, relatório e documentação de rollback
-  - apiWeeklogs, useWeeklogs, botão finalizar em OP
-  - WeeklogValidationDialog com submitForValidation, canvas HTML5 (PNG) e histórico imutável
+FASE 5: SANEAMENTO LEGADO, BACKFILL & FRONTEND UX (T08 DONE, T09, T10)
+  - [x] T08: Saneamento integral de serviceOrders.ts (pure read-only em GET, RequestContext router-level, eliminação total de mutações em GET, 410 em POST/PUT, 409 em mutações de projeções canônicas, remoção total do hook de PaymentOrder)
+  - [x] T08: Script de backfill determinístico seguro backend/scripts/backfillLegacyServiceOrders.ts com --dry-run padrão, qualify-or-skip estrito e relatório JSON
+  - [x] T08: Suíte de testes dedicada tests/integration/service-orders-legacy-sanitization.test.ts (14/14 GREEN)
+  - [ ] T09: apiWeeklogs, useWeeklogs, botão finalizar em OP
+  - [ ] T10: WeeklogValidationDialog com submitForValidation, canvas HTML5 (PNG) e histórico imutável
 
 FASE 6: QUALITY GATES & VERIFICAÇÃO INTEGRADA (T11)
   - 45 testes verdes

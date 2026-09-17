@@ -455,4 +455,152 @@ Cenário: Retrabalho re-finalizado em semana posterior gera novo Weeklog com val
   E a Validation Round 1 do Weeklog original permanece 100% inalterada
 ```
 
+---
+
+## 9. Cenários de Aceitação da Fase T08: Saneamento Legado e Backfill
+
+### Cenário LEGACY-SO-GET-PURE-01: Pureza Read-Only de GET /api/service-orders
+```gherkin
+Cenário: Listagem de ServiceOrders não executa escritas no banco e projeta flag legacyArchive
+  Dado um conjunto de ServiceOrders históricas e canônicas
+  Quando o cliente envia "GET /api/service-orders"
+  Então a resposta retorna HTTP 200 com lista de ordens
+  E nenhuma mutação ou atualização é executada no banco de dados durante a leitura
+  E cada ordem reflete "legacyArchive: true" se não vinculada a WeeklogEntry, ou "legacyArchive: false" se canônica
+```
+
+---
+
+### Cenário LEGACY-SO-TENANT-01: Isolamento de Tenant em GET /api/service-orders
+```gherkin
+Cenário: Consulta a ServiceOrders respeita estritamente o workspace ativo do RequestContext
+  Dado ordens pertencentes ao Workspace A e Workspace B
+  Quando usuário autenticado no Workspace A lista ordens via "GET /api/service-orders"
+  Então somente registros do Workspace A são retornados
+  E parâmetros forjados em query string (ex: "workspace_id") são sumariamente desconsiderados
+```
+
+---
+
+### Cenário LEGACY-SO-TECH-OWN-01: Escopo Próprio do Técnico em GET /api/service-orders
+```gherkin
+Cenário: Técnico autenticado visualiza somente ordens atribuídas a ele
+  Dado técnico T1 pertencente a um workspace com ordens de múltiplos técnicos
+  Quando T1 requisita "GET /api/service-orders"
+  Então a lista retornada contém exclusivamente ordens onde assignedUserId ou userId é T1
+```
+
+---
+
+### Cenário LEGACY-SO-CLIENTS-TENANT-01: Isolamento de Tenant em Clientes de ServiceOrders
+```gherkin
+Cenário: Listagem de clientes via /api/service-orders/clients restringe ao workspace ativo
+  Dado clientes cadastrados no Workspace A e Workspace B
+  Quando operador do Workspace A requisita "/api/service-orders/clients"
+  Então apenas clientes do Workspace A são retornados
+```
+
+---
+
+### Cenário LEGACY-SO-CLIENTS-TECH-OWN-01: Escopo Próprio do Técnico em Clientes
+```gherkin
+Cenário: Técnico autenticado visualiza apenas clientes de suas próprias ordens
+  Dado técnico T1 com ordens apenas para o Cliente C1
+  Quando T1 requisita "GET /api/service-orders/clients"
+  Então somente o Cliente C1 é retornado na listagem
+```
+
+---
+
+### Cenário LEGACY-SO-CROSS-TENANT-MUTATION-01: Bloqueio Cross-Tenant em Mutações
+```gherkin
+Cenário: Tentativa de atualizar ServiceOrder de outro workspace retorna 404
+  Dado uma ServiceOrder existente no Workspace B
+  Quando usuário autenticado no Workspace A tenta enviar "PATCH /api/service-orders/:id"
+  Então o backend retorna HTTP 404 ("Ordem de serviço não encontrada")
+```
+
+---
+
+### Cenário LEGACY-SO-CANONICAL-PROJECTION-IMMUTABLE-01: Imutabilidade de Projeções Canônicas
+```gherkin
+Cenário: Tentativa de mutação legada em projeção vinculada a WeeklogEntry retorna 409
+  Dado uma ServiceOrder projetada a partir de uma WeeklogEntry canônica
+  Quando cliente tenta atualizar a ordem via "PATCH /api/service-orders/:id"
+  Então o backend recusa a mutação com HTTP 409 ("CANONICAL_PROJECTION_IMMUTABLE")
+```
+
+---
+
+### Cenário LEGACY-SO-VALIDATION-NO-FINANCE-01: Validação Legada Descontinuada e Zero Financeiro
+```gherkin
+Cenário: Tentativa de validação via rota legada retorna 409 e não gera PaymentOrder
+  Dado uma ServiceOrder histórica desvinculada
+  Quando cliente tenta enviar payload de validação para "PATCH /api/service-orders/:id"
+  Então o backend recusa com HTTP 409 ("LEGACY_VALIDATION_DEPRECATED")
+  E nenhuma PaymentOrder é gerada e nenhuma lista financeira é criada
+```
+
+---
+
+### Cenário LEGACY-SO-DIRECT-CREATE-DEPRECATED-01: Descontinuação de Criação e Substituição Direta
+```gherkin
+Cenário: POST e PUT diretos em /api/service-orders retornam 410 Gone
+  Dado o encerramento da autoridade operacional em ServiceOrder
+  Quando cliente tenta enviar "POST /api/service-orders" ou "PUT /api/service-orders/:id"
+  Então o backend retorna HTTP 410 ("LEGACY_SERVICE_ORDER_WRITE_DEPRECATED")
+```
+
+---
+
+### Cenário LEGACY-SO-DELETE-CANONICAL-BLOCKED-01: Bloqueio de Deleção de Projeções Canônicas e Arquivo Histórico
+```gherkin
+Cenário: Deleção de projeção canônica ou arquivo legado é bloqueada com 409
+  Dado uma ServiceOrder projeção de WeeklogEntry ou registro legado não vinculado
+  Quando cliente tenta enviar "DELETE /api/service-orders/:id"
+  Então o backend rejeita com HTTP 409 ("CANONICAL_PROJECTION_IMMUTABLE" ou "LEGACY_ARCHIVE_IMMUTABLE")
+```
+
+---
+
+### Cenário LEGACY-BACKFILL-DRY-RUN-01: Execução Segura em Dry-Run do Script de Backfill
+```gherkin
+Cenário: Script de backfill executa sem persistir alterações quando --apply não for informado
+  Dado ordens legadas qualificáveis no banco
+  Quando o script de backfill é executado em modo dry-run padrão
+  Então nenhuma linha de Weeklog ou WeeklogEntry é criada
+  E um relatório estruturado em JSON detalha os registros inspecionados
+```
+
+---
+
+### Cenário LEGACY-BACKFILL-IDEMPOTENT-01: Idempotência e Preservação de Links Existentes
+```gherkin
+Cenário: Execução sucessiva do script de backfill com --apply não duplica registros nem sobrescreve links
+  Dado ordens legadas qualificáveis migradas na primeira execução
+  Quando o script é executado novamente com --apply
+  Então a segunda execução reporta zero novas entradas e zero conflitos
+```
+
+---
+
+### Cenário LEGACY-BACKFILL-AMBIGUOUS-SKIP-01: Pulo Seguro de Registros Ambíguos
+```gherkin
+Cenário: Ordens com múltiplas OPs correspondentes ou dados inconsistentes são ignoradas com segurança
+  Dado ordens legadas com dados ausentes ou com colisão de ProductionOrders
+  Quando o script de backfill é executado com --apply
+  Então o registro ambíguo é ignorado sem adivinhação
+  E a falha é registrada estruturadamente na seção skipped do relatório
+```
+
+---
+
+### Cenário LEGACY-BACKFILL-NO-FINANCE-01: Zero Efeitos Financeiros no Backfill
+```gherkin
+Cenário: Script de backfill não gera registros financeiros nem mutações em listas
+  Dado a execução completa do script de backfill com --apply
+  Quando o banco é verificado pós-execução
+  Então o número de PaymentOrders permanece rigorosamente o mesmo de antes da execução
+```
+
 
