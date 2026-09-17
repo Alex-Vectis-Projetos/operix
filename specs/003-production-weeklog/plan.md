@@ -145,12 +145,21 @@ A implementação técnica da Spec 003 atende a todas as deliberações de remed
   - Move assinatura gráfica em PNG do staging para o caminho canônico no MinIO.
   - Bloqueia mutação in-place pós-validação (HTTP 409).
 - **`rectifyWeeklogEntry(ctx, weeklogId, entryId, payload)`**:
-  - Exige justificativa formal.
+  - Exige justificativa formal obrigatória.
+  - Ordem consistente de locks pessimistas (`Weeklog` $\rightarrow$ `WeeklogEntry` $\rightarrow$ `ProductionOrder`) que **reduz o risco de deadlock** entre transações concorrentes na mesma entidade (sem assumir eliminação global de deadlocks).
+  - Validação estrita de elegibilidade por rodada concluída (T07 Hardening):
+    - Exige existência de `WeeklogValidation` com `status: "validated"` no mesmo Weeklog e workspace.
+    - O `coverageSnapshot` da rodada deve conter exatamente a entrada (`weeklogEntryId`, `productionOrderId`, `executionSequence`).
+    - Se ausente rodada validada cobrindo a entrada: HTTP 409 `RECTIFICATION_NOT_VALIDATED`.
+  - Validação de estados do cabeçalho: bloqueia retificação em `open` e `pending_validation` com HTTP 409 `RECTIFICATION_INVALID_WEEKLOG_STATE`.
+  - Validação de outcomes: status da entrada deve ser `rejected` (ou `approved` pós-validação mediante contestação formal). Entradas `pending` retornam HTTP 409 `RECTIFICATION_INVALID_ENTRY_OUTCOME`.
   - Altera status da entrada para `rectification_requested`.
-  - Atualiza o cabeçalho do Weeklog para `rectification_pending`.
+  - O cabeçalho do Weeklog original permanece em `rectification_pending`.
   - Incrementa `ProductionOrder.executionSequence` e reabre a OP (`status: "in_production"`).
   - Aponta `ProductionOrder.rectificationOriginId = entryId`.
-  - Valida regras TECH-ASSIGN se houver indicação de novo técnico.
+  - Validação de regras TECH-ASSIGN desacoplada na camada de domínio (`lib/objectAuth.ts`).
+  - Escopo de `validationSequence`: estritamente por Weeklog (mesma semana herda sequência incremental; nova semana inicia em sequência 1).
+  - Validation Rounds históricas permanecem estritamente imutáveis.
 
 ### 3.3. Rotas da API (`backend/src/routes/weeklogs.ts` e `productionOrders.ts`)
 - `POST /api/production-orders/:id/finalize`: Comando canônico.

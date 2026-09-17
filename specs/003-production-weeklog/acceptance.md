@@ -401,3 +401,58 @@ Cenário: O ciclo de retificação, reabertura e re-finalização não produz si
   Então nenhuma "PaymentOrder" é gerada e nenhuma mutação em listas ou saldos financeiros ocorre
 ```
 
+---
+
+### Cenário RECTIFICATION-BEFORE-VALIDATION-01: Bloqueio de Retificação em Lote Aberto
+```gherkin
+Cenário: Tentativa de retificar entrada em Weeklog com status open retorna 409
+  Dado uma entrada em um Weeklog aberto ("status: open")
+  Quando o cliente tenta enviar "POST /api/weeklogs/:id/entries/:entryId/rectify"
+  Então o backend recusa a operação com HTTP 409 Conflict ("RECTIFICATION_INVALID_WEEKLOG_STATE")
+```
+
+---
+
+### Cenário RECTIFICATION-DURING-VALIDATION-01: Bloqueio de Retificação Durante Validação
+```gherkin
+Cenário: Tentativa de retificar entrada durante rodada pendente ("pending_validation") retorna 409
+  Dado uma entrada em um Weeklog submetido ("status: pending_validation")
+  Quando o cliente tenta enviar "POST /api/weeklogs/:id/entries/:entryId/rectify"
+  Então o backend recusa a operação com HTTP 409 Conflict ("RECTIFICATION_INVALID_WEEKLOG_STATE")
+```
+
+---
+
+### Cenário RECTIFICATION-OUTSIDE-COVERAGE-01: Bloqueio de Entrada Fora da Cobertura Validada
+```gherkin
+Cenário: Tentativa de retificar entrada ausente do coverageSnapshot da rodada concluída retorna 409
+  Dado um Weeklog com rodada validada cujo coverageSnapshot não inclui a entrada
+  Quando o operador solicita a retificação dessa entrada
+  Então o backend recusa com HTTP 409 Conflict ("RECTIFICATION_NOT_VALIDATED")
+```
+
+---
+
+### Cenário RECTIFICATION-SAME-WEEK-ROUND-SEQUENCE-01: Sequência de Validação na Mesma Semana
+```gherkin
+Cenário: Retrabalho re-finalizado na mesma semana gera rodada com validationSequence incrementada
+  Dado um Weeklog que teve Validation Round 1 concluída com rejeição
+  Quando a entrada é retificada, retrabalhada e re-finalizada na mesma semana
+  E submetida novamente para validação
+  Então a nova Validation Round no mesmo Weeklog possui "validationSequence: 2"
+  E a Validation Round 1 histórica mantém todos os campos imutáveis
+```
+
+---
+
+### Cenário RECTIFICATION-CROSS-WEEK-ROUND-SEQUENCE-01: Sequência de Validação em Semana Posterior
+```gherkin
+Cenário: Retrabalho re-finalizado em semana posterior gera novo Weeklog com validationSequence inicial
+  Dado um Weeklog original com Validation Round 1 concluída com rejeição
+  Quando a ordem retificada é concluída na semana seguinte
+  Então a nova entrada é alocada em um novo Weeklog ("startsOn" posterior)
+  E quando submetida para validação, a Validation Round desse novo Weeklog possui "validationSequence: 1"
+  E a Validation Round 1 do Weeklog original permanece 100% inalterada
+```
+
+

@@ -30,6 +30,25 @@
 | **DEC-017** | **Concorrência, Lock Pessimista e Tratamento Externo de P2002** | Bloqueio pessimista com `SELECT ... FOR UPDATE` na OP em `prisma.$transaction(isolationLevel: ReadCommitted)`. Colisões `P2002` são capturadas **fora** da transação abortada, realizando re-leitura segura em nova operação e distinguindo colisão na sequência da PO de colisão no cabeçalho do Weeklog. |
 | **DEC-018** | **Governança da Assinatura Gráfica (Apenas PNG)** | Upload prévio em staging MinIO (`tenants/{workspaceId}/weeklogs/{weeklogId}/signatures/temp_{uuid}.png`). Suporta estritamente PNG (validação de magic bytes `89 50 4E 47`, limite 1 MB; SVGs são rejeitados). A validação em lote move o arquivo para o caminho definitivo e congela o registro. Mutações pós-validação retornam HTTP 409. |
 | **DEC-019** | **Validation Round Versionada, Imutabilidade de Coverage e Preservação de Histórico** | `WeeklogValidation` representa a Validation Round do lote semanal. Ciclo em duas fases: `submitForValidation` cria a rodada com `status: pending`, gerando `validationSequence`, `coverageSnapshot`, `submittedAt` (server timestamp) e `submittedBy` (`ctx.actorUserId`). O `coverageSnapshot` torna-se estritamente imutável pós-submissão. T06 completa a **mesma** rodada para `validated`. Linhas legadas pré-T05 com chancela concluída têm status corrigido para `validated`, tornando `submittedAt` nullable e preservando `submittedBy` e `submittedAt` como NULL (zero fabricação de histórico). |
+| **DEC-020** | **Endurecimento de Elegibilidade de Retificação e Escopo por Weeklog** | A retificação (`/rectify`) exige Validation Round concluída (`status: "validated"`) que cubra explicitamente a entry em seu `coverageSnapshot` congelado. Estados `open` e `pending_validation` não autorizam retificação (HTTP 409). Entradas com status `pending` não são elegíveis (apenas `rejected` ou `approved` pós-validação). A `validationSequence` é escopada por Weeklog (não global da PO): retrabalho na mesma semana incrementa `validationSequence`, enquanto retrabalho em semana posterior inicia em `validationSequence: 1`. A ordenação consistente de locks reduz o risco de deadlock entre transações concorrentes na mesma entidade. |
+
+---
+
+### 2.4. Endurecimento de Retificação, Sequência e Ordenação de Locks (DEC-020)
+
+1. **Elegibilidade de Retificação Baseada em Coverage**:
+   - Para autorizar `rectifyWeeklogEntry`, deve existir ao menos uma `WeeklogValidation` com `status: "validated"` no mesmo Weeklog e workspace cujo `coverageSnapshot` contenha exatamente o `weeklogEntryId`, `productionOrderId` e `executionSequence`.
+   - Se a rodada ainda estiver pendente ou a entry estiver fora da cobertura: HTTP 409 `RECTIFICATION_NOT_VALIDATED`.
+   - Estados de cabeçalho `open` ou `pending_validation` retornam HTTP 409 `RECTIFICATION_INVALID_WEEKLOG_STATE`.
+2. **Escopo de `validationSequence` por Weeklog**:
+   - A sequência de validação é estritamente escopada ao cabeçalho `Weeklog` via `@@unique([weeklogId, validationSequence])`.
+   - Retrabalho finalizado na mesma semana herda o mesmo Weeklog; sua submissão subsequente gera `validationSequence: 2`.
+   - Retrabalho finalizado em semana posterior aloca a entry em um novo cabeçalho Weeklog; sua submissão inicial gera `validationSequence: 1`.
+   - Em ambos os casos, a `WeeklogValidation` original mantém todos os seus atributos (`id`, `weeklogId`, `validationSequence`, `coverageSnapshot`, timestamps, assinaturas e hashes) 100% imutáveis.
+3. **Mitigação de Deadlocks e Concorrência**:
+   - A aquisição ordenada de locks pessimistas (`SELECT ... FOR UPDATE` ordenado) em operações de retificação e validação **reduz significativamente o risco de deadlocks** em transações concorrentes sobre as mesmas entidades.
+   - *Ressalva de concorrência global*: A consistência na ordem de locks locais reduz o risco, mas não elimina qualquer possibilidade global de deadlock, uma vez que transações paralelas ou fluxos externos no PostgreSQL podem solicitar locks adicionais em ordens distintas.
+
 
 ---
 
