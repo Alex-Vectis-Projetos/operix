@@ -889,9 +889,7 @@ productionOrdersRouter.patch("/:id", async (req: Request, res: Response, next: N
         await prisma.productionOrder.update({ where: { id }, data: otherData });
       }
 
-      const finalized = await finalizeProductionOrder(ctx, id, {
-        deliveredAt: b.delivered_at ?? b.deliveredAt,
-      });
+      const finalized = await finalizeProductionOrder(ctx, id);
 
       return res.json({
         ...mapOrder(finalized.productionOrder),
@@ -931,9 +929,7 @@ productionOrdersRouter.post("/:id/finalize", async (req: Request, res: Response,
       return res.status(403).json({ message: "Workspace ativo não definido." });
     }
 
-    const result = await finalizeProductionOrder(ctx, id, {
-      deliveredAt: req.body?.deliveredAt,
-    });
+    const result = await finalizeProductionOrder(ctx, id);
 
     return res.status(200).json(result);
   } catch (error) {

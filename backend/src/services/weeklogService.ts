@@ -13,7 +13,11 @@ import {
 import { operationalWeekOf } from "../lib/weekUtils.js";
 
 export interface FinalizeProductionOrderOptions {
-  deliveredAt?: Date | string | null;
+  /**
+   * Internal test seam / clock injection for deterministic testing.
+   * NEVER exposed to public HTTP callers or client payloads.
+   */
+  _serverTime?: Date;
 }
 
 export interface FinalizeProductionOrderResult {
@@ -163,11 +167,20 @@ async function syncPhotosToWeeklogFolders(
       });
     }
   } catch (err) {
-    // Non-blocking for folder/document indexing
     console.error("[weeklogService] syncPhotosToWeeklogFolders error:", err);
   }
 }
 
+/**
+ * Downstream Legacy Projection Adapter.
+ *
+ * NOTA ARQUITETURAL: A tabela legacy `service_orders` possui colunas físicas
+ * limitadas para apenas 4 serviços (service1Name..service4Price).
+ * Se `servicesSnapshot` contiver mais de 4 serviços (>4), `WeeklogEntry.servicesSnapshot`
+ * (Source of Truth) preserva a totalidade dos itens sem qualquer truncamento.
+ * A projeção legada apenas preenche os 4 primeiros slots disponíveis e reflete
+ * o `total` integral.
+ */
 export async function syncLegacyServiceOrderProjection(
   tx: Prisma.TransactionClient,
   params: {
@@ -223,6 +236,13 @@ export async function syncLegacyServiceOrderProjection(
  * T04 Domain Command: finalizeProductionOrder
  * Atomically transitions ProductionOrder -> delivered, generates Weeklog header,
  * creates immutable WeeklogEntry snapshot, and downstream legacy ServiceOrder projection.
+ *
+ * HARDENED INVARIANTS:
+ * - Pure Server-Side Authority for deliveredAt (Zero client payload authority).
+ * - Locked Source of Truth: All authorization, preconditions, snapshot, and projections
+ *   are read transaction-locally AFTER acquiring the SELECT ... FOR UPDATE row lock.
+ * - Budget Lineage Validation: Only approved budget revisions can originate a WEEKLOG entry.
+ * - External P2002 recovery: Aborted transactions are never reused.
  */
 export async function finalizeProductionOrder(
   ctx: RequestContext,
@@ -234,280 +254,252 @@ export async function finalizeProductionOrder(
     throw new ForbiddenError("Workspace ativo não definido.");
   }
 
-  // 1. Initial lookup & authorization checks
-  const po = await prisma.productionOrder.findUnique({
-    where: { id: orderId },
-    include: {
-      photos: true,
-      budget: {
-        include: {
-          approvedRevision: true,
-          currentRevision: true,
-        },
-      },
-      budgetRevision: true,
-    },
-  });
-
-  if (!po || po.workspaceId !== ctx.activeWorkspaceId) {
-    throw new NotFoundError("Ordem de produção não encontrada.");
-  }
-
-  assertTenantAccess(ctx, po.workspaceId);
-  assertObjectAccess(ctx, po);
-
-  // 2. Fast idempotency check if already delivered
-  if (po.status === "delivered") {
-    const existingEntry = await prisma.weeklogEntry.findUnique({
-      where: {
-        productionOrderId_executionSequence: {
-          productionOrderId: po.id,
-          executionSequence: po.executionSequence,
-        },
-      },
-      include: {
-        weeklog: true,
-      },
-    });
-
-    if (existingEntry) {
-      return {
-        productionOrder: po,
-        weeklog: existingEntry.weeklog,
-        weeklogEntry: existingEntry,
-        idempotent: true,
-      };
-    }
-  }
-
-  // 3. Permitted state transitions check
-  if (po.status !== "in_production" && po.status !== "paused") {
-    throw new ConflictError(
-      `Ordem de produção com status '${po.status}' não pode ser finalizada. Estados permitidos: in_production, paused.`
-    );
-  }
-
-  // 4. Domain preconditions validation
-  if (!po.clientId) {
-    throw new UnprocessableEntityError("CLIENT_REQUIRED: Ordem de produção sem cliente canônico.");
-  }
-
-  if (!po.operationalSiteKey) {
-    throw new UnprocessableEntityError(
-      "OPERATIONAL_SITE_REQUIRED: Ordem de produção sem local operacional (siteKey)."
-    );
-  }
-
-  // Currency resolution: Budget vs Direct OP
-  let resolvedCurrencyCode: string | null = null;
-  let servicesSnapshot: any[] = [];
-  let totalAmount: Prisma.Decimal = new Prisma.Decimal(0);
-
-  if (po.budgetId) {
-    // Budget-originated OP
-    const revision =
-      po.budgetRevision ||
-      po.budget?.approvedRevision ||
-      po.budget?.currentRevision;
-
-    if (!revision || revision.budgetId !== po.budgetId) {
-      throw new UnprocessableEntityError(
-        "BUDGET_LINEAGE_INVALID: Linhagem de revisão de orçamento inválida."
-      );
-    }
-
-    resolvedCurrencyCode = revision.currencyCode || po.currencyCode || null;
-
-    if (!resolvedCurrencyCode || !/^[A-Z]{3}$/.test(resolvedCurrencyCode)) {
-      throw new UnprocessableEntityError(
-        "CURRENCY_REQUIRED: Código de moeda canônico não resolvível do orçamento."
-      );
-    }
-
-    const revServices = Array.isArray(revision.services) ? revision.services : [];
-    const revParts = Array.isArray(revision.parts) ? revision.parts : [];
-    const revLabor = Array.isArray(revision.labor) ? revision.labor : [];
-
-    servicesSnapshot =
-      revServices.length > 0
-        ? revServices
-        : revParts.length > 0
-        ? revParts
-        : revLabor;
-
-    totalAmount = new Prisma.Decimal(
-      revision.finalTotal?.toString() || revision.grossTotal?.toString() || "0"
-    );
-  } else {
-    // Direct OP
-    resolvedCurrencyCode = po.currencyCode || null;
-
-    if (!resolvedCurrencyCode || !/^[A-Z]{3}$/.test(resolvedCurrencyCode)) {
-      throw new UnprocessableEntityError(
-        "CURRENCY_REQUIRED: Código de moeda canônico ausente ou inválido na ordem direta."
-      );
-    }
-
-    const rawServices = po.performedServices;
-    if (!rawServices || !Array.isArray(rawServices) || rawServices.length === 0) {
-      throw new UnprocessableEntityError(
-        "DIRECT_OP_NO_SERVICES: Ordem de produção direta sem performedServices estruturado."
-      );
-    }
-
-    let calculatedSum = new Prisma.Decimal(0);
-    servicesSnapshot = rawServices.map((item: any, idx: number) => {
-      const name = item.name || item.description;
-      const description = item.description || item.name;
-      if (!name && !description) {
-        throw new UnprocessableEntityError(
-          `DIRECT_OP_SERVICE_INVALID: Serviço no índice ${idx} sem nome ou descrição.`
-        );
-      }
-
-      let quantity: Prisma.Decimal;
-      let unitPrice: Prisma.Decimal;
-      let itemTotal: Prisma.Decimal;
-
-      if (item.amount !== undefined && item.amount !== null && item.amount !== "") {
-        unitPrice = new Prisma.Decimal(String(item.amount));
-        quantity =
-          item.quantity !== undefined
-            ? new Prisma.Decimal(String(item.quantity))
-            : new Prisma.Decimal(1);
-        itemTotal = quantity.mul(unitPrice);
-      } else if (item.unitPrice !== undefined && item.unitPrice !== null && item.unitPrice !== "") {
-        unitPrice = new Prisma.Decimal(String(item.unitPrice));
-        quantity =
-          item.quantity !== undefined
-            ? new Prisma.Decimal(String(item.quantity))
-            : new Prisma.Decimal(1);
-        itemTotal =
-          item.total !== undefined
-            ? new Prisma.Decimal(String(item.total))
-            : quantity.mul(unitPrice);
-      } else {
-        throw new UnprocessableEntityError(
-          `DIRECT_OP_SERVICE_INVALID: Serviço no índice ${idx} sem valor monetário.`
-        );
-      }
-
-      if (item.total !== undefined && item.total !== null && item.total !== "") {
-        const declaredTotal = new Prisma.Decimal(String(item.total));
-        if (!declaredTotal.equals(quantity.mul(unitPrice))) {
-          throw new UnprocessableEntityError(
-            `DIRECT_OP_SERVICE_TOTAL_MISMATCH: Total informado (${declaredTotal}) difere de quantity * unitPrice (${quantity.mul(unitPrice)}).`
-          );
-        }
-      }
-
-      calculatedSum = calculatedSum.add(itemTotal);
-
-      return {
-        name: String(name),
-        description: String(description),
-        type: item.type || "pdr",
-        quantity: quantity.toString(),
-        unitPrice: unitPrice.toFixed(2),
-        total: itemTotal.toFixed(2),
-      };
-    });
-
-    totalAmount = calculatedSum.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-  }
-
-  // 5. Temporal calculation & boundaries
-  const workspace = await prisma.workspace.findUniqueOrThrow({
-    where: { id: po.workspaceId },
-    select: { timezone: true },
-  });
-  const timezone = workspace.timezone || "UTC";
-
-  const deliveredAtDate = options?.deliveredAt
-    ? new Date(options.deliveredAt)
-    : po.deliveredAt || new Date();
-
-  if (isNaN(deliveredAtDate.getTime())) {
-    throw new UnprocessableEntityError("Data de entrega fornecida é inválida.");
-  }
-
-  const weekInfo = operationalWeekOf(deliveredAtDate, timezone);
-
-  // 6. Execute atomic transaction
+  // 1. Transaction-local execution under pessimistic row lock
   try {
     return await prisma.$transaction(
       async (tx) => {
-        // Tenant-safe row locking on ProductionOrder
-        const [locked] = await tx.$queryRaw<
-          Array<{
-            id: string;
-            workspace_id: string;
-            status: string;
-            execution_sequence: number;
-          }>
-        >`
-          SELECT id, workspace_id, status, execution_sequence
+        // Step 1.1: Acquire pessimistic tenant-safe row lock on ProductionOrder
+        const [lockedRow] = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
           FROM "production_orders"
-          WHERE "id" = ${po.id} AND "workspace_id" = ${po.workspaceId}
+          WHERE "id" = ${orderId} AND "workspace_id" = ${ctx.activeWorkspaceId}
           FOR UPDATE
         `;
 
-        if (!locked) {
-          throw new NotFoundError("Ordem de produção não encontrada sob lock.");
+        if (!lockedRow) {
+          throw new NotFoundError("Ordem de produção não encontrada.");
         }
 
-        if (locked.status === "delivered") {
-          const entry = await tx.weeklogEntry.findUnique({
-            where: {
-              productionOrderId_executionSequence: {
-                productionOrderId: po.id,
-                executionSequence: locked.execution_sequence,
+        // Step 1.2: Re-read fresh, transaction-local ProductionOrder under lock (Locked Source of Truth)
+        const currentPo = await tx.productionOrder.findUnique({
+          where: { id: orderId },
+          include: {
+            photos: true,
+            budget: {
+              include: {
+                approvedRevision: true,
+                currentRevision: true,
               },
             },
-            include: { weeklog: true },
-          });
-          if (entry) {
-            return {
-              productionOrder: po,
-              weeklog: entry.weeklog,
-              weeklogEntry: entry,
-              idempotent: true,
-            };
-          }
-          throw new ConflictError("Ordem de produção já entregue sem entrada de Weeklog.");
-        }
-
-        if (locked.status !== "in_production" && locked.status !== "paused") {
-          throw new ConflictError(
-            `Ordem de produção em status '${locked.status}' não pode ser finalizada.`
-          );
-        }
-
-        // Update ProductionOrder status & deliveredAt
-        const updatedPo = await tx.productionOrder.update({
-          where: { id: po.id },
-          data: {
-            status: "delivered",
-            deliveredAt: deliveredAtDate,
+            budgetRevision: true,
           },
         });
 
-        // Upsert Weeklog Header
+        if (!currentPo || currentPo.workspaceId !== ctx.activeWorkspaceId) {
+          throw new NotFoundError("Ordem de produção não encontrada.");
+        }
+
+        // Step 1.3: Authorize on fresh locked object (prevents reassign/ownership race)
+        assertTenantAccess(ctx, currentPo.workspaceId);
+        assertObjectAccess(ctx, currentPo);
+
+        // Step 1.4: Check idempotency on current execution sequence under lock
+        if (currentPo.status === "delivered") {
+          const existingEntry = await tx.weeklogEntry.findUnique({
+            where: {
+              productionOrderId_executionSequence: {
+                productionOrderId: currentPo.id,
+                executionSequence: currentPo.executionSequence,
+              },
+            },
+            include: {
+              weeklog: true,
+            },
+          });
+
+          if (existingEntry) {
+            return {
+              productionOrder: currentPo,
+              weeklog: existingEntry.weeklog,
+              weeklogEntry: existingEntry,
+              idempotent: true,
+            };
+          }
+          throw new ConflictError(
+            "Ordem de produção já entregue sem entrada de Weeklog correspondente."
+          );
+        }
+
+        // Step 1.5: Validate permitted status transitions
+        if (currentPo.status !== "in_production" && currentPo.status !== "paused") {
+          throw new ConflictError(
+            `Ordem de produção com status '${currentPo.status}' não pode ser finalizada. Estados permitidos: in_production, paused.`
+          );
+        }
+
+        // Step 1.6: Validate domain preconditions on fresh locked object
+        if (!currentPo.clientId) {
+          throw new UnprocessableEntityError("CLIENT_REQUIRED: Ordem de produção sem cliente canônico.");
+        }
+
+        if (!currentPo.operationalSiteKey) {
+          throw new UnprocessableEntityError(
+            "OPERATIONAL_SITE_REQUIRED: Ordem de produção sem local operacional (siteKey)."
+          );
+        }
+
+        // Step 1.7: Currency resolution & Budget lineage validation
+        let resolvedCurrencyCode: string | null = null;
+        let servicesSnapshot: any[] = [];
+        let totalAmount: Prisma.Decimal = new Prisma.Decimal(0);
+
+        if (currentPo.budgetId) {
+          // Budget-originated OP
+          const budget = currentPo.budget;
+          if (!budget || budget.workspaceId !== ctx.activeWorkspaceId || budget.id !== currentPo.budgetId) {
+            throw new UnprocessableEntityError("BUDGET_LINEAGE_INVALID: Orçamento vinculado inválido ou inexistente.");
+          }
+
+          if (!currentPo.budgetRevisionId) {
+            throw new UnprocessableEntityError("BUDGET_LINEAGE_INVALID: Ordem de produção sem revisão de orçamento vinculada.");
+          }
+
+          const revision = currentPo.budgetRevision;
+          if (!revision || revision.budgetId !== budget.id || revision.id !== currentPo.budgetRevisionId) {
+            throw new UnprocessableEntityError("BUDGET_LINEAGE_INVALID: Revisão vinculada não pertence ao orçamento.");
+          }
+
+          // Strict Domain Invariant: Only approved budget revisions can originate WEEKLOG
+          if (budget.approvedRevisionId !== currentPo.budgetRevisionId || revision.status !== "approved") {
+            throw new UnprocessableEntityError(
+              "UNAPPROVED_BUDGET_REVISION: Apenas revisão de orçamento aprovada pode gerar WEEKLOG final."
+            );
+          }
+
+          resolvedCurrencyCode = revision.currencyCode || null;
+          if (!resolvedCurrencyCode || !/^[A-Z]{3}$/.test(resolvedCurrencyCode)) {
+            throw new UnprocessableEntityError(
+              "CURRENCY_REQUIRED: Código de moeda canônico ausente ou inválido na revisão do orçamento."
+            );
+          }
+
+          const revServices = Array.isArray(revision.services) ? revision.services : [];
+          const revParts = Array.isArray(revision.parts) ? revision.parts : [];
+          const revLabor = Array.isArray(revision.labor) ? revision.labor : [];
+
+          servicesSnapshot =
+            revServices.length > 0
+              ? revServices
+              : revParts.length > 0
+              ? revParts
+              : revLabor;
+
+          totalAmount = new Prisma.Decimal(
+            revision.finalTotal?.toString() || revision.grossTotal?.toString() || "0"
+          );
+        } else {
+          // Direct OP
+          resolvedCurrencyCode = currentPo.currencyCode || null;
+          if (!resolvedCurrencyCode || !/^[A-Z]{3}$/.test(resolvedCurrencyCode)) {
+            throw new UnprocessableEntityError(
+              "CURRENCY_REQUIRED: Código de moeda canônico ausente ou inválido na ordem direta."
+            );
+          }
+
+          const rawServices = currentPo.performedServices;
+          if (!rawServices || !Array.isArray(rawServices) || rawServices.length === 0) {
+            throw new UnprocessableEntityError(
+              "DIRECT_OP_NO_SERVICES: Ordem de produção direta sem performedServices estruturado."
+            );
+          }
+
+          let calculatedSum = new Prisma.Decimal(0);
+          servicesSnapshot = rawServices.map((item: any, idx: number) => {
+            const name = item.name || item.description;
+            const description = item.description || item.name;
+            if (!name && !description) {
+              throw new UnprocessableEntityError(
+                `DIRECT_OP_SERVICE_INVALID: Serviço no índice ${idx} sem nome ou descrição.`
+              );
+            }
+
+            let quantity: Prisma.Decimal;
+            let unitPrice: Prisma.Decimal;
+            let itemTotal: Prisma.Decimal;
+
+            if (item.amount !== undefined && item.amount !== null && item.amount !== "") {
+              unitPrice = new Prisma.Decimal(String(item.amount));
+              quantity =
+                item.quantity !== undefined
+                  ? new Prisma.Decimal(String(item.quantity))
+                  : new Prisma.Decimal(1);
+              itemTotal = quantity.mul(unitPrice);
+            } else if (item.unitPrice !== undefined && item.unitPrice !== null && item.unitPrice !== "") {
+              unitPrice = new Prisma.Decimal(String(item.unitPrice));
+              quantity =
+                item.quantity !== undefined
+                  ? new Prisma.Decimal(String(item.quantity))
+                  : new Prisma.Decimal(1);
+              itemTotal =
+                item.total !== undefined
+                  ? new Prisma.Decimal(String(item.total))
+                  : quantity.mul(unitPrice);
+            } else {
+              throw new UnprocessableEntityError(
+                `DIRECT_OP_SERVICE_INVALID: Serviço no índice ${idx} sem valor monetário.`
+              );
+            }
+
+            if (item.total !== undefined && item.total !== null && item.total !== "") {
+              const declaredTotal = new Prisma.Decimal(String(item.total));
+              if (!declaredTotal.equals(quantity.mul(unitPrice))) {
+                throw new UnprocessableEntityError(
+                  `DIRECT_OP_SERVICE_TOTAL_MISMATCH: Total informado (${declaredTotal}) difere de quantity * unitPrice (${quantity.mul(unitPrice)}).`
+                );
+              }
+            }
+
+            calculatedSum = calculatedSum.add(itemTotal);
+
+            return {
+              name: String(name),
+              description: String(description),
+              type: item.type || "pdr",
+              quantity: quantity.toString(),
+              unitPrice: unitPrice.toFixed(2),
+              total: itemTotal.toFixed(2),
+            };
+          });
+
+          totalAmount = calculatedSum.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+        }
+
+        // Step 1.8: Server-side Timestamp Authority & Operational Week
+        const workspace = await tx.workspace.findUniqueOrThrow({
+          where: { id: currentPo.workspaceId },
+          select: { timezone: true },
+        });
+        const timezone = workspace.timezone || "UTC";
+
+        // Pure server-side authority: client body cannot pick delivery time
+        const serverDeliveredAt = options?._serverTime || new Date();
+        const weekInfo = operationalWeekOf(serverDeliveredAt, timezone);
+
+        // Step 1.9: Update ProductionOrder to delivered
+        const updatedPo = await tx.productionOrder.update({
+          where: { id: currentPo.id },
+          data: {
+            status: "delivered",
+            deliveredAt: serverDeliveredAt,
+          },
+        });
+
+        // Step 1.10: Upsert Weeklog Header
         const weeklog = await tx.weeklog.upsert({
           where: {
             workspaceId_startsOn_clientId_siteKey: {
-              workspaceId: po.workspaceId,
+              workspaceId: currentPo.workspaceId,
               startsOn: weekInfo.startsOn,
-              clientId: po.clientId!,
-              siteKey: po.operationalSiteKey!,
+              clientId: currentPo.clientId!,
+              siteKey: currentPo.operationalSiteKey!,
             },
           },
           create: {
-            workspaceId: po.workspaceId,
+            workspaceId: currentPo.workspaceId,
             startsOn: weekInfo.startsOn,
             endsOn: weekInfo.endsOn,
-            clientId: po.clientId!,
-            siteKey: po.operationalSiteKey!,
+            clientId: currentPo.clientId!,
+            siteKey: currentPo.operationalSiteKey!,
             timezone: weekInfo.timezone,
             week: weekInfo.week,
             weekNumber: weekInfo.weekNumber,
@@ -517,30 +509,30 @@ export async function finalizeProductionOrder(
           update: {},
         });
 
-        // Downstream ServiceOrder projection
+        // Step 1.11: Downstream ServiceOrder projection
         const legacyServiceOrder = await syncLegacyServiceOrderProjection(tx, {
-          workspaceId: po.workspaceId,
-          technicianUserId: po.technicianUserId || ctx.actorUserId,
-          technicianName: po.technicianName || "",
-          clientId: po.clientId,
-          clientName: po.clientName || "",
-          brand: po.brand,
-          model: po.model,
-          licensePlate: po.licensePlate,
+          workspaceId: currentPo.workspaceId,
+          technicianUserId: currentPo.technicianUserId || ctx.actorUserId,
+          technicianName: currentPo.technicianName || "",
+          clientId: currentPo.clientId,
+          clientName: currentPo.clientName || "",
+          brand: currentPo.brand,
+          model: currentPo.model,
+          licensePlate: currentPo.licensePlate,
           week: weekInfo.week,
           yearReference: weekInfo.yearReference,
           total: totalAmount,
           services: servicesSnapshot,
         });
 
-        // Rectification linkage
+        // Step 1.12: Rectification linkage
         let rectificationOriginEntryId: string | null = null;
         let isRectification = false;
-        if (po.executionSequence > 1) {
+        if (currentPo.executionSequence > 1) {
           const prevEntry = await tx.weeklogEntry.findFirst({
             where: {
-              productionOrderId: po.id,
-              executionSequence: po.executionSequence - 1,
+              productionOrderId: currentPo.id,
+              executionSequence: currentPo.executionSequence - 1,
             },
             select: { id: true },
           });
@@ -550,45 +542,45 @@ export async function finalizeProductionOrder(
           }
         }
 
-        // Create immutable WeeklogEntry snapshot
+        // Step 1.13: Create immutable WeeklogEntry snapshot
         const weeklogEntry = await tx.weeklogEntry.create({
           data: {
             weeklogId: weeklog.id,
-            workspaceId: po.workspaceId,
-            productionOrderId: po.id,
-            executionSequence: po.executionSequence,
-            budgetId: po.budgetId || null,
-            budgetRevisionId: po.budgetRevisionId || null,
+            workspaceId: currentPo.workspaceId,
+            productionOrderId: currentPo.id,
+            executionSequence: currentPo.executionSequence,
+            budgetId: currentPo.budgetId || null,
+            budgetRevisionId: currentPo.budgetRevisionId || null,
             legacyServiceOrderId: legacyServiceOrder.id,
-            technicianUserId: po.technicianUserId || ctx.actorUserId,
-            technicianName: po.technicianName || "",
-            clientId: po.clientId!,
-            clientName: po.clientName || "",
-            brand: po.brand || null,
-            model: po.model || null,
-            color: po.color || null,
-            licensePlate: po.licensePlate || null,
-            vin: po.vin || null,
+            technicianUserId: currentPo.technicianUserId || ctx.actorUserId,
+            technicianName: currentPo.technicianName || "",
+            clientId: currentPo.clientId!,
+            clientName: currentPo.clientName || "",
+            brand: currentPo.brand || null,
+            model: currentPo.model || null,
+            color: currentPo.color || null,
+            licensePlate: currentPo.licensePlate || null,
+            vin: currentPo.vin || null,
             servicesSnapshot: servicesSnapshot as any,
             totalAmount,
             currencyCode: resolvedCurrencyCode!,
-            deliveredAt: deliveredAtDate,
+            deliveredAt: serverDeliveredAt,
             validationStatus: "pending",
             isRectification,
             rectificationOriginEntryId,
           },
         });
 
-        // Link legacyServiceOrderId back to ProductionOrder
+        // Step 1.14: Link legacyServiceOrderId back to ProductionOrder
         await tx.productionOrder.update({
-          where: { id: po.id },
+          where: { id: currentPo.id },
           data: {
             serviceOrderId: legacyServiceOrder.id,
           },
         });
 
-        // Sync document folders
-        await syncPhotosToWeeklogFolders(tx, po, weekInfo, ctx.actorUserId);
+        // Step 1.15: Sync document folders
+        await syncPhotosToWeeklogFolders(tx, currentPo, weekInfo, ctx.actorUserId);
 
         return {
           productionOrder: updatedPo,
@@ -615,17 +607,22 @@ export async function finalizeProductionOrder(
         const existing = await prisma.weeklogEntry.findUnique({
           where: {
             productionOrderId_executionSequence: {
-              productionOrderId: po.id,
-              executionSequence: po.executionSequence,
+              productionOrderId: orderId,
+              executionSequence: (
+                await prisma.productionOrder.findUnique({
+                  where: { id: orderId },
+                  select: { executionSequence: true },
+                })
+              )?.executionSequence ?? 1,
             },
           },
           include: { weeklog: true },
         });
 
         if (existing) {
-          const freshPo = await prisma.productionOrder.findUnique({ where: { id: po.id } });
+          const freshPo = await prisma.productionOrder.findUnique({ where: { id: orderId } });
           return {
-            productionOrder: freshPo || po,
+            productionOrder: freshPo,
             weeklog: existing.weeklog,
             weeklogEntry: existing,
             idempotent: true,

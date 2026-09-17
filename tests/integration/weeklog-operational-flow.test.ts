@@ -1287,6 +1287,203 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
           prisma.$transaction = originalTransaction;
         }
       });
+
+      it("FINALIZE-DELIVERED-AT-AUTHORITY-01: Payload client-side não consegue forjar deliveredAt ou escolher arbitrariamente a semana", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-deliv-auth-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-DELIV-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Reparo", amount: "100.00" }],
+            status: "in_production",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ deliveredAt: "2020-01-01T00:00:00.000Z" }),
+        });
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+
+        const currentYear = new Date().getFullYear();
+        expect(data.weeklog.yearReference).toBe(currentYear);
+        const deliveredYear = new Date(data.weeklogEntry.deliveredAt).getFullYear();
+        expect(deliveredYear).toBe(currentYear);
+      });
+
+      it("FINALIZE-REASSIGN-RACE-01: Se Tech A perde ownership antes do lock, não finaliza com autorização stale", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-reassign-race-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RACE-TO",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Reparo", amount: "100.00" }],
+            status: "in_production",
+          },
+        });
+
+        await prisma.productionOrder.update({
+          where: { id: po.id },
+          data: { technicianUserId: FIXTURES_003.techA2.userId },
+        });
+
+        const res = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+
+        expect(res.status).toBe(403);
+        const check = await prisma.productionOrder.findUniqueOrThrow({ where: { id: po.id } });
+        expect(check.status).toBe("in_production");
+      });
+
+      it("FINALIZE-UNAPPROVED-REVISION-01: OP com revisão de orçamento não aprovada é rejeitada com HTTP 422", async () => {
+        const budget = await prisma.budget.create({
+          data: {
+            id: "bg-unapproved-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "BG-UNAPP-01",
+            clientId: FIXTURES_003.clientA.id,
+            createdById: FIXTURES_003.ownerA.userId,
+            approvedRevisionId: null,
+          },
+        });
+
+        const rev = await prisma.budgetRevision.create({
+          data: {
+            id: "rev-draft-01",
+            budgetId: budget.id,
+            revisionNumber: 1,
+            status: "draft",
+            currencyCode: "EUR",
+            clientSnapshot: {},
+            vehicleSnapshot: {},
+            services: [{ description: "Pintura", total: "300.00" }],
+            finalTotal: new Prisma.Decimal("300.00"),
+            createdById: FIXTURES_003.ownerA.userId,
+          },
+        });
+
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-unapp-rev-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-UNAPP-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            budgetId: budget.id,
+            budgetRevisionId: rev.id,
+            status: "in_production",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+
+        expect(res.status).toBe(422);
+        const data = await res.json();
+        expect(data.message).toMatch(/UNAPPROVED_BUDGET_REVISION/i);
+      });
+
+      it("FINALIZE-NO-FINANCE-01: Finalização de OP possui zero efeitos financeiros colaterais e não gera listName", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-zero-fin-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-ZFIN-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Reparo PDR", amount: "200.00" }],
+            status: "in_production",
+          },
+        });
+
+        const [initialPaymentOrders, initialFinancialRecords] = await Promise.all([
+          prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_003.wsAlpha } }),
+          prisma.financialRecord.count({ where: { workspaceId: FIXTURES_003.wsAlpha } }),
+        ]);
+
+        const res = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+
+        expect(res.status).toBe(200);
+
+        const [finalPaymentOrders, finalFinancialRecords] = await Promise.all([
+          prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_003.wsAlpha } }),
+          prisma.financialRecord.count({ where: { workspaceId: FIXTURES_003.wsAlpha } }),
+        ]);
+
+        expect(finalPaymentOrders).toBe(initialPaymentOrders);
+        expect(finalFinancialRecords).toBe(initialFinancialRecords);
+
+        const anyPaymentWithList = await prisma.paymentOrder.findFirst({
+          where: { workspaceId: FIXTURES_003.wsAlpha, listName: { not: null } },
+        });
+        expect(anyPaymentWithList).toBeNull();
+      });
+
+      it("FINALIZE-MORE-THAN-4-SERVICES-01: servicesSnapshot preserva integralmente >4 serviços sem truncamento canônico", async () => {
+        const services = [
+          { name: "S1", amount: "10.00" },
+          { name: "S2", amount: "20.00" },
+          { name: "S3", amount: "30.00" },
+          { name: "S4", amount: "40.00" },
+          { name: "S5", amount: "50.00" },
+          { name: "S6", amount: "60.00" },
+        ];
+
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-more-4-srv-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-M4S-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: services,
+            status: "in_production",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+
+        expect(data.weeklogEntry.servicesSnapshot).toHaveLength(6);
+        expect(Number(data.weeklogEntry.totalAmount)).toBe(210.0);
+
+        const legacySo = await prisma.serviceOrder.findUniqueOrThrow({
+          where: { id: data.weeklogEntry.legacyServiceOrderId },
+        });
+        expect(legacySo.service1Name).toBe("S1");
+        expect(legacySo.service1Price).toBe(10);
+        expect(legacySo.service4Name).toBe("S4");
+        expect(legacySo.service4Price).toBe(40);
+        expect(legacySo.total).toBe(210);
+      });
     });
 
     // -----------------------------------------------------------------------

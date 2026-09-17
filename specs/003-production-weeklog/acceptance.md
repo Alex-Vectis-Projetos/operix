@@ -4,11 +4,11 @@
 **Branch**: `feat/003-production-weeklog`  
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-17  
-**Total de Cenários**: 51 cenários de aceitação formal (45 base + 6 invariantes T04)  
+**Total de Cenários**: 56 cenários de aceitação formal (45 base + 11 invariantes e hardening T04)  
 
 ---
 
-## 1. Matriz de Cenários e Invariantes (51 Cenários)
+## 1. Matriz de Cenários e Invariantes (56 Cenários)
 
 | ID do Cenário | Invariante / Regra de Negócio | Comportamento Esperado |
 |---|---|---|
@@ -61,8 +61,12 @@
 | **FINALIZE-TECH-OWN-01** | Ownership estrito de técnico | Técnico A tentando finalizar OP atribuída a Técnico B recebe HTTP 403 Forbidden. |
 | **FINALIZE-SNAPSHOT-DECIMAL-01** | Precisão monetária decimal | Cálculos de itens múltiplos utilizam Prisma.Decimal exato sem perda de ponto flutuante. |
 | **FINALIZE-HEADER-RACE-01** | Race condition de cabeçalho | OPs distintas finalizadas concorrentemente para o mesmo lote semanal utilizam o mesmo Weeklog. |
-| **FINALIZE-ROLLBACK-01** | Rollback atômico em falha | Falha ao gravar WeeklogEntry desfaz a transação e deixa ProductionOrder intacta. |
 | **FINALIZE-P2002-UNRELATED-01** | Propagação de P2002 não-relacionado | Erro P2002 de constraint externa à idempotência é relançado sem mascaramento. |
+| **FINALIZE-DELIVERED-AT-AUTHORITY-01** | Autoridade temporal server-side | Payload client-side não consegue forjar data de entrega ou escolher arbitrariamente a semana. |
+| **FINALIZE-REASSIGN-RACE-01** | Locked Source of Truth / Ownership | Técnico que perde atribuição da ordem antes do lock não finaliza com autorização stale (HTTP 403). |
+| **FINALIZE-UNAPPROVED-REVISION-01** | Linhagem estrita de orçamento | OP vinculada a revisão de orçamento em draft/não-aprovada é rejeitada com HTTP 422. |
+| **FINALIZE-NO-FINANCE-01** | Zero efeito financeiro colateral | Finalização não gera PaymentOrder, não cria listName e mantém intactos os saldos financeiros. |
+| **FINALIZE-MORE-THAN-4-SERVICES-01** | Preservação integral de serviços | Snapshot canônico preserva >4 serviços sem truncamento enquanto a projeção legada preenche 4 slots. |
 
 ---
 
