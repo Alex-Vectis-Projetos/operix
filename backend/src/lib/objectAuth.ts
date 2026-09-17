@@ -1,5 +1,13 @@
 import type { RequestContext } from "../middleware/requestContext.js";
 
+export class BadRequestError extends Error {
+  readonly statusCode = 400;
+  constructor(message = "Requisição inválida.") {
+    super(message);
+    this.name = "BadRequestError";
+  }
+}
+
 export class ForbiddenError extends Error {
   readonly statusCode = 403;
   constructor(message = "Acesso negado.") {

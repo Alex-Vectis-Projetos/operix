@@ -10,6 +10,7 @@ import {
   reviewWeeklogEntry,
   uploadWeeklogSignature,
   validateWeeklogBatch,
+  rectifyWeeklogEntry,
 } from "../services/weeklogService.js";
 import { prisma } from "../lib/prisma.js";
 
@@ -182,4 +183,26 @@ weeklogsRouter.post(
     }
   }
 );
+
+// POST /api/weeklogs/:id/entries/:entryId/rectify
+weeklogsRouter.post(
+  "/:id/entries/:entryId/rectify",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const ctx = req.ctx;
+      if (!ctx?.activeWorkspaceId) {
+        return res.status(403).json({ message: "Workspace ativo não definido." });
+      }
+
+      const id = req.params["id"] as string;
+      const entryId = req.params["entryId"] as string;
+      const result = await rectifyWeeklogEntry(ctx, id, entryId, req.body || {});
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
+
 

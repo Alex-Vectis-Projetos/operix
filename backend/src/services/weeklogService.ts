@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 export { Prisma };
 import type { RequestContext } from "../middleware/requestContext.js";
 import {
+  BadRequestError,
   ForbiddenError,
   NotFoundError,
   ConflictError,
@@ -12,6 +13,7 @@ import {
   assertObjectAccess,
 } from "../lib/objectAuth.js";
 import { operationalWeekOf } from "../lib/weekUtils.js";
+import { validateTechnicianAssignment } from "../routes/productionOrders.js";
 
 export interface FinalizeProductionOrderOptions {
   /**
@@ -22,6 +24,19 @@ export interface FinalizeProductionOrderOptions {
 }
 
 export interface FinalizeProductionOrderResult {
+  productionOrder: any;
+  weeklog: any;
+  weeklogEntry: any;
+  idempotent: boolean;
+}
+
+export interface RectifyWeeklogEntryPayload {
+  reason?: string;
+  rectificationReason?: string;
+  assignedTechnicianUserId?: string;
+}
+
+export interface RectifyWeeklogEntryResult {
   productionOrder: any;
   weeklog: any;
   weeklogEntry: any;
@@ -527,9 +542,9 @@ export async function finalizeProductionOrder(
         });
 
         // Step 1.12: Rectification linkage
-        let rectificationOriginEntryId: string | null = null;
-        let isRectification = false;
-        if (currentPo.executionSequence > 1) {
+        let rectificationOriginEntryId: string | null = currentPo.rectificationOriginId || null;
+        let isRectification = currentPo.executionSequence > 1;
+        if (!rectificationOriginEntryId && currentPo.executionSequence > 1) {
           const prevEntry = await tx.weeklogEntry.findFirst({
             where: {
               productionOrderId: currentPo.id,
@@ -539,7 +554,6 @@ export async function finalizeProductionOrder(
           });
           if (prevEntry) {
             rectificationOriginEntryId = prevEntry.id;
-            isRectification = true;
           }
         }
 
@@ -1474,4 +1488,248 @@ export async function validateWeeklogBatch(
 
   return result;
 }
+
+/**
+ * T07 Domain Command: rectifyWeeklogEntry
+ *
+ * Solicita retificação formal de uma execução de ProductionOrder coberta por uma
+ * entrada de WEEKLOG. Reabre a ProductionOrder de forma atômica para retrabalho,
+ * incrementa a executionSequence e registra a linhagem (rectificationOriginId).
+ *
+ * Invariantes Invioláveis:
+ * - A entrada histórica de WeeklogEntry é imutável: snapshots de serviços, veículos,
+ *   preços e assinaturas históricas JAMAIS são alterados ou sobrescritos.
+ * - Nenhuma nova WeeklogEntry ou ServiceOrder é gerada nesta solicitação; a nova execução
+ *   só nascerá na re-finalização (finalizeProductionOrder).
+ * - Ordem estrita de locks pessimistas: Weeklog -> WeeklogEntry -> ProductionOrder.
+ * - Idempotência determinística com detecção de conflito de payload.
+ * - Validador do cliente possui autoridade para solicitar retificação, mas NÃO pode escolher técnico.
+ */
+export async function rectifyWeeklogEntry(
+  ctx: RequestContext,
+  weeklogId: string,
+  entryId: string,
+  payload: RectifyWeeklogEntryPayload
+): Promise<RectifyWeeklogEntryResult> {
+  if (!ctx.activeWorkspaceId) {
+    throw new ForbiddenError("Workspace ativo não definido.");
+  }
+
+  // 1. Validar motivo obrigatório, string, trim, não vazio
+  const rawReason = payload.reason ?? payload.rectificationReason;
+  if (!rawReason || typeof rawReason !== "string" || rawReason.trim().length === 0) {
+    throw new BadRequestError(
+      "RECTIFICATION_REASON_REQUIRED: Motivo da retificação é obrigatório (RECTIFICATION-REASON-01)."
+    );
+  }
+  const reason = rawReason.trim();
+
+  // 2. Validador externo do cliente: NÃO pode escolher técnico
+  const isClientRole = ctx.membershipRole === "client";
+  if (
+    isClientRole &&
+    payload.assignedTechnicianUserId !== undefined &&
+    payload.assignedTechnicianUserId !== null &&
+    payload.assignedTechnicianUserId !== ""
+  ) {
+    throw new ForbiddenError(
+      "VALIDATOR_CANNOT_ASSIGN_TECHNICIAN: Validadores do cliente não possuem autorização para escolher técnicos (RECTIFICATION-VALIDATOR-ASSIGN-FORBIDDEN-01)."
+    );
+  }
+
+  // 3. Validação preliminar de técnico caso informado
+  let assignedTech: { technicianUserId: string | null; technicianName: string | null } | null = null;
+  if (payload.assignedTechnicianUserId) {
+    assignedTech = await validateTechnicianAssignment(ctx, payload.assignedTechnicianUserId);
+  }
+
+  // 4. Execução atômica sob locks pessimistas ordenados
+  return await prisma.$transaction(
+    async (tx) => {
+      // Step 4.1: Lock order determinística: Weeklog -> WeeklogEntry -> ProductionOrder
+      const [lockedWl] = await tx.$queryRaw<Array<{ id: string; workspaceId: string }>>`
+        SELECT id, workspace_id as "workspaceId"
+        FROM "weeklogs"
+        WHERE "id" = ${weeklogId} AND "workspace_id" = ${ctx.activeWorkspaceId}
+        FOR UPDATE
+      `;
+      if (!lockedWl) {
+        throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+      }
+
+      const [lockedEntry] = await tx.$queryRaw<Array<{ id: string; workspaceId: string; productionOrderId: string }>>`
+        SELECT id, workspace_id as "workspaceId", production_order_id as "productionOrderId"
+        FROM "weeklog_entries"
+        WHERE "id" = ${entryId} AND "weeklog_id" = ${weeklogId} AND "workspace_id" = ${ctx.activeWorkspaceId}
+        FOR UPDATE
+      `;
+      if (!lockedEntry) {
+        throw new NotFoundError("Entrada de WEEKLOG não encontrada.");
+      }
+
+      const [lockedPo] = await tx.$queryRaw<Array<{ id: string; workspaceId: string }>>`
+        SELECT id, workspace_id as "workspaceId"
+        FROM "production_orders"
+        WHERE "id" = ${lockedEntry.productionOrderId} AND "workspace_id" = ${ctx.activeWorkspaceId}
+        FOR UPDATE
+      `;
+      if (!lockedPo) {
+        throw new NotFoundError("Ordem de produção vinculada não encontrada.");
+      }
+
+      // Step 4.2: Re-read fresh objects sob lock
+      const currentWl = await tx.weeklog.findUniqueOrThrow({
+        where: { id: weeklogId },
+      });
+      const currentEntry = await tx.weeklogEntry.findUniqueOrThrow({
+        where: { id: entryId },
+      });
+      const currentPo = await tx.productionOrder.findUniqueOrThrow({
+        where: { id: currentEntry.productionOrderId },
+      });
+
+      // Step 4.3: Validar Parent / Tenant Integrity
+      assertTenantAccess(ctx, currentWl.workspaceId);
+      assertTenantAccess(ctx, currentEntry.workspaceId);
+      assertTenantAccess(ctx, currentPo.workspaceId);
+
+      if (currentEntry.weeklogId !== currentWl.id) {
+        throw new NotFoundError("Entrada não pertence ao lote de WEEKLOG informado.");
+      }
+      if (currentPo.id !== currentEntry.productionOrderId) {
+        throw new NotFoundError("Ordem de produção não corresponde à entrada de WEEKLOG.");
+      }
+
+      // Step 4.4: Autoridade do Caller
+      if (ctx.membershipRole === "client") {
+        await assertActiveClientAccessGrant(tx, ctx, currentWl.clientId);
+      } else if (ctx.membershipRole === "technician") {
+        assertObjectAccess(ctx, currentEntry);
+      }
+
+      // Se o caller tiver ClientAccessGrant para o cliente deste Weeklog e tentar escolher técnico:
+      const callerClientGrant = await tx.clientAccessGrant.findFirst({
+        where: {
+          workspaceId: ctx.activeWorkspaceId,
+          userId: ctx.actorUserId,
+          clientId: currentWl.clientId,
+          status: "active",
+          revokedAt: null,
+        },
+      });
+      if (callerClientGrant && payload.assignedTechnicianUserId) {
+        throw new ForbiddenError(
+          "VALIDATOR_CANNOT_ASSIGN_TECHNICIAN: Validadores do cliente não possuem autorização para escolher técnicos (RECTIFICATION-VALIDATOR-ASSIGN-FORBIDDEN-01)."
+        );
+      }
+
+      // Step 4.5: Idempotência
+      if (
+        currentPo.status === "in_production" &&
+        currentPo.executionSequence === currentEntry.executionSequence + 1 &&
+        currentPo.rectificationOriginId === currentEntry.id &&
+        currentEntry.validationStatus === "rectification_requested"
+      ) {
+        const reasonsMatch = currentEntry.rectificationReason === reason;
+        const techMatches =
+          !payload.assignedTechnicianUserId ||
+          currentPo.technicianUserId === payload.assignedTechnicianUserId;
+
+        if (reasonsMatch && techMatches) {
+          return {
+            productionOrder: currentPo,
+            weeklog: currentWl,
+            weeklogEntry: currentEntry,
+            idempotent: true,
+          };
+        }
+
+        throw new ConflictError(
+          "RECTIFICATION_PAYLOAD_CONFLICT: Conflito de parâmetros em solicitação de retificação idempotente."
+        );
+      }
+
+      // Step 4.6: Origem deve ser a execução corrente da OP (sem forks de lineage)
+      if (currentPo.executionSequence !== currentEntry.executionSequence) {
+        throw new ConflictError(
+          "STALE_RECTIFICATION_ENTRY: Apenas a execução corrente da ordem de produção pode ser retificada."
+        );
+      }
+
+      const subsequentEntry = await tx.weeklogEntry.findFirst({
+        where: {
+          productionOrderId: currentPo.id,
+          executionSequence: { gt: currentEntry.executionSequence },
+        },
+      });
+      if (subsequentEntry) {
+        throw new ConflictError(
+          "STALE_RECTIFICATION_ENTRY: Já existe uma execução posterior para esta ordem de produção."
+        );
+      }
+
+      // Step 4.7: Estados Permitidos (ADR-003)
+      if (currentWl.status === "closed") {
+        throw new ConflictError(
+          "WEEKLOG_CLOSED: Lotes com status 'closed' não permitem solicitação de retificação."
+        );
+      }
+
+      if (currentEntry.validationStatus === "rectification_requested") {
+        throw new ConflictError(
+          "ENTRY_ALREADY_RECTIFICATION_REQUESTED: A entrada já possui solicitação de retificação pendente."
+        );
+      }
+
+      // Step 4.8: Writes Atômicos
+      // 1. Atualizar Weeklog para rectification_pending se necessário
+      let updatedWl = currentWl;
+      if (currentWl.status !== "rectification_pending") {
+        updatedWl = await tx.weeklog.update({
+          where: { id: currentWl.id },
+          data: { status: "rectification_pending" },
+        });
+      }
+
+      // 2. Atualizar WeeklogEntry histórica mantendo imutabilidade dos snapshots operacionais
+      const updatedEntry = await tx.weeklogEntry.update({
+        where: { id: currentEntry.id },
+        data: {
+          validationStatus: "rectification_requested",
+          rectificationReason: reason,
+          rectificationRequestedBy: ctx.actorUserId,
+          rectificationRequestedAt: new Date(),
+        },
+      });
+
+      // 3. Reabrir ProductionOrder para retrabalho
+      const resolvedTechUserId = assignedTech ? assignedTech.technicianUserId : currentPo.technicianUserId;
+      const resolvedTechName = assignedTech ? assignedTech.technicianName : currentPo.technicianName;
+
+      const updatedPo = await tx.productionOrder.update({
+        where: { id: currentPo.id },
+        data: {
+          status: "in_production",
+          executionSequence: currentEntry.executionSequence + 1,
+          rectificationOriginId: currentEntry.id,
+          finishedAt: null,
+          deliveredAt: null,
+          technicianUserId: resolvedTechUserId,
+          technicianName: resolvedTechName,
+        },
+      });
+
+      return {
+        productionOrder: updatedPo,
+        weeklog: updatedWl,
+        weeklogEntry: updatedEntry,
+        idempotent: false,
+      };
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    }
+  );
+}
+
 

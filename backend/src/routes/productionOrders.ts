@@ -12,7 +12,10 @@ import {
   flattenServicesFromBudgetNotes,
   isWeekClosed,
 } from "../lib/weekUtils.js";
-import { finalizeProductionOrder } from "../services/weeklogService.js";
+import {
+  finalizeProductionOrder,
+  type FinalizeProductionOrderOptions,
+} from "../services/weeklogService.js";
 
 export const productionOrdersRouter = Router();
 
