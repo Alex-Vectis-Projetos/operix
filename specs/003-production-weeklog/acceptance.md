@@ -637,4 +637,27 @@ Cenário: ProductionOrder sem status delivered ou sem deliveredAt preenchido é 
   E nenhuma WeeklogEntry é criada e o status da ProductionOrder não é auto-corrigido
 ```
 
+---
+
+## 4. Contratos Frontend de Aceitação (T09 & T10 — 21 Cenários GREEN)
+
+| ID do Contrato | Invariante Frontend | Comportamento Verificado |
+|---|---|---|
+| **T09-FINALIZE-DOUBLE-CLICK-01** | Proteção contra duplo clique na finalização | Invocação in-flight previne disparos concorrentes duplicados de rede. |
+| **T09-LEGACY-WRITES-DISABLED-01** | Descontinuação de mutações legadas | `apiServiceOrders.ts` não exporta funções mutantes (`create`, `update`, `put`, `delete`). |
+| **T09-CACHE-WORKSPACE-01** | Isolamento de cache por workspace | Query keys particionadas por `workspaceId` garantem zero vazamento entre inquilinos. |
+| **T09-FINALIZE-NO-CLIENT-AUTHORITY-01** | Zero autoridade do cliente na finalização | `POST /production-orders/:id/finalize` envia payload vazio. |
+| **T09-ERROR-MAPPING-01** | Tradução de erros de domínio da finalização | Erros de domínio (`OPERATIONAL_SITE_REQUIRED`, `CURRENCY_REQUIRED`, etc.) mapeados para mensagens claras. |
+| **T10-SUBMIT-CONTRACT-01** | Zero autoridade do cliente na submissão | `POST /weeklogs/:id/submit-for-validation` envia payload vazio. |
+| **T10-REVIEW-REJECTION-REASON-01** | Justificativa obrigatória na rejeição | Rejeição sem motivo não dispara request; motivo com trim é enviado corretamente. |
+| **T10-CONFIRMATION-01** | Confirmação autenticada sem assinatura | `POST /weeklogs/:id/validate` envia `validationMethod: "authenticated_confirmation"` sem `signatureStoragePath`. |
+| **T10-SIGNATURE-PNG-01** | Upload de assinatura em PNG | `POST /weeklogs/:id/signature-upload` envia Blob com `Content-Type: image/png`. |
+| **T10-SIGNATURE-NO-LOCALSTORAGE-01** | Proibição de assinatura em localStorage | Assinaturas gráficas e PNG nunca são persistidas em `localStorage`. |
+| **T10-VALIDATED-READONLY-01** | Imutabilidade do estado validado | Lote validado bloqueia mutações e mapeia erros `VALIDATED_IMMUTABLE`. |
+| **T10-RECTIFICATION-REASON-01** | Justificativa obrigatória na retificação | `POST /weeklogs/:id/entries/:entryId/rectify` envia motivo obrigatório. |
+| **T10-LEGACY-READONLY-01** | Somente leitura no arquivo histórico | Componentes de arquivo histórico não oferecem ações de validação ou retificação. |
+| **T10-WORKSPACE-CACHE-01** | Isolamento multi-tenant de queries e mutations | Invalidações de cache mantêm namespace rigoroso de `workspaceId`. |
+| **T10-ERROR-MAPPING-01** | Mapeamento exaustivo de erros de validação | Erros de grant, auto-validação, integridade de revisão e retificação traduzidos deterministamente. |
+
+
 
