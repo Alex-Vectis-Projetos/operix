@@ -11,9 +11,9 @@ import {
   UnprocessableEntityError,
   assertTenantAccess,
   assertObjectAccess,
+  validateTechnicianAssignment,
 } from "../lib/objectAuth.js";
 import { operationalWeekOf } from "../lib/weekUtils.js";
-import { validateTechnicianAssignment } from "../routes/productionOrders.js";
 
 export interface FinalizeProductionOrderOptions {
   /**
@@ -1668,7 +1668,13 @@ export async function rectifyWeeklogEntry(
         );
       }
 
-      // Step 4.7: Estados Permitidos (ADR-003)
+      // Step 4.7: Estados Permitidos e Elegibilidade (ADR-003 / Spec 003 T07 Hardening)
+      if (currentWl.status === "open" || currentWl.status === "pending_validation") {
+        throw new ConflictError(
+          `RECTIFICATION_INVALID_WEEKLOG_STATE: Solicitação de retificação não é permitida com o lote em '${currentWl.status}'. O lote deve estar com validação concluída (rectification_pending ou validated).`
+        );
+      }
+
       if (currentWl.status === "closed") {
         throw new ConflictError(
           "WEEKLOG_CLOSED: Lotes com status 'closed' não permitem solicitação de retificação."
@@ -1678,6 +1684,45 @@ export async function rectifyWeeklogEntry(
       if (currentEntry.validationStatus === "rectification_requested") {
         throw new ConflictError(
           "ENTRY_ALREADY_RECTIFICATION_REQUESTED: A entrada já possui solicitação de retificação pendente."
+        );
+      }
+
+      if (currentEntry.validationStatus !== "rejected" && currentEntry.validationStatus !== "approved") {
+        throw new ConflictError(
+          `RECTIFICATION_INVALID_ENTRY_OUTCOME: Apenas entradas com validação formal concluída ('rejected' ou 'approved' em contestação formal) podem ser retificadas. Status atual: '${currentEntry.validationStatus}'.`
+        );
+      }
+
+      // Step 4.7.1: Exigência de Validation Round CONCLUÍDA cobrindo a entry exata em coverageSnapshot
+      const completedRounds = await tx.weeklogValidation.findMany({
+        where: {
+          weeklogId: currentWl.id,
+          workspaceId: ctx.activeWorkspaceId,
+          status: "validated",
+        },
+        orderBy: { validationSequence: "desc" },
+      });
+
+      const coveringRound = completedRounds.find((round) => {
+        if (!Array.isArray(round.coverageSnapshot)) return false;
+        return (round.coverageSnapshot as any[]).some((item: any) => {
+          if (!item) return false;
+          const entryId = item.weeklogEntryId || item.id || item.entryId;
+          if (entryId !== currentEntry.id) return false;
+
+          if (item.productionOrderId && item.productionOrderId !== currentPo.id) {
+            return false;
+          }
+          if (item.executionSequence !== undefined && item.executionSequence !== currentEntry.executionSequence) {
+            return false;
+          }
+          return true;
+        });
+      });
+
+      if (!coveringRound) {
+        throw new ConflictError(
+          "RECTIFICATION_NOT_VALIDATED: Não existe uma Validation Round concluída (status: 'validated') contendo esta entrada em seu coverageSnapshot (RECTIFICATION-OUTSIDE-COVERAGE-01)."
         );
       }
 

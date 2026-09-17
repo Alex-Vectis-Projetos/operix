@@ -9,6 +9,7 @@ import {
   ConflictError,
   assertTenantAccess,
   assertObjectAccess,
+  validateTechnicianAssignment,
 } from "../lib/objectAuth.js";
 import {
   createBudget,
@@ -17,7 +18,6 @@ import {
   rejectBudgetRevision,
   syncLocalBudgets,
 } from "../services/budgetService.js";
-import { validateTechnicianAssignment } from "./productionOrders.js";
 import multer from "multer";
 import { randomUUID } from "node:crypto";
 import { PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
