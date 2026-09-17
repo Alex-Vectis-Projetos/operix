@@ -2647,13 +2647,33 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
           },
         });
 
-        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}`, {
-          method: "PATCH",
-          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
-          body: JSON.stringify({ totalAmount: "500.00" }),
+        // 1. Tentativa de review em lote já validado retorna HTTP 409 Conflict
+        const resReview = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/review`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ outcome: "approved" }),
         });
+        expect(resReview.status).toBe(409);
 
-        expect(res.status).toBe(409);
+        // 2. Tentativa de upload de assinatura em lote já validado retorna HTTP 409 Conflict
+        const fakePng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02]);
+        const resUpload = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/signature-upload`, {
+          method: "POST",
+          headers: {
+            ...getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+            "Content-Type": "image/png",
+          },
+          body: fakePng,
+        });
+        expect(resUpload.status).toBe(409);
+
+        // 3. Tentativa de re-validação conflitante retorna HTTP 409 Conflict
+        const resValidate = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/validate`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha), // Ator diferente tentando revalidar
+          body: JSON.stringify({ validationMethod: "authenticated_confirmation" }),
+        });
+        expect(resValidate.status).toBe(409);
       });
 
       it("RELOAD-01: Persistência relacional pura: estado validado sobrevive a page reload", async () => {
@@ -3027,7 +3047,63 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         expect(res.status).toBe(403);
       });
 
-      it("VALIDATOR-GRANT-REVOKE-RACE-01: Revogação de grant antes da validação é verificada com lock no banco (HTTP 403)", async () => {
+      it("VALIDATOR-GRANT-REVOKE-RACE-01: Revogação de grant concorrente é sincronizada via FOR UPDATE e bloqueia validação (HTTP 403)", async () => {
+        // Cria usuário e grant dedicados para evitar interferência em fixtures globais
+        const raceUserId = "usr-race-val-01";
+        await prisma.clientAccessGrant.deleteMany({ where: { userId: raceUserId } });
+        await prisma.membership.deleteMany({ where: { userId: raceUserId } });
+        await prisma.appUser.deleteMany({ where: { id: raceUserId } });
+        await prisma.user.deleteMany({ where: { id: raceUserId } });
+
+        await prisma.user.create({
+          data: {
+            id: raceUserId,
+            email: "race-validator@example.com",
+            fullName: "Race Validator",
+            role: "user",
+            passwordHash: "hash-spec003-test",
+            isActive: true,
+            appUser: {
+              create: {
+                id: raceUserId,
+                email: "race-validator@example.com",
+                name: "Race Validator",
+              },
+            },
+          },
+        });
+
+        await prisma.membership.create({
+          data: {
+            id: "mem-race-val-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            userId: raceUserId,
+            role: "user",
+            status: "active",
+          },
+        });
+
+        await prisma.clientAccessGrant.create({
+          data: {
+            id: "grant-race-val-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            userId: raceUserId,
+            clientId: FIXTURES_003.clientA.id,
+            role: "validator",
+            status: "active",
+          },
+        });
+
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-grant-race-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-GRANT-RACE-01",
+            currencyCode: "EUR",
+            executionSequence: 1,
+          },
+        });
+
         const wl = await prisma.weeklog.create({
           data: {
             id: "wl-grant-race-01",
@@ -3039,37 +3115,89 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
             week: "2026-W33",
             weekNumber: 33,
             yearReference: 2026,
-            status: "pending_validation",
+            status: "open",
           },
         });
 
-        // Revoga o grant de validatorClientA
-        await prisma.clientAccessGrant.updateMany({
-          where: {
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-grant-race-01",
+            weeklogId: wl.id,
             workspaceId: FIXTURES_003.wsAlpha,
-            userId: FIXTURES_003.validatorClientA.userId,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
             clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "pending",
           },
-          data: { status: "revoked", revokedAt: new Date() },
         });
 
-        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/validate`, {
+        // 1. Submit e Review
+        await fetch(`${baseUrl}/api/weeklogs/${wl.id}/submit-for-validation`, {
           method: "POST",
-          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+
+        await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/review`, {
+          method: "POST",
+          headers: getAuthHeader({ userId: raceUserId, role: "user" }, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ outcome: "approved" }),
+        });
+
+        // 2. Concorrência Real: Transação de revogação adquire lock FOR UPDATE primeiro
+        let lockAcquiredResolver: () => void;
+        const lockAcquiredPromise = new Promise<void>((resolve) => {
+          lockAcquiredResolver = resolve;
+        });
+
+        let releaseLockResolver: () => void;
+        const releaseLockPromise = new Promise<void>((resolve) => {
+          releaseLockResolver = resolve;
+        });
+
+        const revocationTx = prisma.$transaction(async (tx) => {
+          // Trava a linha do grant no PostgreSQL com lock exclusivo
+          await tx.$queryRaw`
+            SELECT id FROM client_access_grants
+            WHERE id = 'grant-race-val-01'
+            FOR UPDATE
+          `;
+          lockAcquiredResolver();
+
+          // Segura a transação aberta até que a validação HTTP tenha batido no banco
+          await releaseLockPromise;
+
+          // Revoga o grant e commita a transação
+          await tx.clientAccessGrant.update({
+            where: { id: "grant-race-val-01" },
+            data: { status: "revoked", revokedAt: new Date() },
+          });
+        });
+
+        // Aguarda transação de revogação segurar o lock do banco
+        await lockAcquiredPromise;
+
+        // Dispara validação concorrente (que tentará assertActiveClientAccessGrant com FOR UPDATE
+        // e ficará BLOQUEADA no PostgreSQL aguardando a liberação do lock pela Transação 1)
+        const validationPromise = fetch(`${baseUrl}/api/weeklogs/${wl.id}/validate`, {
+          method: "POST",
+          headers: getAuthHeader({ userId: raceUserId, role: "user" }, FIXTURES_003.wsAlpha),
           body: JSON.stringify({ validationMethod: "authenticated_confirmation" }),
         });
 
-        expect(res.status).toBe(403);
+        // Breve espera para garantir que a requisição de validação enfileirou no lock da linha
+        await new Promise((r) => setTimeout(r, 60));
 
-        // Restaura grant para não afetar outros testes
-        await prisma.clientAccessGrant.updateMany({
-          where: {
-            workspaceId: FIXTURES_003.wsAlpha,
-            userId: FIXTURES_003.validatorClientA.userId,
-            clientId: FIXTURES_003.clientA.id,
-          },
-          data: { status: "active", revokedAt: null },
-        });
+        // Libera a transação de revogação para atualizar o status e commitar
+        releaseLockResolver!();
+        await revocationTx;
+
+        // A validação HTTP desengata do lock no PostgreSQL, lê o status 'revoked' atualizado e rejeita!
+        const resVal = await validationPromise;
+        expect(resVal.status).toBe(403);
       });
 
       it("SIGNATURE-NON-PNG-01: Upload de arquivo não-PNG (falsificado com Content-Type png) é rejeitado com HTTP 422", async () => {
@@ -3288,6 +3416,252 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         const stored = getStoredSignature(expectedFinalKey);
         expect(stored).toBeDefined();
         expect(stored?.buffer).toBeDefined();
+      });
+
+      it("SIGNATURE-DB-COMMIT-FAILURE-01: Falha de commit no banco após cópia no storage não corrompe DB e retry converge para a mesma final key", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-commit-fail-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-COMMIT-FAIL-01",
+            currencyCode: "EUR",
+            executionSequence: 1,
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-commit-fail-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-08-10T00:00:00Z"),
+            endsOn: new Date("2026-08-16T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W33",
+            weekNumber: 33,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-commit-fail-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "pending",
+          },
+        });
+
+        // 1. Submit e Review
+        await fetch(`${baseUrl}/api/weeklogs/${wl.id}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+
+        await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/review`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ outcome: "approved" }),
+        });
+
+        // 2. Upload de assinatura
+        const fakePng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x99, 0x88]);
+        const resUpload = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/signature-upload`, {
+          method: "POST",
+          headers: {
+            ...getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+            "Content-Type": "image/png",
+          },
+          body: fakePng,
+        });
+        expect(resUpload.status).toBe(200);
+        const { signatureStoragePath } = await resUpload.json();
+
+        const roundBefore = await prisma.weeklogValidation.findFirstOrThrow({
+          where: { weeklogId: wl.id },
+        });
+
+        const expectedFinalKey = `tenants/${FIXTURES_003.wsAlpha}/weeklogs/${wl.id}/signatures/${roundBefore.id}.png`;
+
+        // 3. Simulação de falha de banco após promoção no storage via trigger temporária no PostgreSQL
+        await prisma.$executeRawUnsafe(`
+          CREATE OR REPLACE FUNCTION fail_validation_trigger() RETURNS trigger AS $$
+          BEGIN
+            IF NEW.id = '${roundBefore.id}' AND NEW.status = 'validated' THEN
+              RAISE EXCEPTION 'SIMULATED_DB_COMMIT_FAILURE';
+            END IF;
+            RETURN NEW;
+          END;
+          $$ LANGUAGE plpgsql;
+        `);
+        await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS trg_fail_validation ON weeklog_validations;`);
+        await prisma.$executeRawUnsafe(`
+          CREATE TRIGGER trg_fail_validation
+          BEFORE UPDATE ON weeklog_validations
+          FOR EACH ROW EXECUTE FUNCTION fail_validation_trigger();
+        `);
+
+        try {
+          // Tentativa 1: Step B promove para storage, mas Step C/E falha na transação do banco
+          const resFail = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/validate`, {
+            method: "POST",
+            headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+            body: JSON.stringify({
+              validationMethod: "drawn_signature",
+              signatureStoragePath,
+            }),
+          });
+          expect(resFail.status).toBe(500);
+
+          // Prova 1: No banco, a rodada continua "pending" e signatureStoragePath permanece NULL (não aponta para lixo)
+          const roundDuring = await prisma.weeklogValidation.findFirstOrThrow({
+            where: { id: roundBefore.id },
+          });
+          expect(roundDuring.status).toBe("pending");
+          expect(roundDuring.signatureStoragePath).toBeNull();
+
+          // Prova 2: No storage, o arquivo órfão existe na chave determinística final
+          const { getStoredSignature } = await import("../../backend/src/lib/weeklogStorage.js");
+          expect(getStoredSignature(expectedFinalKey)).toBeDefined();
+        } finally {
+          await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS trg_fail_validation ON weeklog_validations;`);
+          await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS fail_validation_trigger();`);
+        }
+
+        // 4. Tentativa 2: Retry do cliente com a MESMA chamada
+        const resRetry = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/validate`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({
+            validationMethod: "drawn_signature",
+            signatureStoragePath,
+          }),
+        });
+        expect(resRetry.status).toBe(200);
+
+        // Prova 3: Converge para a MESMA final key e NENHUMA segunda Validation Round é criada
+        const totalRounds = await prisma.weeklogValidation.count({
+          where: { weeklogId: wl.id },
+        });
+        expect(totalRounds).toBe(1);
+
+        const roundAfter = await prisma.weeklogValidation.findFirstOrThrow({
+          where: { id: roundBefore.id },
+        });
+        expect(roundAfter.status).toBe("validated");
+        expect(roundAfter.signatureStoragePath).toBe(expectedFinalKey);
+      });
+
+      it("SIGNATURE-STORAGE-UNAVAILABLE-01: Com storage indisponível em produção, retorna erro explícito e round permanece pending com signatureStoragePath null", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-sig-unavail-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-SIG-UNAVAIL-01",
+            currencyCode: "EUR",
+            executionSequence: 1,
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-sig-unavail-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-08-10T00:00:00Z"),
+            endsOn: new Date("2026-08-16T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W33",
+            weekNumber: 33,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-sig-unavail-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "pending",
+          },
+        });
+
+        await fetch(`${baseUrl}/api/weeklogs/${wl.id}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+
+        await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/review`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ outcome: "approved" }),
+        });
+
+        const { setStorageDriver } = await import("../../backend/src/lib/weeklogStorage.js");
+        const { UnprocessableEntityError } = await import("../../backend/src/lib/objectAuth.js");
+
+        // Injeta driver simulando falha de MinIO/S3 sem fallback silencioso
+        const unavailableDriver = {
+          async saveStaging() {
+            throw new UnprocessableEntityError(
+              "STORAGE_UNAVAILABLE: O serviço de armazenamento de arquivos (MinIO/S3) está indisponível ou inacessível."
+            );
+          },
+          async promoteToFinal() {
+            throw new UnprocessableEntityError(
+              "STORAGE_UNAVAILABLE: Falha ao promover arquivo no storage."
+            );
+          },
+          async assertExists() {
+            throw new UnprocessableEntityError(
+              "STORAGE_UNAVAILABLE: O serviço de armazenamento de arquivos (MinIO/S3) está indisponível."
+            );
+          },
+          async deleteStaging() {},
+        };
+
+        setStorageDriver(unavailableDriver as any);
+
+        try {
+          const fakePng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x11, 0x22]);
+          const resUpload = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/signature-upload`, {
+            method: "POST",
+            headers: {
+              ...getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+              "Content-Type": "image/png",
+            },
+            body: fakePng,
+          });
+
+          expect(resUpload.status).toBe(422);
+          const body = await resUpload.json();
+          expect(body.message).toContain("STORAGE_UNAVAILABLE");
+
+          // Verifica no banco: round continua pending e signatureStoragePath permanece null
+          const round = await prisma.weeklogValidation.findFirstOrThrow({
+            where: { weeklogId: wl.id },
+          });
+          expect(round.status).toBe("pending");
+          expect(round.signatureStoragePath).toBeNull();
+        } finally {
+          setStorageDriver(null);
+        }
       });
     });
 
