@@ -1088,50 +1088,60 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
     describe("B.2 Determinismo Temporal e Boundaries", () => {
       it("WEEK-BOUNDARY-01: A transição de Domingo 00:00:00 a Sábado 23:59:59 respeita o fuso horário configurado no workspace", () => {
         // Domingo em Europe/Paris (UTC+2 no verão) às 00:00:01 local corresponde a Sábado 22:00:01 UTC
-        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
         const result = operationalWeekOf("2026-08-16T00:00:01+02:00", "Europe/Paris");
 
         expect(result.startsOn.toISOString()).toBe("2026-08-15T22:00:00.000Z"); // Domingo 00:00:00 local em UTC
         expect(result.endsOn.toISOString()).toBe("2026-08-22T21:59:59.999Z"); // Sábado 23:59:59.999 local em UTC
         expect(result.week).toBe("2026-W33");
+        expect(result.weekNumber).toBe(33);
+        expect(result.yearReference).toBe(2026);
+        expect(result.timezone).toBe("Europe/Paris");
       });
 
       it("WEEK-DST-SPRING-01: Transição com salto de 23h na Primavera calcula início e término sem perder ordens no boundary", () => {
         // Domingo 29/03/2026 da virada de horário de verão em Paris (salto 02:00 -> 03:00)
-        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
         const result = operationalWeekOf("2026-03-29T02:30:00+01:00", "Europe/Paris");
 
         expect(result.startsOn.toISOString()).toBe("2026-03-28T23:00:00.000Z"); // Domingo 00:00 local (UTC+1)
+        expect(result.endsOn.toISOString()).toBe("2026-04-04T21:59:59.999Z");
         expect(result.week).toBe("2026-W13");
         expect(result.weekNumber).toBe(13);
+        // Duração absoluta de semana com início de DST é 167 horas
+        const durationHours = (result.endsOn.getTime() + 1 - result.startsOn.getTime()) / (3600 * 1000);
+        expect(durationHours).toBe(167);
       });
 
       it("WEEK-DST-FALL-01: Transição com repetição de 25h no Outono mantém consistência estrita de timestamps UTC", () => {
         // Domingo 25/10/2026 do retorno de horário de verão em Paris (repetição 03:00 -> 02:00)
-        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
         const result = operationalWeekOf("2026-10-25T02:30:00+02:00", "Europe/Paris");
 
         expect(result.startsOn.toISOString()).toBe("2026-10-24T22:00:00.000Z"); // Domingo 00:00 local (UTC+2)
+        expect(result.endsOn.toISOString()).toBe("2026-10-31T22:59:59.999Z");
         expect(result.week).toBe("2026-W43");
         expect(result.weekNumber).toBe(43);
+        // Duração absoluta de semana com término de DST é 169 horas
+        const durationHours = (result.endsOn.getTime() + 1 - result.startsOn.getTime()) / (3600 * 1000);
+        expect(durationHours).toBe(169);
       });
 
       it("WEEK-YEAR-BOUNDARY-01: Semana que cruza 31/12 e 01/01 resolve startsOn e yearReference de forma determinística", () => {
         // 31/12/2026 (quinta-feira) em Paris
-        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
         const result = operationalWeekOf("2026-12-31T23:59:00+01:00", "Europe/Paris");
 
         expect(result.yearReference).toBe(2026);
         expect(result.startsOn.toISOString()).toBe("2026-12-26T23:00:00.000Z"); // Domingo 27/12 00:00 local (UTC+1)
+        expect(result.endsOn.toISOString()).toBe("2027-01-02T22:59:59.999Z");
+        expect(result.week).toBe("2026-W52");
       });
 
       it("WEEK-INVALID-TIMEZONE-01: Workspace com fuso IANA inválido aciona fallback seguro e determinístico para UTC", () => {
         // Quarta-feira 12/08/2026 com timezone inválido
-        // @ts-expect-error T03 will add timezone parameter to operationalWeekOf
         const result = operationalWeekOf("2026-08-12T14:00:00Z", "Invalid/Fictional_Zone");
 
         expect(result.startsOn.toISOString()).toBe("2026-08-09T00:00:00.000Z"); // Domingo 00:00 UTC
+        expect(result.endsOn.toISOString()).toBe("2026-08-15T23:59:59.999Z");
         expect(result.week).toBe("2026-W32");
+        expect(result.timezone).toBe("UTC");
       });
     });
 
