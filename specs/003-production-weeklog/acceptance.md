@@ -4,11 +4,12 @@
 **Branch**: `feat/003-production-weeklog`  
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-17  
-**Total de Cenários**: 56 cenários de aceitação formal (45 base + 11 invariantes e hardening T04)  
+**Total de Cenários**: 67 cenários de aceitação formal (45 base + 11 hardening T04 + 9 T05 + 2 hardening T05)  
+*(Nota: A suíte de testes de integração executa 72 testes no total: 67 cenários comportamentais de aceitação + 5 testes puramente estruturais de schema/invariantes de banco)*  
 
 ---
 
-## 1. Matriz de Cenários e Invariantes (56 Cenários)
+## 1. Matriz de Cenários e Invariantes (67 Cenários Comportamentais)
 
 | ID do Cenário | Invariante / Regra de Negócio | Comportamento Esperado |
 |---|---|---|
@@ -67,6 +68,17 @@
 | **FINALIZE-UNAPPROVED-REVISION-01** | Linhagem estrita de orçamento | OP vinculada a revisão de orçamento em draft/não-aprovada é rejeitada com HTTP 422. |
 | **FINALIZE-NO-FINANCE-01** | Zero efeito financeiro colateral | Finalização não gera PaymentOrder, não cria listName e mantém intactos os saldos financeiros. |
 | **FINALIZE-MORE-THAN-4-SERVICES-01** | Preservação integral de serviços | Snapshot canônico preserva >4 serviços sem truncamento enquanto a projeção legada preenche 4 slots. |
+| **WEEKLOG-LIST-TENANT-01** | Isolamento tenant na listagem | `GET /api/weeklogs` filtra rigorosamente por workspace do `RequestContext` (Workspace B não lista registros do Workspace A). |
+| **WEEKLOG-DETAIL-TECH-OWN-01** | Visibilidade restrita em detalhes | Técnico com `scope: own` consulta `GET /api/weeklogs/:id` e visualiza estritamente suas próprias entradas (`WeeklogEntry`). |
+| **WEEKLOG-ENTRY-PARENT-01** | Consistência relacional de rota | `GET /api/weeklogs/:id/entries/:entryId` exige que o item pertença ao lote indicado na URL (HTTP 404 se pertencer a outro Weeklog). |
+| **SUBMIT-COVERAGE-FREEZE-01** | Congelamento de rodada | Submissão transiciona lote para `pending_validation` e congela `coverageSnapshot` auditável com lista de IDs e totalizador. |
+| **SUBMIT-CONCURRENT-01** | Concorrência de submissão | Duas submissões simultâneas para o mesmo lote resultam em exatamente 1 rodada de validação criada. |
+| **SUBMIT-INVALID-STATE-01** | Validação de transição de estado | Submissão de lote vazio ou em estado que não seja `open` ou `rectification_pending` é rejeitada com HTTP 400. |
+| **SUBMIT-CROSS-TENANT-01** | Isolamento tenant na submissão | Ator de Workspace B tentando submeter lote de Workspace A recebe HTTP 404/403. |
+| **SUBMIT-TECH-FORBIDDEN-01** | Autoridade de submissão | Técnico comum sem permissão de gerenciamento é bloqueado de submeter lote (HTTP 403 Forbidden). |
+| **GET-NO-WRITE-01** | Pureza de leitura (Zero mutações em GET) | Consultas via `GET /api/weeklogs` e `GET /api/weeklogs/:id` são rigorosamente somente-leitura e não alteram o banco. |
+| **SUBMIT-AUDIT-ACTOR-01** | Autoridade estrita de autoria | Submissão audita `submittedBy` e `submittedAt` gerados exclusivamente pelo servidor a partir de `RequestContext` (rejeita/ignora client body). |
+| **SUBMIT-COVERAGE-DB-IMMUTABLE-01** | Imutabilidade estrita no banco | O `coverageSnapshot` persistido em `WeeklogValidation` não é alterado por finalizações tardias de ordens ou retries de submissão. |
 
 ---
 

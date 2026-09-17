@@ -129,12 +129,17 @@ flowchart TD
 - `GET /api/weeklogs/:id/entries/:entryId`: Retorna detalhes de uma entrada específica.
 - Aplica filtro server-side estrito por `RequestContext`. Técnicos enxergam apenas suas próprias entradas (`scope: own`).
 
-### RF-003: Submissão do Lote para Validação
+### RF-003: Submissão do Lote para Validação (Abertura de Validation Round)
 - `POST /api/weeklogs/:id/submit-for-validation`
 - Valida se o lote possui ao menos 1 entrada de execução.
-- Transiciona `Weeklog.status` de `"open"` para `"pending_validation"`.
-- Congela o `coverageSnapshot` contendo a lista e os IDs das entradas ativas submetidas para conferência.
-- Retorno: HTTP 200 com o cabeçalho atualizado. Se já estiver em `pending_validation` com a mesma cobertura, retorna HTTP 200 de forma idempotente.
+- Transiciona `Weeklog.status` de `"open"` (ou `"rectification_pending"`) para `"pending_validation"`.
+- Cria/abre a rodada de validação (`WeeklogValidation`) em estado pendente:
+  - `status`: `"pending"`
+  - `validationSequence`: Sequência incremental única do lote (`@@unique([weeklogId, validationSequence])`).
+  - `coverageSnapshot`: Congela JSON estruturado com os IDs das entradas ativas submetidas, totais de itens e valor monetário total. **Estritamente imutável após a submissão** (novas ordens ou retries não alteram o snapshot).
+  - `submittedAt`: Timestamp gerado com autoridade server-side no momento da transição (`DateTime?`).
+  - `submittedBy`: Identificador do ator autenticado extraído estritamente do `RequestContext` (`ctx.actorUserId`). Nunca aceito de payload client-side.
+- Retorno: HTTP 200 com a rodada pendente e o cabeçalho atualizado. Se já estiver em `pending_validation` com a mesma cobertura, retorna HTTP 200 de forma idempotente sem criar nova rodada.
 
 ### RF-004: Inspeção Individual de Itens de WEEKLOG
 - `POST /api/weeklogs/:id/entries/:entryId/review`
@@ -143,14 +148,19 @@ flowchart TD
   - `rejectionReason`: Motivo formal caso reprovado.
 - Atualiza o item individual sem fechar o lote.
 
-### RF-005: Validação e Assinatura em Lote do WEEKLOG
+### RF-005: Validação e Assinatura em Lote do WEEKLOG (Conclusão da Validation Round)
 - `POST /api/weeklogs/:id/validate`
 - Payload Zod:
   - `validationMethod`: `"authenticated_confirmation"` ou `"drawn_signature"`
   - `signatureStoragePath`: Caminho do arquivo temporário no MinIO (se `drawn_signature`)
 - Valida permissões do validador (rejeita se `ctx.actorUserId` executou qualquer item do lote — `VALIDATOR-BATCH-SELF-01`).
 - Valida se o validador possui `ClientAccessGrant` ativo para o `clientId` do lote (rejeita com HTTP 403 se revogado ou inexistente).
-- Cria o registro versionado `WeeklogValidation` com `validationSequence = current + 1`.
+- **Completa a MESMA Validation Round** que foi aberta no submit:
+  - `status`: Transiciona para `"validated"`
+  - `validatorUserId`: Preenchido com `ctx.actorUserId` autenticado
+  - `validationMethod`: Método utilizado
+  - `validatedAt`: Carimbo server-side da conclusão
+  - `signatureStoragePath`: Caminho definitivo no MinIO (se assinatura desenhada)
 - Move a assinatura gráfica do staging para o caminho definitivo:
   `tenants/{workspaceId}/weeklogs/{weeklogId}/signatures/{validationId}.png`.
 - Atualiza `Weeklog.status` para `"validated"` (ou `"rectification_pending"` se houver itens reprovados).

@@ -57,12 +57,30 @@ O cabeçalho do lote `Weeklog` **NÃO** utiliza campos nulos em sua chave de uni
 - Fallback canônico obrigatório: estritamente `"UTC"`.
 - O modelo `Weeklog` armazena `timezone String` como snapshot do fuso horário utilizado no cálculo de `startsOn` e `endsOn`.
 
-### 2.5. Granularidade de Validação, Assinatura em Lote e `submitForValidation`
-- O **WEEKLOG** é submetido para validação via endpoint explícito:
-  `POST /api/weeklogs/:id/submit-for-validation`
-  Transiciona `open` $\rightarrow$ `pending_validation`, congelando o `coverageSnapshot` da rodada sem exigir que todas as ordens futuras da semana estejam finalizadas.
-- O lote é chancelado via `POST /api/weeklogs/:id/validate`, gerando um registro versionado `WeeklogValidation`:
-  - `validationSequence Int` com constraint `@@unique([weeklogId, validationSequence])`. Cada rodada recebe sequência incremental.
+### 2.5. Granularidade de Validação, Validation Round Versionada e `submitForValidation`
+- O modelo `WeeklogValidation` atua como a **Validation Round (Rodada de Validação) Versionada** do lote semanal, identificada por `validationSequence Int` com a constraint `@@unique([weeklogId, validationSequence])`.
+- **Ciclo de Vida da Rodada em Duas Fases**:
+  1. **Submissão (`submitForValidation`)**:
+     - O endpoint `POST /api/weeklogs/:id/submit-for-validation` transiciona o cabeçalho `Weeklog.status` de `open` (ou `rectification_pending`) para `pending_validation`.
+     - Cria a rodada em estado pendente (`status = "pending"`).
+     - **Campos da Fase Pendente**:
+       - `validationSequence`: Sequência incremental da rodada no lote.
+       - `coverageSnapshot`: Snapshot JSON contendo a lista congelada de `entryIds`, totalizadores de itens e total monetário das ordens ativas submetidas.
+       - `submittedAt`: Timestamp gerado estritamente server-side (`DateTime?`, sem DEFAULT no banco).
+       - `submittedBy`: Identificador do ator responsável pela submissão (`ctx.actorUserId`), extraído com autoridade do `RequestContext`.
+       - `status`: `"pending"`.
+     - **Imutabilidade Estrita de Coverage**: O `coverageSnapshot` é estritamente imutável após a criação da rodada. Finalizações de novas ordens para a mesma semana ou retries de submissão não alteram o snapshot congelado. A API não oferece caminhos de sobrescrita de cobertura.
+  2. **Conclusão/Chancela (T06 — `validateWeeklogBatch`)**:
+     - O endpoint `POST /api/weeklogs/:id/validate` completa **a mesma rodada** que foi aberta no submit.
+     - **Campos de Conclusão**:
+       - `status`: Transiciona para `"validated"` (ou reflete o desfecho da rodada).
+       - `validatorUserId`: Identificador do validador autenticado (`ctx.actorUserId`).
+       - `validationMethod`: Método de chancela (`"authenticated_confirmation"` ou `"drawn_signature"`).
+       - `validatedAt`: Carimbo temporal server-side da conferência.
+       - `signatureStoragePath`: Caminho do arquivo definitivo no MinIO (se assinatura desenhada).
+- **Preservação Semântica de Registros Legados (Pré-T05)**:
+  - Registros de validação históricos anteriores à introdução de rodadas de submissão já possuíam `validatorUserId`, `validationMethod` e `validatedAt`.
+  - A migration corretiva forward-only garante que essas linhas históricas permaneçam com `status = 'validated'`, sem criar falsas atribuições de submissão (`submittedBy IS NULL`) e sem inventar carimbos temporais de submissão (`submittedAt IS NULL`), tornando `submittedAt` nullable e eliminando o `DEFAULT CURRENT_TIMESTAMP`.
 - Cada `WeeklogEntry` mantém status individual de inspeção física (`pending`, `approved`, `rejected`, `rectification_requested`).
 - A assinatura gráfica é capturada para o documento do lote semanal (estritamente em formato PNG, rejeitando SVG para eliminar superfícies de ataque XSS/XML).
 

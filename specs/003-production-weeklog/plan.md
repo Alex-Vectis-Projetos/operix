@@ -4,7 +4,7 @@
 **Branch**: `feat/003-production-weeklog`  
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-17  
-**Total de Cenários Planejados**: 45 testes de integração automatizados  
+**Total de Cenários Planejados**: 67 cenários de aceitação formal (+ 5 testes estruturais = 72 testes no total)  
 
 ---
 
@@ -18,9 +18,12 @@ A implementação técnica da Spec 003 atende a todas as deliberações de remed
    - `@@unique([workspaceId, startsOn, clientId, siteKey])`.
    - `operationalSiteKey` canônico em `ProductionOrder` (sem fallback silencioso "default"; 422 `OPERATIONAL_SITE_REQUIRED` se ausente).
    - `Workspace.timezone` formal (formato IANA, fallback universal `"UTC"`).
-3. **Submissão e Validação em Lote Versionada**:
-   - Contrato formal: `POST /api/weeklogs/:id/submit-for-validation` transicionando `open` $\rightarrow$ `pending_validation` e congelando o `coverageSnapshot` da rodada (sem exigir que todas as OPs futuras da semana estejam finalizadas).
-   - `WeeklogValidation` versionado via `validationSequence Int` com constraint `@@unique([weeklogId, validationSequence])`. Cada nova rodada de validação recebe `sequence + 1`.
+3. **Submissão e Validation Round Versionada (Ciclo em Duas Fases)**:
+   - `WeeklogValidation` modela cada Validation Round versionada (`validationSequence Int`, `@@unique([weeklogId, validationSequence])`).
+   - **Fase A (Submissão — T05)**: `POST /api/weeklogs/:id/submit-for-validation` transiciona o lote para `pending_validation`, abrindo a rodada com `status: "pending"`, `submittedAt: now()` (server-side, sem DEFAULT no banco), `submittedBy: ctx.actorUserId` e congelando o `coverageSnapshot`.
+   - **Imutabilidade Estrita de Coverage**: O `coverageSnapshot` não é alterado após o submit por novas ordens ou retries.
+   - **Fase B (Conclusão — T06)**: `POST /api/weeklogs/:id/validate` completa **a mesma rodada** para `status: "validated"`, preenchendo `validatorUserId`, `validationMethod`, `validatedAt` e `signatureStoragePath`.
+   - **Preservação Histórica Pré-T05**: Migration forward-only corretiva mantém validações legadas com `status = 'validated'`, `submittedBy = NULL` e `submittedAt = NULL` (tornando a coluna nullable, sem inventar auditoria inexistente).
    - Ciclo de vida de `ClientAccessGrant`: `status` (`active` / `revoked`), `grantedAt`, `revokedAt`, `revokedBy`, com integridade referencial `(clientId, workspaceId)` no PostgreSQL. Grants revogados retornam HTTP 403 `VALIDATOR_REVOKED`.
    - Bloqueio estrito de auto-validação em lote (`VALIDATOR-BATCH-SELF-01`): na validação do lote, o backend verifica `ctx.actorUserId` contra o `technicianUserId` de **todas** as entradas no `coverageSnapshot`. Se o ator executou qualquer item, a validação é sumariamente rejeitada com HTTP 403 Forbidden.
    - Eliminação de `finalValue` (congelamento de `totalAmount` e `currencyCode`; moeda obrigatória sem default EUR, retornando 422 `CURRENCY_REQUIRED` se ausente).
@@ -78,18 +81,22 @@ A implementação técnica da Spec 003 atende a todas as deliberações de remed
      - `(rectificationOriginEntryId, workspaceId) REFERENCES weeklog_entries(id, workspaceId) ON DELETE RESTRICT`.
      - `(clientId, workspaceId) REFERENCES clients(id, workspaceId) ON DELETE RESTRICT`.
    - Constraints: `@@unique([productionOrderId, executionSequence])`, `@@unique([id, workspaceId])`.
-6. **`WeeklogValidation`**:
-   - Modelo para chancela e assinatura do lote:
-     - `id`, `weeklogId`, `workspaceId`, `validationSequence Int @default(1)`, `validatorUserId`, `validationMethod`, `signatureStoragePath`, `coverageSnapshot Json`, `auditTrail Json`, `validatedAt DateTime`.
+6. **`WeeklogValidation` (Validation Round Versionada)**:
+   - Modelo para governança da rodada de submissão e chancela:
+     - `id`, `weeklogId`, `workspaceId`, `validationSequence Int @default(1)`.
+     - **Fase de Submissão**: `status String @default("pending")` (`pending`, `validated`), `submittedAt DateTime?`, `submittedBy String?`, `coverageSnapshot Json`.
+     - **Fase de Conclusão**: `validatorUserId String?`, `validationMethod String?`, `signatureStoragePath String?`, `validatedAt DateTime?`, `auditTrail Json?`.
    - Foreign keys compostas:
      - `(weeklogId, workspaceId) REFERENCES weeklogs(id, workspaceId) ON DELETE CASCADE`.
      - `(workspaceId) REFERENCES workspaces(id) ON DELETE CASCADE`.
    - Constraint: `@@unique([weeklogId, validationSequence])`.
 
-### 2.2. Execução da Migração
-- Geração da migration versionada no PostgreSQL:
-  `npx prisma migrate dev --name add_weeklog_canonical_domain_and_versioned_rectification`
-- Validação estrita via `npx prisma validate`.
+### 2.2. Execução das Migrações
+- Migrations versionadas forward-only aplicadas:
+  1. `20260917100000_add_weeklog_canonical_domain_and_versioned_rectification`: Modelagem canônica inicial.
+  2. `20260917110000_spec_003_weeklog_validation_round_lifecycle`: Ciclo de vida da rodada de validação.
+  3. `20260917120000_fix_legacy_weeklog_validation_semantics`: Preservação de semântica histórica pré-T05 (`submitted_at` nullable sem default, legacy status `validated`).
+- Validação estrita via `npx prisma validate` e `prisma migrate diff --exit-code` (zero drift).
 
 ---
 

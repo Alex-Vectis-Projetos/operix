@@ -29,6 +29,7 @@
 | **DEC-016** | **Delegação da Finalização Legada** | `POST /api/production-orders/:id/finalize` é o comando canônico. O handler legado `PATCH /api/production-orders/:id` com `status: "delivered"` delega obrigatoriamente ao `finalizeProductionOrder`. |
 | **DEC-017** | **Concorrência, Lock Pessimista e Tratamento Externo de P2002** | Bloqueio pessimista com `SELECT ... FOR UPDATE` na OP em `prisma.$transaction(isolationLevel: ReadCommitted)`. Colisões `P2002` são capturadas **fora** da transação abortada, realizando re-leitura segura em nova operação e distinguindo colisão na sequência da PO de colisão no cabeçalho do Weeklog. |
 | **DEC-018** | **Governança da Assinatura Gráfica (Apenas PNG)** | Upload prévio em staging MinIO (`tenants/{workspaceId}/weeklogs/{weeklogId}/signatures/temp_{uuid}.png`). Suporta estritamente PNG (validação de magic bytes `89 50 4E 47`, limite 1 MB; SVGs são rejeitados). A validação em lote move o arquivo para o caminho definitivo e congela o registro. Mutações pós-validação retornam HTTP 409. |
+| **DEC-019** | **Validation Round Versionada, Imutabilidade de Coverage e Preservação de Histórico** | `WeeklogValidation` representa a Validation Round do lote semanal. Ciclo em duas fases: `submitForValidation` cria a rodada com `status: pending`, gerando `validationSequence`, `coverageSnapshot`, `submittedAt` (server timestamp) e `submittedBy` (`ctx.actorUserId`). O `coverageSnapshot` torna-se estritamente imutável pós-submissão. T06 completa a **mesma** rodada para `validated`. Linhas legadas pré-T05 com chancela concluída têm status corrigido para `validated`, tornando `submittedAt` nullable e preservando `submittedBy` e `submittedAt` como NULL (zero fabricação de histórico). |
 
 ---
 
@@ -140,3 +141,24 @@ export async function finalizeProductionOrder(
   }
 }
 ```
+
+---
+
+### 2.3. Ciclo de Vida da Validation Round e Preservação de Histórico Pré-T05 (DEC-019)
+
+1. **Semântica da Entidade `WeeklogValidation`**:
+   - `WeeklogValidation` modela cada **rodada versionada** de submissão e validação do lote semanal (`validationSequence Int`, com constraint `@@unique([weeklogId, validationSequence])`).
+   - A máquina de estados da rodada opera em duas fases sobre a **mesma linha**:
+     - **Fase A (Submissão — T05)**: `submitForValidation` cria a rodada com `status: "pending"`, `validationSequence`, `coverageSnapshot`, `submittedAt: now()` (server-side) e `submittedBy: ctx.actorUserId`.
+     - **Fase B (Conclusão — T06)**: `validateWeeklogBatch` atualiza a mesma rodada para `status: "validated"`, preenchendo `validatorUserId`, `validationMethod`, `validatedAt` e `signatureStoragePath`.
+2. **Imutabilidade Estrita de Coverage Snapshot**:
+   - Uma vez persistido na criação da rodada pendente, o `coverageSnapshot` (com a lista de IDs de entradas, totais e metadados de auditoria) é **imutável**.
+   - Novas ordens finalizadas para a mesma semana ou requisições idempotentes de submissão não alteram o snapshot congelado da rodada ativa.
+3. **Preservação de Registros Legados Pré-T05**:
+   - Registros anteriores à introdução de rodadas de submissão já possuíam chancela concluída (`validator_user_id IS NOT NULL`, `validation_method IS NOT NULL`, `validated_at IS NOT NULL`).
+   - Migration forward-only corretiva (`20260917120000_fix_legacy_weeklog_validation_semantics`) preserva a semântica histórica:
+     - `status` corrigido de `'pending'` para `'validated'`.
+     - `submitted_at` tornado nullable (`DateTime?`) e removido o `DEFAULT CURRENT_TIMESTAMP`.
+     - `submitted_at` setado como `NULL` para registros legados (evitando inventar timestamps de submissão inexistentes).
+     - `submitted_by` preservado como `NULL` (evitando fabricar autoria inexistente).
+
