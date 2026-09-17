@@ -114,10 +114,18 @@ serviceOrdersRouter.get("/", async (req: Request, res: Response, next: NextFunct
     };
 
     // Technician own-scope enforcement (OWASP API1 / BOLA)
+    // Canonical ownership via WeeklogEntry takes precedence when link exists; falls back to legacy fields.
     if (isTechScope(ctx)) {
       where.OR = [
         { assignedUserId: ctx.actorUserId },
         { userId: ctx.actorUserId },
+        {
+          weeklogEntries: {
+            some: {
+              technicianUserId: ctx.actorUserId,
+            },
+          },
+        },
       ];
     } else if (assigned_user_id) {
       where.assignedUserId = assigned_user_id;
@@ -240,6 +248,13 @@ serviceOrdersRouter.get("/clients", async (req: Request, res: Response, next: Ne
           OR: [
             { assignedUserId: ctx.actorUserId },
             { userId: ctx.actorUserId },
+            {
+              weeklogEntries: {
+                some: {
+                  technicianUserId: ctx.actorUserId,
+                },
+              },
+            },
           ],
         },
         select: { clientId: true },
@@ -360,11 +375,11 @@ serviceOrdersRouter.patch("/:id", async (req: Request, res: Response, next: Next
       });
     }
 
-    // Qualquer outra tentativa de escrita direta operacional em dados históricos
-    return res.status(410).json({
-      code: "LEGACY_SERVICE_ORDER_WRITE_DEPRECATED",
+    // Regra T08 Targeted Hardening: Registros históricos legados são imutáveis
+    return res.status(409).json({
+      code: "LEGACY_ARCHIVE_IMMUTABLE",
       message:
-        "A alteração direta de ServiceOrder legada foi descontinuada. Utilize os endpoints canônicos.",
+        "Registros históricos legados são preservados como Legacy Archive e não podem ser alterados via PATCH.",
     });
   } catch (error) {
     return next(error);

@@ -19,6 +19,7 @@ export interface BackfillReport {
   skippedMissingSite: number;
   skippedMissingCurrency: number;
   skippedMissingServices: number;
+  skippedNotDelivered: number;
   errors: Array<{ id: string; error: string }>;
 }
 
@@ -50,6 +51,7 @@ export async function backfillLegacyServiceOrders(
     skippedMissingSite: 0,
     skippedMissingCurrency: 0,
     skippedMissingServices: 0,
+    skippedNotDelivered: 0,
     errors: [],
   };
 
@@ -165,8 +167,15 @@ export async function backfillLegacyServiceOrders(
         continue;
       }
 
+      // 3.5. Validação estrita de conclusão de execução (T08 Targeted Hardening)
+      // ProductionOrder deve representar execução concluída: deliveredAt válido e status == 'delivered'
+      if (!po.deliveredAt || po.status !== "delivered") {
+        report.skippedNotDelivered++;
+        continue;
+      }
+
       const resolvedTotal = new Prisma.Decimal(po.budgetRevisionId ? 0 : so.total ?? 0);
-      const resolvedDeliveredAt = po.deliveredAt || so.createdAt;
+      const resolvedDeliveredAt = po.deliveredAt;
       const resolvedTechUserId = po.technicianUserId || so.assignedUserId || so.userId;
 
       // 4. Elegível para migração determinística
