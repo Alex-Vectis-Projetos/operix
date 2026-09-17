@@ -7,6 +7,8 @@ import {
   createProductionOrder,
   updateProductionOrder,
   deleteProductionOrder,
+  finalizeProductionOrder,
+  type FinalizeProductionOrderResult,
 } from "@/lib/apiProductionOrders";
 
 export type ProductionStatus =
@@ -149,8 +151,22 @@ export function useProductionOrders(filters?: { technicianOnly?: boolean; status
     onError: (e: any) => toast.error(e.message),
   });
 
-  return { ...query, create, update, remove };
+  const finalize = useMutation({
+    mutationFn: (id: string) => finalizeProductionOrder(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["production_orders"] });
+      qc.invalidateQueries({ queryKey: ["production_kpis"] });
+      qc.invalidateQueries({ queryKey: ["weeklogs"] });
+      qc.invalidateQueries({ queryKey: ["service_orders"] });
+      toast.success("Ordem de produção finalizada com sucesso.");
+    },
+  });
+
+  return { ...query, create, update, remove, finalize };
 }
+
+export { finalizeProductionOrder };
+export type { FinalizeProductionOrderResult };
 
 export function useProductionKpis() {
   const { workspaceId } = useWorkspace();

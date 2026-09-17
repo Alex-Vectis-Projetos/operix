@@ -35,3 +35,19 @@ export function updateProductionOrder(
 export function deleteProductionOrder(id: string): Promise<void> {
   return apiRequest<void>(`/production-orders/${id}`, { method: "DELETE", timeoutMs: 10000 });
 }
+
+export interface FinalizeProductionOrderResult {
+  productionOrder: ProductionOrder;
+  weeklog: any;
+  weeklogEntry: any;
+  idempotent?: boolean;
+}
+
+export function finalizeProductionOrder(id: string): Promise<FinalizeProductionOrderResult> {
+  return apiRequest<FinalizeProductionOrderResult>(`/production-orders/${id}/finalize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    timeoutMs: 15000,
+  });
+}
+

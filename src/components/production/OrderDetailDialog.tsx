@@ -25,6 +25,7 @@ import {
   Car, Hash as HashIcon, CalendarDays, CalendarClock,
   Wrench, ClipboardList, Package, Coins, UserCog, FileText, Shield,
   Play, Pause, CheckCheck, Plus as PlusIcon, Clock, History, AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -548,8 +549,49 @@ function emptyStep(description: string, fallbackResponsibleName: string | null =
   };
 }
 
+export function mapFinalizeError(err: any): string {
+  const code = err?.code;
+  const status = err?.status;
+
+  if (code === "OPERATIONAL_SITE_REQUIRED") {
+    return "Local operacional não configurado na ordem (siteKey obrigatório).";
+  }
+  if (code === "CURRENCY_REQUIRED") {
+    return "Código de moeda não configurado ou inválido (currencyCode obrigatório).";
+  }
+  if (code === "CLIENT_REQUIRED") {
+    return "Cliente não vinculado à ordem de produção.";
+  }
+  if (code === "DIRECT_OP_NO_SERVICES") {
+    return "Ordem direta exige ao menos um serviço estruturado na execução.";
+  }
+  if (code === "DIRECT_OP_SERVICE_TOTAL_MISMATCH") {
+    return "Soma dos serviços estruturados difere do valor total da ordem.";
+  }
+  if (code === "UNAPPROVED_BUDGET_REVISION") {
+    return "Apenas ordens com revisão de orçamento aprovada podem ser finalizadas.";
+  }
+  if (code === "BUDGET_LINEAGE_INVALID") {
+    return "Vínculo de orçamento ou revisão inconsistente.";
+  }
+  if (code === "CANNOT_FINALIZE_STATUS") {
+    return "Apenas ordens em produção ou pausadas podem ser finalizadas.";
+  }
+  if (status === 403) {
+    return "Acesso negado: você não tem permissão para finalizar esta ordem.";
+  }
+  if (status === 409) {
+    return err?.message || "Conflito: o estado atual da ordem não permite finalização.";
+  }
+  if (status === 422) {
+    return err?.message || "Dados inconsistentes para finalização da ordem.";
+  }
+  return err?.message || "Erro inesperado ao finalizar a ordem de produção.";
+}
+
 export function OrderDetailDialog({ order, onClose }: Props) {
-  const { update, remove, create } = useProductionOrders();
+  const { update, remove, create, finalize } = useProductionOrders();
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const { members: membersRaw } = useWorkspace();
   const members = Array.isArray(membersRaw) ? membersRaw : [];
   const [form, setForm] = useState<Partial<ProductionOrder>>({});
@@ -967,6 +1009,36 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
   const currentStatus = (form.status ?? order.status ?? "new_vehicle") as ProductionStatus;
   const currentPriority = (form.priority ?? order.priority ?? "normal") as ProductionPriority;
+
+  const canFinalizeStatus = !isNew && !locked && (currentStatus === "in_production" || currentStatus === "paused");
+  const preflightMissingClient = !order?.client_id && !form.client_id && !budgetHydrated;
+  const preflightMissingSite = !order?.platform && !form.platform;
+  const preflightMissingServices = !budgetHydrated && executionSafe.steps.length === 0;
+
+  const handleFinalize = async () => {
+    if (!order?.id || isFinalizing || finalize.isPending) return;
+
+    if (preflightMissingClient) {
+      toast.warning("Aviso: Ordem sem cliente vinculado. O servidor pode rejeitar a finalização.");
+    }
+    if (preflightMissingSite) {
+      toast.warning("Aviso: Ordem sem local operacional / plataforma. O servidor pode rejeitar a finalização.");
+    }
+    if (preflightMissingServices) {
+      toast.warning("Aviso: Ordem direta sem serviços na execução. O servidor exige serviços estruturados.");
+    }
+
+    setIsFinalizing(true);
+    try {
+      await finalize.mutateAsync(order.id);
+      clearDraft();
+      onClose();
+    } catch (err: any) {
+      toast.error(mapFinalizeError(err));
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
 
   const executionFieldsetDisabled = locked || serviceDoneLocked;
 
@@ -1613,14 +1685,33 @@ export function OrderDetailDialog({ order, onClose }: Props) {
               </div>
               <div className="flex gap-2">
                 {!locked && (
-                  <Button variant="outline" onClick={minimize}>
+                  <Button variant="outline" onClick={minimize} disabled={isFinalizing || finalize.isPending}>
                     <Minimize2 className="h-4 w-4 mr-2" /> Minimizar
+                  </Button>
+                )}
+                {canFinalizeStatus && (
+                  <Button
+                    type="button"
+                    variant="default"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                    onClick={handleFinalize}
+                    disabled={isFinalizing || finalize.isPending || update.isPending || create.isPending}
+                  >
+                    {isFinalizing || finalize.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Finalizando…
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 mr-2" /> Finalizar Ordem
+                      </>
+                    )}
                   </Button>
                 )}
                 {locked ? (
                   <Button variant="outline" onClick={onClose}>Fechar</Button>
                 ) : (
-                  <Button onClick={save} disabled={update.isPending || create.isPending}>
+                  <Button onClick={save} disabled={update.isPending || create.isPending || isFinalizing || finalize.isPending}>
                     <Save className="h-4 w-4 mr-2" /> Salvar
                   </Button>
                 )}
