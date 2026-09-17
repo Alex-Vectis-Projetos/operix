@@ -3702,7 +3702,7 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
             week: "2026-W33",
             weekNumber: 33,
             yearReference: 2026,
-            status: "pending_validation",
+            status: "rectification_pending",
           },
         });
 
@@ -3718,6 +3718,27 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
             clientId: FIXTURES_003.clientA.id,
             currencyCode: "EUR",
             deliveredAt: new Date(),
+            validationStatus: "rejected",
+          },
+        });
+
+        await prisma.weeklogValidation.create({
+          data: {
+            id: "val-rect-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            submittedAt: new Date("2026-08-10T10:00:00Z"),
+            submittedBy: FIXTURES_003.ownerA.userId,
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date("2026-08-10T11:00:00Z"),
+            coverageSnapshot: [{
+              weeklogEntryId: entry.id,
+              productionOrderId: po.id,
+              executionSequence: 1,
+            }],
           },
         });
 
@@ -3922,6 +3943,22 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         const entry1Id = data1.weeklogEntry.id;
         const wlId = data1.weeklogEntry.weeklogId;
 
+        // Submete e valida ciclo 1 com rejeição
+        await fetch(`${baseUrl}/api/weeklogs/${wlId}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        await fetch(`${baseUrl}/api/weeklogs/${wlId}/entries/${entry1Id}/review`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ validationStatus: "rejected", rejectionReason: "Defeito 1" }),
+        });
+        await fetch(`${baseUrl}/api/weeklogs/${wlId}/validate`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ validationMethod: "authenticated_confirmation" }),
+        });
+
         // 2. Solicita retificação do ciclo 1
         const resRect1 = await fetch(`${baseUrl}/api/weeklogs/${wlId}/entries/${entry1Id}/rectify`, {
           method: "POST",
@@ -3938,6 +3975,22 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         expect(resFin2.status).toBe(200);
         const data2 = await resFin2.json();
         const entry2Id = data2.weeklogEntry.id;
+
+        // Submete e valida ciclo 2 com rejeição
+        await fetch(`${baseUrl}/api/weeklogs/${wlId}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        await fetch(`${baseUrl}/api/weeklogs/${wlId}/entries/${entry2Id}/review`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ validationStatus: "rejected", rejectionReason: "Defeito 2" }),
+        });
+        await fetch(`${baseUrl}/api/weeklogs/${wlId}/validate`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ validationMethod: "authenticated_confirmation" }),
+        });
 
         // 4. Solicita retificação do ciclo 2
         const resRect2 = await fetch(`${baseUrl}/api/weeklogs/${wlId}/entries/${entry2Id}/rectify`, {
@@ -4042,6 +4095,24 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
           },
         });
 
+        await prisma.weeklogValidation.create({
+          data: {
+            id: "val-rect-idemp-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date(),
+            coverageSnapshot: [{
+              weeklogEntryId: entry.id,
+              productionOrderId: po.id,
+              executionSequence: 1,
+            }],
+          },
+        });
+
         const headers = getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha);
 
         // 1ª Chamada: Solicitação inicial
@@ -4123,6 +4194,24 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
             currencyCode: "EUR",
             deliveredAt: new Date(),
             validationStatus: "rejected",
+          },
+        });
+
+        await prisma.weeklogValidation.create({
+          data: {
+            id: "val-rect-conc-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date(),
+            coverageSnapshot: [{
+              weeklogEntryId: entry.id,
+              productionOrderId: po.id,
+              executionSequence: 1,
+            }],
           },
         });
 
@@ -4209,6 +4298,23 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
             deliveredAt: new Date(),
             validationStatus: "rejected",
             rectificationOriginEntryId: e1.id,
+          },
+        });
+
+        await prisma.weeklogValidation.create({
+          data: {
+            id: "val-rect-stale-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date(),
+            coverageSnapshot: [
+              { weeklogEntryId: e1.id, productionOrderId: po.id, executionSequence: 1 },
+              { weeklogEntryId: "wle-stale-seq-2", productionOrderId: po.id, executionSequence: 2 },
+            ],
           },
         });
 
@@ -4383,6 +4489,24 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
             currencyCode: "EUR",
             deliveredAt: new Date(),
             validationStatus: "rejected",
+          },
+        });
+
+        await prisma.weeklogValidation.create({
+          data: {
+            id: "val-rect-roll-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date(),
+            coverageSnapshot: [{
+              weeklogEntryId: entry.id,
+              productionOrderId: po.id,
+              executionSequence: 1,
+            }],
           },
         });
 
@@ -4664,6 +4788,24 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
           },
         });
 
+        await prisma.weeklogValidation.create({
+          data: {
+            id: "val-rect-nofin-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date(),
+            coverageSnapshot: [{
+              weeklogEntryId: entry.id,
+              productionOrderId: po.id,
+              executionSequence: 1,
+            }],
+          },
+        });
+
         // 1. Rectify
         const resRect = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
           method: "POST",
@@ -4696,6 +4838,410 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
 
         expect(finalPaymentOrders).toBe(initialPaymentOrders);
         expect(finalFinancialRecords).toBe(initialFinancialRecords);
+      });
+
+      it("RECTIFICATION-BEFORE-VALIDATION-01: Tentativa de retificar entry com lote em status 'open' retorna HTTP 409 Conflict", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-bef-val-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-BEF-VAL-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-bef-val-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "open",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-bef-val-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "pending",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ reason: "Tentativa de retificar sem validação prévia" }),
+        });
+
+        expect(res.status).toBe(409);
+      });
+
+      it("RECTIFICATION-DURING-VALIDATION-01: Tentativa de retificar com lote em 'pending_validation' e rodada aberta retorna HTTP 409 Conflict", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-dur-val-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-DUR-VAL-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-dur-val-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "pending_validation",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-dur-val-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "pending",
+          },
+        });
+
+        await prisma.weeklogValidation.create({
+          data: {
+            id: "val-rect-dur-val-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "pending",
+            submittedAt: new Date(),
+            submittedBy: FIXTURES_003.ownerA.userId,
+            coverageSnapshot: [{
+              weeklogEntryId: entry.id,
+              productionOrderId: po.id,
+              executionSequence: 1,
+            }],
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ reason: "Tentativa de retificar durante validação pendente" }),
+        });
+
+        expect(res.status).toBe(409);
+      });
+
+      it("RECTIFICATION-OUTSIDE-COVERAGE-01: Tentativa de retificar entry fora da coverage da Validation Round concluída retorna HTTP 409", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-out-cov-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-OUT-COV-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-out-cov-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "rectification_pending",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-out-cov-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rejected",
+          },
+        });
+
+        // Round concluída, mas cobrindo OUTRA entrada
+        await prisma.weeklogValidation.create({
+          data: {
+            id: "val-rect-out-cov-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date(),
+            coverageSnapshot: [{
+              weeklogEntryId: "wle-other-entry-id",
+              productionOrderId: "po-other-id",
+              executionSequence: 1,
+            }],
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ reason: "Retificar entrada fora da cobertura congelada" }),
+        });
+
+        expect(res.status).toBe(409);
+      });
+
+      it("RECTIFICATION-SAME-WEEK-ROUND-SEQUENCE-01: Retrabalho re-finalizado no mesmo Weeklog gera Validation Round com sequence 2 e preserva Round 1", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-same-wk-rnd-seq-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-SWS-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            performedServices: [{ description: "Polimento", amount: "120.00" }],
+            status: "in_production",
+          },
+        });
+
+        // 1. Finaliza execução 1
+        const resFin1 = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(resFin1.status).toBe(200);
+        const dataFin1 = await resFin1.json();
+        const e1Id = dataFin1.weeklogEntry.id;
+        const wlId = dataFin1.weeklogEntry.weeklogId;
+
+        // 2. Submete e valida com rejeição (Round 1)
+        const resSub1 = await fetch(`${baseUrl}/api/weeklogs/${wlId}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(resSub1.status).toBe(200);
+        const round1Id = (await resSub1.json()).validationRound.id;
+
+        await fetch(`${baseUrl}/api/weeklogs/${wlId}/entries/${e1Id}/review`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ validationStatus: "rejected", rejectionReason: "Defeito de pintura" }),
+        });
+
+        const resVal1 = await fetch(`${baseUrl}/api/weeklogs/${wlId}/validate`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ validationMethod: "authenticated_confirmation" }),
+        });
+        expect(resVal1.status).toBe(200);
+
+        // Snapshot congelado da Round 1 para comparar imutabilidade posterior
+        const round1Snapshot = await prisma.weeklogValidation.findUniqueOrThrow({ where: { id: round1Id } });
+        expect(round1Snapshot.validationSequence).toBe(1);
+        expect(round1Snapshot.status).toBe("validated");
+
+        // 3. Rectify
+        const resRect = await fetch(`${baseUrl}/api/weeklogs/${wlId}/entries/${e1Id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ reason: "Reabrir para novo polimento" }),
+        });
+        expect(resRect.status).toBe(200);
+
+        // 4. Re-finaliza PO na sequência 2 na MESMA semana
+        const resFin2 = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(resFin2.status).toBe(200);
+        const dataFin2 = await resFin2.json();
+        expect(dataFin2.weeklogEntry.weeklogId).toBe(wlId);
+        expect(dataFin2.weeklogEntry.executionSequence).toBe(2);
+
+        // 5. Submete para nova rodada no MESMO Weeklog -> sequence deve ser 2!
+        const resSub2 = await fetch(`${baseUrl}/api/weeklogs/${wlId}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(resSub2.status).toBe(200);
+        const dataSub2 = await resSub2.json();
+        expect(dataSub2.validationRound.validationSequence).toBe(2);
+        expect(dataSub2.validationRound.status).toBe("pending");
+
+        // 6. Provar que a Round 1 original mantém 100% dos seus atributos inalterados
+        const round1After = await prisma.weeklogValidation.findUniqueOrThrow({ where: { id: round1Id } });
+        expect(round1After.id).toBe(round1Snapshot.id);
+        expect(round1After.weeklogId).toBe(round1Snapshot.weeklogId);
+        expect(round1After.validationSequence).toBe(1);
+        expect(round1After.status).toBe("validated");
+        expect(round1After.validatorUserId).toBe(round1Snapshot.validatorUserId);
+        expect(round1After.validationMethod).toBe(round1Snapshot.validationMethod);
+        expect(round1After.validatedAt?.toISOString()).toBe(round1Snapshot.validatedAt?.toISOString());
+        expect(round1After.signatureStoragePath).toBe(round1Snapshot.signatureStoragePath);
+        expect(round1After.coverageSnapshot).toEqual(round1Snapshot.coverageSnapshot);
+      });
+
+      it("RECTIFICATION-CROSS-WEEK-ROUND-SEQUENCE-01: Retrabalho re-finalizado em novo Weeklog gera Round com sequence 1 (escopo por Weeklog)", async () => {
+        // Criar Weeklog histórico W33 já validado com rejeição e Round 1
+        const wlW33 = await prisma.weeklog.create({
+          data: {
+            id: "wl-seq-scope-w33",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-08-10T00:00:00Z"),
+            endsOn: new Date("2026-08-16T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W33",
+            weekNumber: 33,
+            yearReference: 2026,
+            status: "rectification_pending",
+          },
+        });
+
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-cross-wk-rnd-seq-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-CW-SEQ-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            performedServices: [{ description: "Reparo Cross-Week", amount: "250.00" }],
+            status: "delivered",
+          },
+        });
+
+        const e1 = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-seq-scope-e1",
+            weeklogId: wlW33.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date("2026-08-11T10:00:00Z"),
+            validationStatus: "rejected",
+          },
+        });
+
+        const roundW33 = await prisma.weeklogValidation.create({
+          data: {
+            id: "val-w33-round-01",
+            weeklogId: wlW33.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date("2026-08-12T10:00:00Z"),
+            coverageSnapshot: [{ weeklogEntryId: e1.id, productionOrderId: po.id, executionSequence: 1 }],
+          },
+        });
+
+        // 1. Rectify na entry de W33
+        const resRect = await fetch(`${baseUrl}/api/weeklogs/${wlW33.id}/entries/${e1.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ reason: "Retrabalho concluído na semana seguinte" }),
+        });
+        expect(resRect.status).toBe(200);
+
+        // 2. Re-finalização na semana atual (posterior a W33)
+        const resFin = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(resFin.status).toBe(200);
+        const dataFin = await resFin.json();
+        const newWlId = dataFin.weeklogEntry.weeklogId;
+        expect(newWlId).not.toBe(wlW33.id); // alocado em novo Weeklog
+        expect(dataFin.weeklogEntry.executionSequence).toBe(2);
+        expect(dataFin.weeklogEntry.rectificationOriginEntryId).toBe(e1.id);
+
+        // 3. Submeter o NOVO Weeklog para validação
+        const resSubNew = await fetch(`${baseUrl}/api/weeklogs/${newWlId}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(resSubNew.status).toBe(200);
+        const dataSubNew = await resSubNew.json();
+
+        // Sequence no NOVO Weeklog deve ser 1 (escopo local por Weeklog, não global de PO)
+        expect(dataSubNew.validationRound.validationSequence).toBe(1);
+        expect(dataSubNew.validationRound.status).toBe("pending");
+
+        // 4. Provar que a Round 1 do Weeklog original W33 permanece intacta
+        const rW33After = await prisma.weeklogValidation.findUniqueOrThrow({ where: { id: roundW33.id } });
+        expect(rW33After.validationSequence).toBe(1);
+        expect(rW33After.status).toBe("validated");
+        expect(rW33After.validatorUserId).toBe(roundW33.validatorUserId);
+        expect(rW33After.coverageSnapshot).toEqual(roundW33.coverageSnapshot);
+
+        // E o Weeklog antigo W33 permanece em rectification_pending
+        const wlW33After = await prisma.weeklog.findUniqueOrThrow({ where: { id: wlW33.id } });
+        expect(wlW33After.status).toBe("rectification_pending");
       });
     });
 
