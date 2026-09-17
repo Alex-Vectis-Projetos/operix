@@ -738,7 +738,7 @@ model WeeklogValidation {
   workspaceId          String    @map("workspace_id")
   validationSequence   Int       @default(1) @map("validation_sequence")
   status               String    @default("pending")
-  submittedAt          DateTime  @default(now()) @map("submitted_at")
+  submittedAt          DateTime? @map("submitted_at")
   submittedBy          String?   @map("submitted_by")
   validatorUserId      String?   @map("validator_user_id")
   validationMethod     String?   @map("validation_method")
