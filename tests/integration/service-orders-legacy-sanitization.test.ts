@@ -763,6 +763,7 @@ describe("Spec 003 — T08: Saneamento de ServiceOrders e Downstream Projection 
           { code: "SRV-01", description: "Polimento", quantity: 1, unitPrice: "450.00", total: "450.00" },
         ],
         status: "delivered",
+        deliveredAt: new Date(),
         createdBy: FIXTURES_T08.ownerA.userId,
       },
     });
@@ -809,6 +810,7 @@ describe("Spec 003 — T08: Saneamento de ServiceOrders e Downstream Projection 
           { code: "SRV-01", description: "Polimento", quantity: 1, unitPrice: "500.00", total: "500.00" },
         ],
         status: "delivered",
+        deliveredAt: new Date(),
         createdBy: FIXTURES_T08.ownerA.userId,
       },
     });
@@ -874,5 +876,199 @@ describe("Spec 003 — T08: Saneamento de ServiceOrders e Downstream Projection 
 
     const poAfter = await prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_T08.wsAlpha } });
     expect(poAfter).toBe(poBefore);
+  });
+
+  // =========================================================================
+  // 8. T08 Targeted Hardening: Archive PATCH, Canonical Link Ownership, Delivered State
+  // =========================================================================
+  it("LEGACY-SO-PATCH-ARCHIVE-BLOCKED-01: PATCH em ServiceOrder de arquivo histórico (legacyArchive = true) retorna 409 LEGACY_ARCHIVE_IMMUTABLE", async () => {
+    const token = signAccessToken({
+      id: FIXTURES_T08.ownerA.userId,
+      email: FIXTURES_T08.ownerA.email,
+      role: "owner",
+    });
+
+    // Ordem puramente histórica sem WeeklogEntry vinculada (legacyArchive = true)
+    const so = await prisma.serviceOrder.create({
+      data: {
+        workspaceId: FIXTURES_T08.wsAlpha,
+        userId: FIXTURES_T08.ownerA.userId,
+        assignedUserId: FIXTURES_T08.techA1.userId,
+        clientName: "Cliente Arquivo Histórico",
+        carName: "Veículo Antigo",
+        total: 250,
+        status: "draft",
+      },
+    });
+
+    // Tentativa de PATCH operacional não-validação
+    const response = await fetch(`${baseUrl}/api/service-orders/${so.id}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Workspace-Id": FIXTURES_T08.wsAlpha,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ car_name: "Tentativa de Alteração no Arquivo Histórico" }),
+    });
+
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.code).toBe("LEGACY_ARCHIVE_IMMUTABLE");
+
+    // Confirma que registro permanece inalterado no banco
+    const freshSo = await prisma.serviceOrder.findUnique({ where: { id: so.id } });
+    expect(freshSo?.carName).toBe("Veículo Antigo");
+  });
+
+  it("LEGACY-SO-TECH-OWN-CANONICAL-LINK-01: Técnico visualiza projeção canônica onde é titular na WeeklogEntry mesmo se campos legados divergirem", async () => {
+    const tokenTech1 = signAccessToken({
+      id: FIXTURES_T08.techA1.userId,
+      email: FIXTURES_T08.techA1.email,
+      role: "technician",
+    });
+
+    // ServiceOrder com campos legados divergentes (assignedUserId e userId pertencentes ao Tech 2)
+    const so = await prisma.serviceOrder.create({
+      data: {
+        workspaceId: FIXTURES_T08.wsAlpha,
+        userId: FIXTURES_T08.techA2.userId,
+        assignedUserId: FIXTURES_T08.techA2.userId,
+        clientName: "Cliente Canonical Link Test",
+        clientId: FIXTURES_T08.clientA1.id,
+        total: 600,
+        status: "delivered",
+      },
+    });
+
+    // Weeklog canônico
+    const weeklog = await prisma.weeklog.create({
+      data: {
+        workspaceId: FIXTURES_T08.wsAlpha,
+        startsOn: new Date("2026-03-01T00:00:00Z"),
+        endsOn: new Date("2026-03-07T23:59:59Z"),
+        clientId: FIXTURES_T08.clientA1.id,
+        siteKey: FIXTURES_T08.siteCentral,
+        week: "2026-W10",
+        weekNumber: 10,
+        yearReference: 2026,
+        status: "open",
+        timezone: "UTC",
+      },
+    });
+
+    // OP canônica executada pelo Tech 1
+    const po = await prisma.productionOrder.create({
+      data: {
+        workspaceId: FIXTURES_T08.wsAlpha,
+        code: "PO-CANONICAL-LINK-01",
+        clientId: FIXTURES_T08.clientA1.id,
+        serviceOrderId: so.id,
+        operationalSiteKey: FIXTURES_T08.siteCentral,
+        currencyCode: "BRL",
+        status: "delivered",
+        deliveredAt: new Date(),
+        createdBy: FIXTURES_T08.ownerA.userId,
+      },
+    });
+
+    // WeeklogEntry canônica vinculada à ServiceOrder onde technicianUserId é Tech 1!
+    await prisma.weeklogEntry.create({
+      data: {
+        workspaceId: FIXTURES_T08.wsAlpha,
+        weeklogId: weeklog.id,
+        productionOrderId: po.id,
+        executionSequence: 1,
+        legacyServiceOrderId: so.id,
+        technicianUserId: FIXTURES_T08.techA1.userId,
+        technicianName: "Tech Alpha 1",
+        clientId: FIXTURES_T08.clientA1.id,
+        clientName: "Cliente Canonical Link Test",
+        totalAmount: 600,
+        currencyCode: "BRL",
+        servicesSnapshot: [],
+        deliveredAt: new Date(),
+      },
+    });
+
+    // Outra ServiceOrder do Tech 2 SEM vínculo canônico
+    const soOther = await prisma.serviceOrder.create({
+      data: {
+        workspaceId: FIXTURES_T08.wsAlpha,
+        userId: FIXTURES_T08.techA2.userId,
+        assignedUserId: FIXTURES_T08.techA2.userId,
+        clientName: "Cliente Exclusivo Tech 2",
+        total: 100,
+        status: "draft",
+      },
+    });
+
+    // Tech 1 faz consulta à lista de ServiceOrders
+    const res = await fetch(`${baseUrl}/api/service-orders`, {
+      headers: {
+        Authorization: `Bearer ${tokenTech1}`,
+        "X-Workspace-Id": FIXTURES_T08.wsAlpha,
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const orders = await res.json();
+    const ids = orders.map((o: any) => o.id);
+
+    // O vínculo canônico garante visibilidade para Tech 1
+    expect(ids).toContain(so.id);
+    // A ordem legada do Tech 2 sem vínculo continua oculta
+    expect(ids).not.toContain(soOther.id);
+  });
+
+  it("LEGACY-BACKFILL-NOT-DELIVERED-SKIP-01: ProductionOrder sem status delivered ou sem deliveredAt é pulada sem auto-correção", async () => {
+    // ServiceOrder
+    const so = await prisma.serviceOrder.create({
+      data: {
+        workspaceId: FIXTURES_T08.wsAlpha,
+        userId: FIXTURES_T08.ownerA.userId,
+        assignedUserId: FIXTURES_T08.techA1.userId,
+        clientName: "Cliente OP Incompleta",
+        clientId: FIXTURES_T08.clientA1.id,
+        total: 350,
+        status: "in_progress",
+      },
+    });
+
+    // ProductionOrder com status incoerente (in_progress) e deliveredAt nulo
+    const poIncomplete = await prisma.productionOrder.create({
+      data: {
+        workspaceId: FIXTURES_T08.wsAlpha,
+        code: "PO-INCOMPLETE-NOT-DELIVERED",
+        clientId: FIXTURES_T08.clientA1.id,
+        serviceOrderId: so.id,
+        operationalSiteKey: FIXTURES_T08.siteCentral,
+        currencyCode: "BRL",
+        performedServices: [
+          { code: "SRV-01", description: "Reparo", quantity: 1, unitPrice: "350.00", total: "350.00" },
+        ],
+        status: "in_progress",
+        deliveredAt: null,
+        createdBy: FIXTURES_T08.ownerA.userId,
+      },
+    });
+
+    const report = await backfillLegacyServiceOrders({
+      apply: true,
+      workspaceId: FIXTURES_T08.wsAlpha,
+    });
+
+    expect(report.skippedNotDelivered).toBeGreaterThanOrEqual(1);
+
+    // Confirma que não foi criada WeeklogEntry
+    const entry = await prisma.weeklogEntry.findFirst({
+      where: { legacyServiceOrderId: so.id },
+    });
+    expect(entry).toBeNull();
+
+    // Confirma que status e deliveredAt da ProductionOrder NÃO foram auto-corrigidos
+    const freshPo = await prisma.productionOrder.findUnique({ where: { id: poIncomplete.id } });
+    expect(freshPo?.status).toBe("in_progress");
+    expect(freshPo?.deliveredAt).toBeNull();
   });
 });
