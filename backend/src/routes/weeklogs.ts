@@ -1,4 +1,4 @@
-import { Router, type Request, type Response, type NextFunction } from "express";
+import express, { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { resolveRequestContext } from "../middleware/requestContext.js";
 import {
@@ -7,7 +7,11 @@ import {
   getWeeklogEntries,
   getWeeklogEntryById,
   submitWeeklogForValidation,
+  reviewWeeklogEntry,
+  uploadWeeklogSignature,
+  validateWeeklogBatch,
 } from "../services/weeklogService.js";
+import { prisma } from "../lib/prisma.js";
 
 export const weeklogsRouter = Router();
 
@@ -106,3 +110,113 @@ weeklogsRouter.post("/:id/submit-for-validation", async (req: Request, res: Resp
     return next(error);
   }
 });
+
+// POST /api/weeklogs/:id/entries/:entryId/review
+weeklogsRouter.post(
+  "/:id/entries/:entryId/review",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const ctx = req.ctx;
+      if (!ctx?.activeWorkspaceId) {
+        return res.status(403).json({ message: "Workspace ativo não definido." });
+      }
+
+      const id = req.params["id"] as string;
+      const entryId = req.params["entryId"] as string;
+
+      const updatedEntry = await reviewWeeklogEntry(ctx, id, entryId, req.body);
+      return res.status(200).json(updatedEntry);
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
+
+// POST /api/weeklogs/:id/signature-upload
+// Recebe o buffer binário PNG capturado pelo canvas
+weeklogsRouter.post(
+  "/:id/signature-upload",
+  express.raw({ type: ["image/png", "application/octet-stream", "*/*"], limit: "2mb" }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const ctx = req.ctx;
+      if (!ctx?.activeWorkspaceId) {
+        return res.status(403).json({ message: "Workspace ativo não definido." });
+      }
+
+      const id = req.params["id"] as string;
+
+      let buffer: Buffer;
+      if (Buffer.isBuffer(req.body)) {
+        buffer = req.body;
+      } else if (typeof req.body === "string") {
+        buffer = Buffer.from(req.body, "base64");
+      } else {
+        buffer = Buffer.alloc(0);
+      }
+
+      const result = await uploadWeeklogSignature(ctx, id, buffer);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
+
+// POST /api/weeklogs/:id/validate
+weeklogsRouter.post(
+  "/:id/validate",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const ctx = req.ctx;
+      if (!ctx?.activeWorkspaceId) {
+        return res.status(403).json({ message: "Workspace ativo não definido." });
+      }
+
+      const id = req.params["id"] as string;
+      const result = await validateWeeklogBatch(ctx, id, req.body);
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
+
+// PATCH /api/weeklogs/:id/entries/:entryId
+// Garante imutabilidade pós-validação (VALIDATED-IMMUTABLE-01)
+weeklogsRouter.patch(
+  "/:id/entries/:entryId",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const ctx = req.ctx;
+      if (!ctx?.activeWorkspaceId) {
+        return res.status(403).json({ message: "Workspace ativo não definido." });
+      }
+
+      const id = req.params["id"] as string;
+      const entryId = req.params["entryId"] as string;
+
+      const weeklog = await prisma.weeklog.findUnique({
+        where: { id },
+      });
+
+      if (!weeklog || weeklog.workspaceId !== ctx.activeWorkspaceId) {
+        return res.status(404).json({ message: "Lote de WEEKLOG não encontrado." });
+      }
+
+      if (weeklog.status === "validated") {
+        return res.status(409).json({
+          message: "VALIDATED_IMMUTABLE: Entradas de WEEKLOG validado não aceitam modificação.",
+        });
+      }
+
+      return res.status(400).json({
+        message: "Operação de edição in-place não permitida em entradas de WEEKLOG.",
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
+
