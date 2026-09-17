@@ -2134,6 +2134,126 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         expect(finalCount).toBe(initialCount);
       });
 
+      it("SUBMIT-AUDIT-ACTOR-01: Submissão de lote vincula submittedBy e submittedAt com autoridade server-side", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-sub-audit-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-S-AUD-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Serviço Audit", amount: "120.00" }],
+            status: "in_production",
+          },
+        });
+
+        const finRes = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(finRes.status).toBe(200);
+        const wlId = (await finRes.json()).weeklog.id;
+
+        const beforeSubmit = new Date(Date.now() - 1000);
+        // OwnerA submete com tentativa inútil de injetar submittedBy e submittedAt no body
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wlId}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({
+            submittedBy: "fake-hacker-id",
+            submittedAt: "2020-01-01T00:00:00.000Z",
+          }),
+        });
+
+        expect(res.status).toBe(200);
+        const afterSubmit = new Date(Date.now() + 1000);
+
+        const round = await prisma.weeklogValidation.findFirstOrThrow({
+          where: { weeklogId: wlId },
+        });
+
+        expect(round.submittedBy).not.toBeNull();
+        expect(round.submittedBy).toBe(FIXTURES_003.ownerA.userId);
+        expect(round.submittedAt).not.toBeNull();
+        expect(round.submittedAt!.getTime()).toBeGreaterThanOrEqual(beforeSubmit.getTime());
+        expect(round.submittedAt!.getTime()).toBeLessThanOrEqual(afterSubmit.getTime());
+        expect(round.status).toBe("pending");
+      });
+
+      it("SUBMIT-COVERAGE-DB-IMMUTABLE-01: Cobertura congelada no banco é estritamente imutável após submissão", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-cov-immut-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-COV-IMM",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Serviço Imutável", amount: "150.00" }],
+            status: "in_production",
+          },
+        });
+
+        const finRes = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(finRes.status).toBe(200);
+        const { weeklog } = await finRes.json();
+
+        // Submissão inicial
+        const subRes1 = await fetch(`${baseUrl}/api/weeklogs/${weeklog.id}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(subRes1.status).toBe(200);
+
+        const round1 = await prisma.weeklogValidation.findFirstOrThrow({
+          where: { weeklogId: weeklog.id },
+        });
+        const originalCoverage = JSON.stringify(round1.coverageSnapshot);
+
+        // Retry subsequente não altera coverageSnapshot
+        const subRes2 = await fetch(`${baseUrl}/api/weeklogs/${weeklog.id}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(subRes2.status).toBe(200);
+
+        const round2 = await prisma.weeklogValidation.findFirstOrThrow({
+          where: { weeklogId: weeklog.id },
+        });
+        expect(JSON.stringify(round2.coverageSnapshot)).toBe(originalCoverage);
+
+        // Nova OP finalizada na mesma semana não afeta o coverageSnapshot da rodada
+        const po2 = await prisma.productionOrder.create({
+          data: {
+            id: "po-cov-immut-02",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-COV-IMM-2",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Serviço Novo", amount: "50.00" }],
+            status: "in_production",
+          },
+        });
+        const finRes2 = await fetch(`${baseUrl}/api/production-orders/${po2.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(finRes2.status).toBe(200);
+
+        const roundAfterNewOrder = await prisma.weeklogValidation.findFirstOrThrow({
+          where: { weeklogId: weeklog.id },
+        });
+        expect(JSON.stringify(roundAfterNewOrder.coverageSnapshot)).toBe(originalCoverage);
+      });
+
       it("VALIDATE-01: Validador com capability weeklog.validate aprova o lote semanal gerando WeeklogValidation versionado", async () => {
         const wl = await prisma.weeklog.create({
           data: {
