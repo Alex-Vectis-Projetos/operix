@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { Prisma } from "@prisma/client";
 export { Prisma };
@@ -1204,12 +1205,50 @@ export async function validateWeeklogBatch(
   }
 
   const {
+    assertStagingSignaturePath,
+    assertSignatureExists,
     promoteStagingToFinalSignature,
     deleteStagingSignatureBestEffort,
   } = await import("../lib/weeklogStorage.js");
 
+  let finalSignaturePath: string | null = null;
   let stagingKeyToDelete: string | null = null;
 
+  // A & B. Validar e promover arquivo de assinatura FORA da transação do banco (evita I/O de storage em lock de DB)
+  if (payload.validationMethod === "drawn_signature") {
+    if (!payload.signatureStoragePath || !payload.signatureStoragePath.trim()) {
+      throw new UnprocessableEntityError(
+        "SIGNATURE_REQUIRED: O método 'drawn_signature' exige o envio de signatureStoragePath previamente carregado."
+      );
+    }
+
+    const stagingKey = payload.signatureStoragePath.trim();
+    assertStagingSignaturePath(workspaceId, weeklogId, stagingKey);
+    await assertSignatureExists(stagingKey);
+
+    // Identificar a rodada pendente alvo para chave definitiva determinística
+    const existingPendingRound = await prisma.weeklogValidation.findFirst({
+      where: {
+        weeklogId,
+        workspaceId,
+        status: "pending",
+      },
+      orderBy: { validationSequence: "desc" },
+      select: { id: true },
+    });
+
+    const targetRoundId = existingPendingRound?.id || randomUUID();
+
+    finalSignaturePath = await promoteStagingToFinalSignature(
+      workspaceId,
+      weeklogId,
+      stagingKey,
+      targetRoundId
+    );
+    stagingKeyToDelete = stagingKey;
+  }
+
+  // C. Transação CURTA puramente relacional
   const result = await prisma.$transaction(
     async (tx) => {
       // 1. Lock pessimista no cabeçalho do Weeklog
@@ -1319,7 +1358,6 @@ export async function validateWeeklogBatch(
         : [];
       const coveredEntryIds = coverage.map((c) => c.weeklogEntryId).filter(Boolean);
 
-      // 5. Verificar se todas as entradas cobertas foram revisadas
       const coveredEntries = await tx.weeklogEntry.findMany({
         where: {
           id: { in: coveredEntryIds },
@@ -1327,6 +1365,30 @@ export async function validateWeeklogBatch(
         },
       });
 
+      // 5. Verificar autoridade contra auto-validação em lote (Zero Trust / 403 antes de pré-condições 409)
+      const executorMatch = coveredEntries.some(
+        (e) => e.technicianUserId === actorUserId
+      );
+      if (executorMatch) {
+        throw new ForbiddenError(
+          "VALIDATOR_BATCH_SELF_FORBIDDEN: O validador executou ordens de produção vinculadas a este lote semanal e não pode validá-lo."
+        );
+      }
+
+      const anySelfEntry = await tx.weeklogEntry.findFirst({
+        where: {
+          weeklogId,
+          workspaceId,
+          technicianUserId: actorUserId,
+        },
+      });
+      if (anySelfEntry) {
+        throw new ForbiddenError(
+          "VALIDATOR_BATCH_SELF_FORBIDDEN: O validador executou ordens de produção vinculadas a este lote semanal e não pode validá-lo."
+        );
+      }
+
+      // 6. Verificar se todas as entradas cobertas foram revisadas
       const unreviewedCount = coveredEntries.filter(
         (e) => e.validationStatus === "pending"
       ).length;
@@ -1337,40 +1399,12 @@ export async function validateWeeklogBatch(
         );
       }
 
-      // 5.1 Verificar se há pelo menos um item rejeitado
+      // 6.1 Verificar se há pelo menos um item rejeitado
       const hasRejectedEntries = coveredEntries.some(
         (e) => e.validationStatus === "rejected"
       );
 
-      // 5.2 Defesa contra auto-validação em lote (VALIDATOR-BATCH-SELF-01)
-      const executorMatch = coveredEntries.some(
-        (e) => e.technicianUserId === actorUserId
-      );
-      if (executorMatch) {
-        throw new ForbiddenError(
-          "VALIDATOR_BATCH_SELF_FORBIDDEN: O validador executou ordens de produção vinculadas a este lote semanal e não pode validá-lo."
-        );
-      }
-
-      // 6. Resolução da assinatura
-      let finalSignaturePath: string | null = null;
-      if (payload.validationMethod === "drawn_signature") {
-        if (!payload.signatureStoragePath || !payload.signatureStoragePath.trim()) {
-          throw new UnprocessableEntityError(
-            "SIGNATURE_REQUIRED: O método 'drawn_signature' exige o envio de signatureStoragePath previamente carregado."
-          );
-        }
-
-        finalSignaturePath = await promoteStagingToFinalSignature(
-          workspaceId,
-          weeklogId,
-          payload.signatureStoragePath.trim(),
-          activeRound.id
-        );
-        stagingKeyToDelete = payload.signatureStoragePath.trim();
-      }
-
-      // 7. Atualizar a MESMA rodada de validação para status 'validated'
+      // 6. Atualizar a MESMA rodada de validação para status 'validated'
       const audit = Array.isArray(activeRound.auditTrail) ? (activeRound.auditTrail as any[]) : [];
       audit.push({
         action: "validation_completed",
@@ -1391,7 +1425,7 @@ export async function validateWeeklogBatch(
         },
       });
 
-      // 8. Determinar status final do cabeçalho do Weeklog
+      // 7. Determinar status final do cabeçalho do Weeklog
       let finalHeaderStatus = "validated";
 
       if (hasRejectedEntries) {
@@ -1433,7 +1467,7 @@ export async function validateWeeklogBatch(
     }
   );
 
-  // 9. Limpeza best-effort do arquivo temporário fora da transação
+  // 8. Limpeza best-effort do arquivo temporário FORA da transação
   if (stagingKeyToDelete) {
     await deleteStagingSignatureBestEffort(stagingKeyToDelete);
   }
