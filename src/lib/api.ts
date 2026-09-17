@@ -11,11 +11,13 @@ const DEFAULT_API_TIMEOUT_MS = 12000;
 
 export class ApiError extends Error {
   status: number;
+  code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -60,7 +62,11 @@ export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promis
         typeof body === "object" && body && "message" in body && typeof body.message === "string"
           ? body.message
           : `API request failed with status ${response.status}`;
-      throw new ApiError(message, response.status);
+      const code =
+        typeof body === "object" && body && "code" in body && typeof body.code === "string"
+          ? body.code
+          : undefined;
+      throw new ApiError(message, response.status, code);
     }
 
     return body as T;
