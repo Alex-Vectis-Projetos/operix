@@ -1,14 +1,28 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "./useWorkspace";
 import {
   listWeeklogs,
   getWeeklog,
   listWeeklogEntries,
+  getWeeklogEntry,
+  submitWeeklogForValidation,
+  reviewWeeklogEntry,
+  uploadWeeklogSignature,
+  validateWeeklog,
+  rectifyWeeklogEntry,
+  mapWeeklogError,
   type Weeklog,
   type WeeklogEntry,
   type WeeklogFilters,
   type WeeklogStatus,
   type WeeklogValidationSummary,
+  type ReviewWeeklogEntryPayload,
+  type ValidateWeeklogPayload,
+  type RectifyWeeklogEntryPayload,
+  type SubmitWeeklogResult,
+  type UploadSignatureResult,
+  type ValidateWeeklogResult,
+  type RectifyWeeklogEntryResult,
 } from "@/lib/apiWeeklogs";
 
 export type {
@@ -17,7 +31,15 @@ export type {
   WeeklogFilters,
   WeeklogStatus,
   WeeklogValidationSummary,
+  ReviewWeeklogEntryPayload,
+  ValidateWeeklogPayload,
+  RectifyWeeklogEntryPayload,
+  SubmitWeeklogResult,
+  UploadSignatureResult,
+  ValidateWeeklogResult,
+  RectifyWeeklogEntryResult,
 };
+export { mapWeeklogError };
 
 export const weeklogQueryKeys = {
   all: (workspaceId?: string | null) => ["weeklogs", workspaceId ?? "none"] as const,
@@ -58,5 +80,97 @@ export function useWeeklogEntries(weeklogId?: string | null) {
     queryKey: weeklogQueryKeys.entries(workspaceId, weeklogId),
     enabled: !!workspaceId && !!weeklogId,
     queryFn: () => listWeeklogEntries(weeklogId!),
+  });
+}
+
+export function useSubmitWeeklog() {
+  const queryClient = useQueryClient();
+  const { workspaceId } = useWorkspace();
+
+  return useMutation({
+    mutationFn: (weeklogId: string) => submitWeeklogForValidation(weeklogId),
+    onSuccess: (_, weeklogId) => {
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.detail(workspaceId, weeklogId) });
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.entries(workspaceId, weeklogId) });
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.lists(workspaceId) });
+    },
+  });
+}
+
+export function useReviewWeeklogEntry() {
+  const queryClient = useQueryClient();
+  const { workspaceId } = useWorkspace();
+
+  return useMutation({
+    mutationFn: ({
+      weeklogId,
+      entryId,
+      payload,
+    }: {
+      weeklogId: string;
+      entryId: string;
+      payload: ReviewWeeklogEntryPayload;
+    }) => reviewWeeklogEntry(weeklogId, entryId, payload),
+    onSuccess: (_, { weeklogId }) => {
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.detail(workspaceId, weeklogId) });
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.entries(workspaceId, weeklogId) });
+    },
+  });
+}
+
+export function useUploadWeeklogSignature() {
+  return useMutation({
+    mutationFn: ({
+      weeklogId,
+      pngBlob,
+    }: {
+      weeklogId: string;
+      pngBlob: Blob;
+    }) => uploadWeeklogSignature(weeklogId, pngBlob),
+  });
+}
+
+export function useValidateWeeklog() {
+  const queryClient = useQueryClient();
+  const { workspaceId } = useWorkspace();
+
+  return useMutation({
+    mutationFn: ({
+      weeklogId,
+      payload,
+    }: {
+      weeklogId: string;
+      payload: ValidateWeeklogPayload;
+    }) => validateWeeklog(weeklogId, payload),
+    onSuccess: (_, { weeklogId }) => {
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.detail(workspaceId, weeklogId) });
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.entries(workspaceId, weeklogId) });
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.lists(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: ["production_orders"] });
+    },
+  });
+}
+
+export function useRectifyWeeklogEntry() {
+  const queryClient = useQueryClient();
+  const { workspaceId } = useWorkspace();
+
+  return useMutation({
+    mutationFn: ({
+      weeklogId,
+      entryId,
+      payload,
+    }: {
+      weeklogId: string;
+      entryId: string;
+      payload: RectifyWeeklogEntryPayload;
+    }) => rectifyWeeklogEntry(weeklogId, entryId, payload),
+    onSuccess: (_, { weeklogId }) => {
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.detail(workspaceId, weeklogId) });
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.entries(workspaceId, weeklogId) });
+      queryClient.invalidateQueries({ queryKey: weeklogQueryKeys.lists(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: ["production_orders"] });
+      queryClient.invalidateQueries({ queryKey: ["production_kpis"] });
+    },
   });
 }

@@ -38,6 +38,10 @@ import { getCurrentUser } from "@/lib/authUser";
 import { apiRequest } from "@/lib/api";
 import { useContextualWorkspace } from "@/hooks/useContextualWorkspace";
 import { ContextualWorkspacePicker } from "@/components/workspace/ContextualWorkspacePicker";
+import { useWeeklogs, type WeeklogStatus } from "@/hooks/useWeeklogs";
+import { WeeklogValidationDialog } from "@/components/service-orders/WeeklogValidationDialog";
+import { Badge } from "@/components/ui/badge";
+import { ShieldCheck, Archive, Loader2, ArrowRight } from "lucide-react";
 
 export default function ServiceOrdersPage() {
   const { t, formatCurrency } = useLanguage();
@@ -57,6 +61,10 @@ export default function ServiceOrdersPage() {
   const { data: earningsMap } = useTechnicianEarnings();
   const { isProcessing, addFiles } = useFileQueue();
   const ctxWs = useContextualWorkspace("service_orders");
+  const [activeTab, setActiveTab] = useState<"canonical_weeklogs" | "legacy_archive">("canonical_weeklogs");
+  const [selectedWeeklogId, setSelectedWeeklogId] = useState<string | null>(null);
+  const [isWeeklogDialogOpen, setIsWeeklogDialogOpen] = useState(false);
+  const { data: weeklogs = [], isLoading: isWeeklogsLoading } = useWeeklogs();
 
   const [hCtx, setHCtx] = useState<HierarchyContext>(() =>
     loadHierarchyContext("hierarchy.service_orders"),
@@ -380,11 +388,148 @@ export default function ServiceOrdersPage() {
                 hint="Relatórios automáticos serão disponibilizados em breve."
               />
             ) : (
-              <ServiceOrdersTable orders={visibleOrders as any} isLoading={isLoading} />
+              <div className="space-y-4">
+                {/* Segmented control separating Canonical Weeklog operations from Legacy Archive */}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant={activeTab === "canonical_weeklogs" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setActiveTab("canonical_weeklogs")}
+                      className={`text-xs gap-1.5 ${
+                        activeTab === "canonical_weeklogs"
+                          ? "bg-indigo-600 hover:bg-indigo-700 text-white"
+                          : ""
+                      }`}
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Lotes Semanais (WEEKLOG Canônico)
+                      <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0 h-4">
+                        {weeklogs.length}
+                      </Badge>
+                    </Button>
+
+                    <Button
+                      variant={activeTab === "legacy_archive" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setActiveTab("legacy_archive")}
+                      className="text-xs gap-1.5"
+                    >
+                      <Archive className="h-3.5 w-3.5" />
+                      Arquivo Histórico (Legado - Leitura)
+                    </Button>
+                  </div>
+                </div>
+
+                {activeTab === "canonical_weeklogs" ? (
+                  <div className="space-y-3">
+                    {isWeeklogsLoading ? (
+                      <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Carregando lotes semanais...
+                      </div>
+                    ) : weeklogs.length === 0 ? (
+                      <div className="rounded-xl border border-dashed p-8 text-center space-y-2">
+                        <ShieldCheck className="mx-auto h-8 w-8 text-muted-foreground/60" />
+                        <h3 className="text-sm font-semibold text-foreground">Nenhum lote semanal ativo</h3>
+                        <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                          Finalize ordens de produção para agrupar automaticamente as execuções em lotes semanais determinísticos por cliente e local.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border bg-card overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b bg-muted/40 text-muted-foreground font-medium">
+                                <th className="p-3">Semana / Data</th>
+                                <th className="p-3">Cliente</th>
+                                <th className="p-3">Local Operacional</th>
+                                <th className="p-3">Status</th>
+                                <th className="p-3 text-right">Ação</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                              {weeklogs.map((wl) => (
+                                <tr key={wl.id} className="hover:bg-muted/30 transition-colors">
+                                  <td className="p-3 font-semibold text-foreground">
+                                    <div className="flex items-center gap-1.5">
+                                      <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                                      {wl.week ?? `Início ${wl.startsOn}`}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground font-normal">
+                                      ID: {wl.id.slice(0, 8)}
+                                    </div>
+                                  </td>
+                                  <td className="p-3 text-foreground font-medium">
+                                    {wl.clientId}
+                                  </td>
+                                  <td className="p-3 text-muted-foreground">
+                                    {wl.siteKey}
+                                  </td>
+                                  <td className="p-3">
+                                    {wl.status === "open" && (
+                                      <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                                        Aberto
+                                      </Badge>
+                                    )}
+                                    {wl.status === "pending_validation" && (
+                                      <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
+                                        Aguardando Validação
+                                      </Badge>
+                                    )}
+                                    {wl.status === "validated" && (
+                                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                                        Validado
+                                      </Badge>
+                                    )}
+                                    {wl.status === "rectification_pending" && (
+                                      <Badge variant="secondary" className="bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300">
+                                        Retificação Pendente
+                                      </Badge>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-right">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 text-xs gap-1.5"
+                                      onClick={() => {
+                                        setSelectedWeeklogId(wl.id);
+                                        setIsWeeklogDialogOpen(true);
+                                      }}
+                                    >
+                                      Abrir Validação
+                                      <ArrowRight className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-950/20 p-3 text-xs text-amber-800 dark:text-amber-300">
+                      <b>Arquivo Histórico (Legado):</b> Visualização de ordens de serviço anteriores e projeções downstream em modo somente leitura (imutáveis).
+                    </div>
+                    <ServiceOrdersTable orders={visibleOrders as any} isLoading={isLoading} />
+                  </div>
+                )}
+              </div>
             )
           )}
         </div>
       </div>
+
+      {/* Canonical Weeklog Validation Dialog */}
+      <WeeklogValidationDialog
+        weeklogId={selectedWeeklogId}
+        open={isWeeklogDialogOpen}
+        onOpenChange={setIsWeeklogDialogOpen}
+      />
     </div>
   );
 }
