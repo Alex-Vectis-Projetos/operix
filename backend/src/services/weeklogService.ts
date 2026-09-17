@@ -650,3 +650,311 @@ export async function finalizeProductionOrder(
     throw error;
   }
 }
+
+export interface WeeklogListFilters {
+  startsOn?: string | Date;
+  clientId?: string;
+  status?: string;
+  siteKey?: string;
+}
+
+/**
+ * Lista lotes de WEEKLOG do workspace ativo com filtros canônicos.
+ * Aplica segregação estrita por tenant e escopo de técnico ('scope: own').
+ */
+export async function listWeeklogs(
+  ctx: RequestContext,
+  filters: WeeklogListFilters = {}
+) {
+  if (!ctx.activeWorkspaceId) {
+    throw new ForbiddenError("Workspace ativo não definido.");
+  }
+
+  const isTechnicianScope =
+    ctx.membershipRole === "technician" && ctx.scope === "workspace";
+
+  const where: Prisma.WeeklogWhereInput = {
+    workspaceId: ctx.activeWorkspaceId,
+  };
+
+  if (filters.clientId) {
+    where.clientId = filters.clientId;
+  }
+  if (filters.status) {
+    where.status = filters.status;
+  }
+  if (filters.siteKey) {
+    where.siteKey = filters.siteKey;
+  }
+  if (filters.startsOn) {
+    where.startsOn = new Date(filters.startsOn);
+  }
+
+  if (isTechnicianScope) {
+    where.entries = {
+      some: {
+        technicianUserId: ctx.actorUserId,
+      },
+    };
+  }
+
+  const weeklogs = await prisma.weeklog.findMany({
+    where,
+    include: {
+      validations: {
+        orderBy: { validationSequence: "desc" },
+        take: 1,
+      },
+      entries: isTechnicianScope
+        ? {
+            where: { technicianUserId: ctx.actorUserId },
+            orderBy: { executionSequence: "asc" },
+          }
+        : {
+            orderBy: { executionSequence: "asc" },
+          },
+    },
+    orderBy: [{ startsOn: "desc" }, { createdAt: "desc" }],
+  });
+
+  return weeklogs;
+}
+
+/**
+ * Retorna um lote de WEEKLOG por ID com validação estrita de tenant e técnico.
+ */
+export async function getWeeklogById(ctx: RequestContext, id: string) {
+  if (!ctx.activeWorkspaceId) {
+    throw new ForbiddenError("Workspace ativo não definido.");
+  }
+
+  const weeklog = await prisma.weeklog.findUnique({
+    where: { id },
+    include: {
+      validations: {
+        orderBy: { validationSequence: "asc" },
+      },
+      entries: {
+        orderBy: { executionSequence: "asc" },
+      },
+    },
+  });
+
+  if (!weeklog || weeklog.workspaceId !== ctx.activeWorkspaceId) {
+    throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+  }
+
+  const isTechnicianScope =
+    ctx.membershipRole === "technician" && ctx.scope === "workspace";
+
+  if (isTechnicianScope) {
+    const ownEntries = weeklog.entries.filter(
+      (e) => e.technicianUserId === ctx.actorUserId
+    );
+    if (ownEntries.length === 0) {
+      throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+    }
+    return {
+      ...weeklog,
+      entries: ownEntries,
+    };
+  }
+
+  return weeklog;
+}
+
+/**
+ * Retorna as entradas autorizadas de um WEEKLOG específico.
+ */
+export async function getWeeklogEntries(ctx: RequestContext, weeklogId: string) {
+  if (!ctx.activeWorkspaceId) {
+    throw new ForbiddenError("Workspace ativo não definido.");
+  }
+
+  const weeklog = await prisma.weeklog.findUnique({
+    where: { id: weeklogId },
+  });
+
+  if (!weeklog || weeklog.workspaceId !== ctx.activeWorkspaceId) {
+    throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+  }
+
+  const isTechnicianScope =
+    ctx.membershipRole === "technician" && ctx.scope === "workspace";
+
+  const entries = await prisma.weeklogEntry.findMany({
+    where: {
+      weeklogId,
+      workspaceId: ctx.activeWorkspaceId,
+      ...(isTechnicianScope ? { technicianUserId: ctx.actorUserId } : {}),
+    },
+    orderBy: { executionSequence: "asc" },
+  });
+
+  if (isTechnicianScope && entries.length === 0) {
+    throw new ForbiddenError("Acesso negado: nenhum item autorizado encontrado.");
+  }
+
+  return entries;
+}
+
+/**
+ * Retorna uma entrada específica de WEEKLOG garantindo parentesco e tenant.
+ */
+export async function getWeeklogEntryById(
+  ctx: RequestContext,
+  weeklogId: string,
+  entryId: string
+) {
+  if (!ctx.activeWorkspaceId) {
+    throw new ForbiddenError("Workspace ativo não definido.");
+  }
+
+  const entry = await prisma.weeklogEntry.findUnique({
+    where: { id: entryId },
+  });
+
+  if (!entry || entry.workspaceId !== ctx.activeWorkspaceId || entry.weeklogId !== weeklogId) {
+    throw new NotFoundError("Entrada de WEEKLOG não encontrada.");
+  }
+
+  assertObjectAccess(ctx, entry);
+
+  return entry;
+}
+
+/**
+ * Submete um lote de WEEKLOG para validação congelando a cobertura da rodada.
+ * Transição atômica: open | rectification_pending -> pending_validation.
+ * Idempotente para retries na mesma rodada com status pending_validation.
+ */
+export async function submitWeeklogForValidation(
+  ctx: RequestContext,
+  weeklogId: string
+) {
+  if (!ctx.activeWorkspaceId) {
+    throw new ForbiddenError("Workspace ativo não definido.");
+  }
+
+  // Autoridade: Apenas gestores, administradores ou owners podem submeter o lote semanal
+  if (ctx.membershipRole === "technician") {
+    throw new ForbiddenError("Apenas gestores ou administradores podem submeter o lote semanal para validação.");
+  }
+
+  return await prisma.$transaction(
+    async (tx) => {
+      // 1. Lock pessimista no cabeçalho do Weeklog
+      const lockedRows: any[] = await tx.$queryRaw`
+        SELECT id, workspace_id as "workspaceId", status, client_id as "clientId", site_key as "siteKey"
+        FROM weeklogs
+        WHERE id = ${weeklogId} AND workspace_id = ${ctx.activeWorkspaceId}
+        FOR UPDATE
+      `;
+
+      if (!lockedRows || lockedRows.length === 0) {
+        throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+      }
+
+      const currentWl = lockedRows[0];
+
+      // 2. State machine & idempotência
+      if (currentWl.status === "pending_validation") {
+        const activeRound = await tx.weeklogValidation.findFirst({
+          where: {
+            weeklogId,
+            workspaceId: ctx.activeWorkspaceId,
+            status: "pending",
+          },
+          orderBy: { validationSequence: "desc" },
+        });
+
+        const fullWl = await tx.weeklog.findUnique({ where: { id: weeklogId } });
+
+        return {
+          weeklog: fullWl,
+          validationRound: activeRound,
+          coverageSnapshot: activeRound?.coverageSnapshot,
+          status: "pending_validation",
+          idempotent: true,
+        };
+      }
+
+      if (currentWl.status !== "open" && currentWl.status !== "rectification_pending") {
+        throw new ConflictError(
+          `WEEKLOG_INVALID_STATE_FOR_SUBMISSION: Lote em estado '${currentWl.status}' não pode ser submetido para validação.`
+        );
+      }
+
+      // 3. Carregar entradas elegíveis para submission
+      const eligibleEntries = await tx.weeklogEntry.findMany({
+        where: {
+          weeklogId,
+          workspaceId: ctx.activeWorkspaceId,
+          validationStatus: "pending",
+        },
+        orderBy: { executionSequence: "asc" },
+      });
+
+      if (eligibleEntries.length === 0) {
+        throw new UnprocessableEntityError(
+          "EMPTY_WEEKLOG_CANNOT_BE_SUBMITTED: O lote semanal não possui ordens de produção pendentes para validação."
+        );
+      }
+
+      // 4. Congelamento imutável da coverage
+      const coverageSnapshot = eligibleEntries.map((e) => ({
+        weeklogEntryId: e.id,
+        productionOrderId: e.productionOrderId,
+        executionSequence: e.executionSequence,
+        validationStatus: e.validationStatus,
+        totalAmount: e.totalAmount.toString(),
+        currencyCode: e.currencyCode,
+      }));
+
+      // 5. Determinar sequência da rodada de validação
+      const latestValidation = await tx.weeklogValidation.findFirst({
+        where: { weeklogId },
+        orderBy: { validationSequence: "desc" },
+        select: { validationSequence: true },
+      });
+      const nextSequence = (latestValidation?.validationSequence ?? 0) + 1;
+
+      // 6. Criar registro versionado WeeklogValidation em estado pending
+      const validationRound = await tx.weeklogValidation.create({
+        data: {
+          weeklogId,
+          workspaceId: ctx.activeWorkspaceId!,
+          validationSequence: nextSequence,
+          status: "pending",
+          submittedAt: new Date(),
+          submittedBy: ctx.actorUserId,
+          coverageSnapshot,
+          auditTrail: [
+            {
+              action: "submitted_for_validation",
+              actorUserId: ctx.actorUserId,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        },
+      });
+
+      // 7. Atualizar status do cabeçalho
+      const updatedWeeklog = await tx.weeklog.update({
+        where: { id: weeklogId },
+        data: { status: "pending_validation" },
+      });
+
+      return {
+        weeklog: updatedWeeklog,
+        validationRound,
+        coverageSnapshot,
+        status: "pending_validation",
+        idempotent: false,
+      };
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    }
+  );
+}

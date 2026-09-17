@@ -33,6 +33,7 @@ import { peopleRouter } from "./routes/people.js";
 import { countryDocumentRequirementsRouter } from "./routes/countryDocumentRequirements.js";
 import { clientsRouter } from "./routes/clients.js";
 import { budgetsRouter } from "./routes/budgets.js";
+import { weeklogsRouter } from "./routes/weeklogs.js";
 import { runWeatherIngest } from "./services/weatherIngest.js";
 
 const app = express();
@@ -83,6 +84,7 @@ app.use("/api/locations", locationsRouter);
 app.use("/api/people", peopleRouter);
 app.use("/api/clients", clientsRouter);
 app.use("/api/budgets", budgetsRouter);
+app.use("/api/weeklogs", weeklogsRouter);
 app.use("/api/country-document-requirements", countryDocumentRequirementsRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
