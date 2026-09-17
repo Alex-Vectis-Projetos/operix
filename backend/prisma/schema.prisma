@@ -25,6 +25,7 @@ model User {
   technicianBudgets  Budget[]            @relation("BudgetTechnician")
   clientAccessGrants ClientAccessGrant[] @relation("UserClientAccessGrants")
   weeklogValidations WeeklogValidation[] @relation("UserWeeklogValidations")
+  weeklogSubmissions WeeklogValidation[] @relation("UserWeeklogSubmissions")
 
   @@map("users")
 }
@@ -736,16 +737,20 @@ model WeeklogValidation {
   weeklogId            String    @map("weeklog_id")
   workspaceId          String    @map("workspace_id")
   validationSequence   Int       @default(1) @map("validation_sequence")
-  validatorUserId      String    @map("validator_user_id")
-  validationMethod     String    @map("validation_method")
+  status               String    @default("pending")
+  submittedAt          DateTime  @default(now()) @map("submitted_at")
+  submittedBy          String?   @map("submitted_by")
+  validatorUserId      String?   @map("validator_user_id")
+  validationMethod     String?   @map("validation_method")
   signatureStoragePath String?   @map("signature_storage_path")
   coverageSnapshot     Json      @map("coverage_snapshot")
   auditTrail           Json      @default("[]") @map("audit_trail")
-  validatedAt          DateTime  @default(now()) @map("validated_at")
+  validatedAt          DateTime? @map("validated_at")
 
   weeklog   Weeklog   @relation(fields: [weeklogId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  validator User      @relation("UserWeeklogValidations", fields: [validatorUserId], references: [id], onDelete: Restrict)
+  validator User?     @relation("UserWeeklogValidations", fields: [validatorUserId], references: [id], onDelete: Restrict)
+  submitter User?     @relation("UserWeeklogSubmissions", fields: [submittedBy], references: [id], onDelete: Restrict)
 
   @@unique([weeklogId, validationSequence])
   @@index([workspaceId, weeklogId])
