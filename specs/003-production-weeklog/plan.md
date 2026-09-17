@@ -4,7 +4,7 @@
 **Branch**: `feat/003-production-weeklog`  
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-17  
-**Total de Cenários Planejados**: 78 cenários de aceitação formal (+ 5 testes estruturais = 83 testes no total; 77 GREEN / 6 RED reservados para T07)  
+**Total de Cenários Planejados**: 80 cenários de aceitação formal (+ 5 testes estruturais = 85 testes no total; 79 GREEN / 6 RED reservados para T07)  
 
 ---
 

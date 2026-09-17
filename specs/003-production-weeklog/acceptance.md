@@ -4,12 +4,12 @@
 **Branch**: `feat/003-production-weeklog`  
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-17  
-**Total de Cenários**: 78 cenários de aceitação formal (45 base + 11 hardening T04 + 9 T05 + 2 hardening T05 + 11 hardening T06)  
-*(Nota: A suíte de testes de integração executa 83 testes no total: 78 cenários comportamentais de aceitação + 5 testes puramente estruturais de schema/invariantes de banco)*  
+**Total de Cenários**: 80 cenários de aceitação formal (45 base + 11 hardening T04 + 9 T05 + 2 hardening T05 + 13 hardening T06)  
+*(Nota: A suíte de testes de integração executa 85 testes no total: 80 cenários comportamentais de aceitação + 5 testes puramente estruturais de schema/invariantes de banco)*  
 
 ---
 
-## 1. Matriz de Cenários e Invariantes (78 Cenários Comportamentais)
+## 1. Matriz de Cenários e Invariantes (80 Cenários Comportamentais)
 
 | ID do Cenário | Invariante / Regra de Negócio | Comportamento Esperado |
 |---|---|---|
@@ -25,7 +25,7 @@
 | **VALIDATE-FORBIDDEN-01** | Bloqueio de validador não-autorizado | Usuário sem grant formal do cliente recebe HTTP 403 Forbidden. |
 | **SIGNATURE-01** | Assinatura manuscrita capturada | Upload de assinatura desenhada em canvas grava imagem no MinIO e vincula storagePath auditável ao lote. |
 | **CONFIRMATION-01** | Confirmação eletrônica sem desenho | Validação autenticada sem assinatura gráfica registra o carimbo de sessão do validador. |
-| **VALIDATED-IMMUTABLE-01** | Bloqueio de edição in-place | Tentativa de atualizar diretamente campos de um item com status `approved` retorna HTTP 409 Conflict. |
+| **VALIDATED-IMMUTABLE-01** | Imutabilidade estrita pós-validação | Tentativas de modificação após validação (review, upload de assinatura ou validação conflitante) retornam HTTP 409 Conflict. |
 | **RECTIFICATION-01** | Preservação de histórico original | Solicitação de retificação mantém o registro original como histórico e reabre a OP para retrabalho. |
 | **RECTIFICATION-REASON-01** | Auditoria e obrigatoriedade de motivo | Rejeição/retificação sem motivo formal é rejeitada com HTTP 400 Bad Request. |
 | **RECTIFICATION-REVALIDATE-01** | Revalidação de retrabalho | O retrabalho concluído gera nova entrada de WEEKLOG que exige nova validação formal. |
@@ -90,6 +90,8 @@
 | **SIGNATURE-CROSS-TENANT-PATH-01** | Bloqueio de BOLA em storagePath de assinatura | Validação fornecendo caminho de storage de outro workspace/tenant é bloqueada com HTTP 403 Forbidden. |
 | **SIGNATURE-CROSS-WEEKLOG-PATH-01** | Bloqueio de IDOR em storagePath entre weeklogs | Validação fornecendo caminho de storage de outro weeklog do mesmo tenant é bloqueada com HTTP 403 Forbidden. |
 | **SIGNATURE-FINAL-PATH-01** | Promoção atômica de staging para definitivo | Validação com assinatura manuscrita promove staging temporário para chave definitiva vinculada à Validation Round. |
+| **SIGNATURE-DB-COMMIT-FAILURE-01** | Resiliência a falha de commit após storage | Falha de commit no banco após cópia no storage não corrompe DB e retry converge para a mesma chave final determinística. |
+| **SIGNATURE-STORAGE-UNAVAILABLE-01** | Falha de storage sem fallback silencioso | Falha de storage em produção aciona erro explícito 422, mantendo round pendente e signatureStoragePath null. |
 
 ---
 
