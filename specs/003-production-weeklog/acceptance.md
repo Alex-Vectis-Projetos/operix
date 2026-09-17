@@ -4,12 +4,12 @@
 **Branch**: `feat/003-production-weeklog`  
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-17  
-**Total de Cenários**: 67 cenários de aceitação formal (45 base + 11 hardening T04 + 9 T05 + 2 hardening T05)  
-*(Nota: A suíte de testes de integração executa 72 testes no total: 67 cenários comportamentais de aceitação + 5 testes puramente estruturais de schema/invariantes de banco)*  
+**Total de Cenários**: 78 cenários de aceitação formal (45 base + 11 hardening T04 + 9 T05 + 2 hardening T05 + 11 hardening T06)  
+*(Nota: A suíte de testes de integração executa 83 testes no total: 78 cenários comportamentais de aceitação + 5 testes puramente estruturais de schema/invariantes de banco)*  
 
 ---
 
-## 1. Matriz de Cenários e Invariantes (67 Cenários Comportamentais)
+## 1. Matriz de Cenários e Invariantes (78 Cenários Comportamentais)
 
 | ID do Cenário | Invariante / Regra de Negócio | Comportamento Esperado |
 |---|---|---|
@@ -79,6 +79,17 @@
 | **GET-NO-WRITE-01** | Pureza de leitura (Zero mutações em GET) | Consultas via `GET /api/weeklogs` e `GET /api/weeklogs/:id` são rigorosamente somente-leitura e não alteram o banco. |
 | **SUBMIT-AUDIT-ACTOR-01** | Autoridade estrita de autoria | Submissão audita `submittedBy` e `submittedAt` gerados exclusivamente pelo servidor a partir de `RequestContext` (rejeita/ignora client body). |
 | **SUBMIT-COVERAGE-DB-IMMUTABLE-01** | Imutabilidade estrita no banco | O `coverageSnapshot` persistido em `WeeklogValidation` não é alterado por finalizações tardias de ordens ou retries de submissão. |
+| **VALIDATE-SAME-ROUND-01** | Conclusão da mesma rodada de validação | Validação do lote conclui a MESMA rodada criada no submit (`WHERE id = activeRound.id`) em vez de inserir novo registro. |
+| **VALIDATE-REVIEW-INCOMPLETE-01** | Pré-condição de revisão completa | Tentativa de validar lote com itens de coverage ainda pendentes retorna HTTP 409 Conflict (`VALIDATION_REVIEW_INCOMPLETE`). |
+| **VALIDATE-UNCOVERED-ENTRY-01** | Preservação de status com ordens tardias | Lote com ordens novas adicionadas após o submit não é marcado como `validated`, mas permanece `open` para nova rodada. |
+| **VALIDATE-CONCURRENT-01** | Concorrência de validação em lote | Concorrência real de chamadas de validação com lock pessimista resulta em exatamente uma validação consumada. |
+| **VALIDATOR-GRANT-WORKSPACE-01** | Isolamento tenant de grant de validador | Validador com grant para o mesmo cliente em outro workspace é bloqueado com HTTP 403 Forbidden. |
+| **VALIDATOR-GRANT-REVOKE-RACE-01** | Defesa contra corrida de revogação de grant | Revogação concorrente de grant antes da validação é detectada com `SELECT ... FOR UPDATE` no grant (HTTP 403). |
+| **SIGNATURE-NON-PNG-01** | Validação de cabeçalho binário PNG | Upload de arquivo não-PNG (falsificado com Content-Type png) é rejeitado com HTTP 422 Unprocessable Entity. |
+| **SIGNATURE-OVERSIZE-01** | Limite estrito de tamanho de assinatura | Upload de assinatura excedendo 1 MB é rejeitado com HTTP 422 Unprocessable Entity (`FILE_TOO_LARGE`). |
+| **SIGNATURE-CROSS-TENANT-PATH-01** | Bloqueio de BOLA em storagePath de assinatura | Validação fornecendo caminho de storage de outro workspace/tenant é bloqueada com HTTP 403 Forbidden. |
+| **SIGNATURE-CROSS-WEEKLOG-PATH-01** | Bloqueio de IDOR em storagePath entre weeklogs | Validação fornecendo caminho de storage de outro weeklog do mesmo tenant é bloqueada com HTTP 403 Forbidden. |
+| **SIGNATURE-FINAL-PATH-01** | Promoção atômica de staging para definitivo | Validação com assinatura manuscrita promove staging temporário para chave definitiva vinculada à Validation Round. |
 
 ---
 
