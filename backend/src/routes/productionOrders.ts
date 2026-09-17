@@ -12,6 +12,7 @@ import {
   flattenServicesFromBudgetNotes,
   isWeekClosed,
 } from "../lib/weekUtils.js";
+import { finalizeProductionOrder } from "../services/weeklogService.js";
 
 export const productionOrdersRouter = Router();
 
@@ -879,6 +880,26 @@ productionOrdersRouter.patch("/:id", async (req: Request, res: Response, next: N
       data.deliveredAt = parseDate(b.delivered_at ?? b.deliveredAt);
     }
 
+    // Delegação canônica de PATCH status="delivered" para finalizeProductionOrder (LEGACY-FINALIZE-01)
+    if (b.status === "delivered") {
+      const otherData = { ...data };
+      delete otherData.status;
+      delete otherData.deliveredAt;
+      if (Object.keys(otherData).length > 0) {
+        await prisma.productionOrder.update({ where: { id }, data: otherData });
+      }
+
+      const finalized = await finalizeProductionOrder(ctx, id, {
+        deliveredAt: b.delivered_at ?? b.deliveredAt,
+      });
+
+      return res.json({
+        ...mapOrder(finalized.productionOrder),
+        weeklog: finalized.weeklog,
+        weeklogEntry: finalized.weeklogEntry,
+      });
+    }
+
     // Auto-preenchimento de data de entrega se status virou delivered
     if (data.status === "delivered" && !data.deliveredAt && !existing.deliveredAt) {
       data.deliveredAt = new Date();
@@ -896,6 +917,25 @@ productionOrdersRouter.patch("/:id", async (req: Request, res: Response, next: N
     }
 
     return res.json({ ...mapOrder(order), weeklog });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// POST /api/production-orders/:id/finalize
+productionOrdersRouter.post("/:id/finalize", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params["id"] as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const result = await finalizeProductionOrder(ctx, id, {
+      deliveredAt: req.body?.deliveredAt,
+    });
+
+    return res.status(200).json(result);
   } catch (error) {
     return next(error);
   }
