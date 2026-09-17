@@ -21,8 +21,10 @@ model User {
   profile   Profile?
   userRole  UserRole?
 
-  createdBudgets    Budget[] @relation("BudgetCreator")
-  technicianBudgets Budget[] @relation("BudgetTechnician")
+  createdBudgets     Budget[]            @relation("BudgetCreator")
+  technicianBudgets  Budget[]            @relation("BudgetTechnician")
+  clientAccessGrants ClientAccessGrant[] @relation("UserClientAccessGrants")
+  weeklogValidations WeeklogValidation[] @relation("UserWeeklogValidations")
 
   @@map("users")
 }
@@ -75,6 +77,7 @@ model Workspace {
   name        String
   type        String   @default("company")
   ownerUserId String   @map("owner_user_id")
+  timezone    String   @default("UTC")
   createdAt   DateTime @default(now()) @map("created_at")
 
   owner             AppUser              @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
@@ -91,8 +94,12 @@ model Workspace {
   billingAttachments BillingAttachment[]
   backendEventLogs  BackendEventLog[]
   workspaceInvites  WorkspaceInvite[]
-  budgets           Budget[]
-  budgetPhotos      BudgetPhoto[]
+  budgets            Budget[]
+  budgetPhotos       BudgetPhoto[]
+  clientAccessGrants ClientAccessGrant[]
+  weeklogs           Weeklog[]
+  weeklogEntries     WeeklogEntry[]
+  weeklogValidations WeeklogValidation[]
 
   @@map("workspaces")
 }
@@ -466,10 +473,14 @@ model Client {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  serviceOrders ServiceOrder[]
-  paymentOrders PaymentOrder[]
-  budgets       Budget[]
+  serviceOrders      ServiceOrder[]
+  paymentOrders      PaymentOrder[]
+  budgets            Budget[]
+  clientAccessGrants ClientAccessGrant[]
+  weeklogs           Weeklog[]
+  weeklogEntries     WeeklogEntry[]
 
+  @@unique([id, workspaceId])
   @@index([workspaceId])
   @@map("clients")
 }
@@ -511,7 +522,8 @@ model ServiceOrder {
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client         Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  weeklogEntries WeeklogEntry[]
 
   @@index([workspaceId, status])
   @@index([clientId])
@@ -573,22 +585,30 @@ model ProductionOrder {
   priority         String    @default("normal")
   status           String    @default("new_vehicle")
   commercialStatus String?   @map("commercial_status")
-  serviceOrderId   String?   @map("service_order_id")
-  dueAt            DateTime? @map("due_at")
-  startedAt        DateTime? @map("started_at")
-  finishedAt       DateTime? @map("finished_at")
-  deliveredAt      DateTime? @map("delivered_at")
-  createdBy        String    @default("") @map("created_by")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  serviceOrderId        String?   @map("service_order_id")
+  executionSequence     Int       @default(1) @map("execution_sequence")
+  rectificationOriginId String?   @map("rectification_origin_id")
+  operationalSiteKey    String?   @map("operational_site_key")
+  currencyCode          String?   @map("currency_code")
+  performedServices     Json?     @map("performed_services")
+  dueAt                 DateTime? @map("due_at")
+  startedAt             DateTime? @map("started_at")
+  finishedAt            DateTime? @map("finished_at")
+  deliveredAt           DateTime? @map("delivered_at")
+  createdBy             String    @default("") @map("created_by")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
   budgetId         String?         @unique @map("budget_id")
   budgetRevisionId String?         @map("budget_revision_id")
 
-  photos         ProductionPhoto[]
-  budget         Budget?         @relation(fields: [budgetId], references: [id], onDelete: SetNull)
-  budgetRevision BudgetRevision? @relation("ProductionOrderRevision", fields: [budgetRevisionId, budgetId], references: [id, budgetId], onDelete: Restrict)
+  photos                   ProductionPhoto[]
+  budget                   Budget?           @relation(fields: [budgetId], references: [id], onDelete: SetNull)
+  budgetRevision           BudgetRevision?   @relation("ProductionOrderRevision", fields: [budgetRevisionId, budgetId], references: [id, budgetId], onDelete: Restrict)
+  weeklogEntries           WeeklogEntry[]
+  rectificationOriginEntry WeeklogEntry?     @relation("ProductionOrderRectificationOrigin", fields: [rectificationOriginId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
+  @@unique([id, workspaceId])
   @@index([workspaceId, status])
   @@map("production_orders")
 }
@@ -608,6 +628,128 @@ model ProductionPhoto {
 
   @@index([productionOrderId])
   @@map("production_photos")
+}
+
+model ClientAccessGrant {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  userId      String    @map("user_id")
+  clientId    String    @map("client_id")
+  role        String    @default("validator")
+  status      String    @default("active")
+  grantedAt   DateTime  @default(now()) @map("granted_at")
+  revokedAt   DateTime? @map("revoked_at")
+  revokedBy   String?   @map("revoked_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client    Client    @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  user      User      @relation("UserClientAccessGrants", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId, clientId])
+  @@index([workspaceId, userId])
+  @@index([clientId, status])
+  @@map("client_access_grants")
+}
+
+model Weeklog {
+  id            String    @id @default(uuid())
+  workspaceId   String    @map("workspace_id")
+  startsOn      DateTime  @map("starts_on")
+  endsOn        DateTime  @map("ends_on")
+  clientId      String    @map("client_id")
+  siteKey       String    @map("site_key")
+  timezone      String    @default("UTC")
+  week          String
+  weekNumber    Int       @map("week_number")
+  yearReference Int       @map("year_reference")
+  status        String    @default("open")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client      Client              @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  entries     WeeklogEntry[]
+  validations WeeklogValidation[]
+
+  @@unique([workspaceId, startsOn, clientId, siteKey])
+  @@unique([id, workspaceId])
+  @@index([workspaceId, status])
+  @@map("weeklogs")
+}
+
+model WeeklogEntry {
+  id                         String    @id @default(uuid())
+  weeklogId                  String    @map("weeklog_id")
+  workspaceId                String    @map("workspace_id")
+  productionOrderId          String    @map("production_order_id")
+  executionSequence          Int       @default(1) @map("execution_sequence")
+  budgetId                   String?   @map("budget_id")
+  budgetRevisionId           String?   @map("budget_revision_id")
+  legacyServiceOrderId       String?   @map("legacy_service_order_id")
+  technicianUserId           String    @map("technician_user_id")
+  technicianName             String    @map("technician_name")
+  clientId                   String    @map("client_id")
+  clientName                 String    @default("") @map("client_name")
+  brand                      String?
+  model                      String?
+  color                      String?
+  licensePlate               String?   @map("license_plate")
+  vin                        String?
+  servicesSnapshot           Json      @default("[]") @map("services_snapshot")
+  totalAmount                Decimal   @default(0) @db.Decimal(12, 2) @map("total_amount")
+  currencyCode               String    @map("currency_code")
+  deliveredAt                DateTime  @map("delivered_at")
+
+  validationStatus           String    @default("pending") @map("validation_status")
+  reviewedAt                 DateTime? @map("reviewed_at")
+  reviewerUserId             String?   @map("reviewer_user_id")
+  rejectionReason            String?   @map("rejection_reason")
+
+  isRectification            Boolean   @default(false) @map("is_rectification")
+  rectificationOriginEntryId String?   @map("rectification_origin_entry_id")
+  rectificationReason        String?   @map("rectification_reason")
+  rectificationRequestedBy   String?   @map("rectification_requested_by")
+  rectificationRequestedAt   DateTime? @map("rectification_requested_at")
+
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
+
+  weeklog                    Weeklog           @relation(fields: [weeklogId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  productionOrder            ProductionOrder   @relation(fields: [productionOrderId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace                  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client                     Client            @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  legacyServiceOrder         ServiceOrder?     @relation(fields: [legacyServiceOrderId], references: [id], onDelete: SetNull)
+  rectificationOriginEntry   WeeklogEntry?     @relation("WeeklogEntryRectification", fields: [rectificationOriginEntryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  rectifiedSubsequentEntries WeeklogEntry[]    @relation("WeeklogEntryRectification")
+  originForProductionOrders  ProductionOrder[] @relation("ProductionOrderRectificationOrigin")
+
+  @@unique([productionOrderId, executionSequence])
+  @@unique([id, workspaceId])
+  @@index([workspaceId, validationStatus])
+  @@index([technicianUserId])
+  @@map("weeklog_entries")
+}
+
+model WeeklogValidation {
+  id                   String    @id @default(uuid())
+  weeklogId            String    @map("weeklog_id")
+  workspaceId          String    @map("workspace_id")
+  validationSequence   Int       @default(1) @map("validation_sequence")
+  validatorUserId      String    @map("validator_user_id")
+  validationMethod     String    @map("validation_method")
+  signatureStoragePath String?   @map("signature_storage_path")
+  coverageSnapshot     Json      @map("coverage_snapshot")
+  auditTrail           Json      @default("[]") @map("audit_trail")
+  validatedAt          DateTime  @default(now()) @map("validated_at")
+
+  weeklog   Weeklog   @relation(fields: [weeklogId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  validator User      @relation("UserWeeklogValidations", fields: [validatorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([weeklogId, validationSequence])
+  @@index([workspaceId, weeklogId])
+  @@map("weeklog_validations")
 }
 
 model Budget {
