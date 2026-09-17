@@ -32,7 +32,6 @@ import {
   Wrench,
   ShieldCheck,
 } from "lucide-react";
-import { updateServiceOrder } from "@/lib/apiServiceOrders";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -323,45 +322,11 @@ export function WeeklogOperationalDocumentDialog({
           ],
         };
       }
-
-      const operational_document_payload = {
-        ...(order.operational_document ||
-          (order.distribution_snapshot?.operational_document ?? {})),
-        base: {
-          vin: state.vin || null,
-          insurer: state.insurer || null,
-          delivered_at: order.production_delivered_at || undefined,
-          brand: state.brand || null,
-          model: state.model || null,
-          production_order_id: order.id,
-          production_code: order.production_code ?? null,
-          week_number: state.week_number,
-          week_display: state.week_display,
-        },
-        validation: validationPayload,
-        retificativa: {
-          type: state.retificativa,
-          text: state.retificativa_text.trim() || null,
-          value:
-            typeof state.retificativa_valor === "number" &&
-            isFinite(state.retificativa_valor)
-              ? state.retificativa_valor
-              : null,
-        },
-      };
-
-      const updated = await updateServiceOrder(
-        order.id,
-        { operational_document: operational_document_payload },
+      toast.error(
+        "A alteração via Documento Operacional legado foi descontinuada (T08). O fluxo canônico de validação e retificação será disponibilizado no T10.",
+        { duration: 8000 }
       );
-
-      if (registrar_validacao) toast.success("Validação registrada com sucesso.");
-      else toast.success("Documento operacional salvo.");
-      onSaved?.(updated);
-      if (registrar_validacao) onOpenChange(false);
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message || "Erro ao salvar documento operacional.");
+      return;
     } finally {
       setSaving(false);
     }
@@ -850,23 +815,15 @@ export function WeeklogOperationalDocumentDialog({
           ) : null}
         </section>
 
-        <DialogFooter className="mt-4">
+        <DialogFooter className="mt-4 flex items-center justify-between">
+          <span className="text-xs text-muted-foreground italic">
+            Visualização somente leitura · Validação e retificação canônica disponíveis no T10
+          </span>
           <Button
-            variant="ghost"
+            variant="outline"
             onClick={() => onOpenChange(false)}
-            disabled={saving}
           >
             Fechar
-          </Button>
-          <Button variant="outline" onClick={() => handleSave(false)} disabled={saving || !canSave}>
-            {saving ? "Salvando…" : "Salvar rascunho"}
-          </Button>
-          <Button
-            className="bg-indigo-600 hover:bg-indigo-700"
-            onClick={() => handleSave(true)}
-            disabled={saving || !canSave}
-          >
-            {saving ? "Registrando…" : "📝 Registrar validação"}
           </Button>
         </DialogFooter>
       </DialogContent>

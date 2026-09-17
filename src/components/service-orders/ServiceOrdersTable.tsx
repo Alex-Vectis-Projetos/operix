@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { updateServiceOrder, deleteServiceOrder } from "@/lib/apiServiceOrders";
+import { useQueryClient } from "@tanstack/react-query";
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Trash2, Pencil, Save, X, Loader2, ChevronDown, ChevronRight, Camera, FileText } from "lucide-react";
+import { ChevronDown, ChevronRight, Camera, FileText } from "lucide-react";
 import { useLanguage } from "@/hooks/useLanguage";
 import { useAuth } from "@/hooks/useAuth";
 import { useClients } from "@/hooks/useServiceOrders";
@@ -19,9 +18,7 @@ import { cn } from "@/lib/utils";
 import { getRowAlertLevel, type AlertLevel } from "@/hooks/useAgingAlerts";
 import { AlertTriangle, Clock } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { BulkDeleteDialog } from "@/components/shared/BulkDeleteDialog";
 import { useTechnicianEarnings, getTechEarnings } from "@/hooks/useTechnicianEarnings";
-import { Can } from "@/components/Can";
 import { PlatformOpsToggle } from "@/components/service-orders/PlatformOpsToggle";
 import { ServiceOrderPhotosDialog } from "@/components/service-orders/ServiceOrderPhotosDialog";
 import { WeeklogOperationalDocumentDialog, type ServiceOrderLike } from "@/components/service-orders/WeeklogOperationalDocumentDialog";
@@ -115,10 +112,7 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
   const { data: technicians = [] } = useAssignableUsers();
   const { data: earningsMap } = useTechnicianEarnings();
   const queryClient = useQueryClient();
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<EditState | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [photosOpen, setPhotosOpen] = useState(false);
   const [photosOrderId, setPhotosOrderId] = useState<string | null>(null);
   const [operDocOpen, setOperDocOpen] = useState(false);
@@ -227,136 +221,9 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
     return n;
   });
 
-  // --- Delete mutation ---
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteServiceOrder(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
-      toast.success(t("toast.deleted"));
-    },
-    onError: (err) => toast.error((err as Error).message),
-  });
-
-  const bulkDeleteMutation = useMutation({
-    mutationFn: async (ids: string[]) => {
-      await Promise.all(ids.map((id) => deleteServiceOrder(id)));
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["payment_status_map"] });
-      setSelected(new Set());
-      setShowDeleteDialog(false);
-      toast.success(t("toast.deleted"));
-    },
-    onError: (err) => toast.error((err as Error).message),
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async (id: string) => {
-      if (!editForm) return;
-
-      const total =
-        (Number(editForm.service_1_price) || 0) +
-        (Number(editForm.service_2_price) || 0) +
-        (Number(editForm.service_3_price) || 0) +
-        (Number(editForm.service_4_price) || 0);
-
-      if (total === 0) {
-        throw new Error(t("validate.inlineError") + ": " + t("validate.zeroTotal").replace("{n}", ""));
-      }
-
-      const existing = orders.find((o) => o.id === id);
-      if (!existing) throw new Error("Ordem de serviço não encontrada.");
-
-      const resolvedClientId = editForm.client_id === EMPTY_RELATION_VALUE ? null : editForm.client_id;
-      const resolvedAssignedUserId = editForm.assigned_user_id === EMPTY_RELATION_VALUE ? null : editForm.assigned_user_id;
-      const finalAssignedUserId = resolvedAssignedUserId ?? existing.assigned_user_id;
-      if (!finalAssignedUserId) {
-        throw new Error("assigned_user_id is required. Please select a user.");
-      }
-      const techMatch = resolvedAssignedUserId
-        ? technicians.find((t) => t.user_id === resolvedAssignedUserId)
-        : null;
-      const clientName = resolvedClientId
-        ? (clients.find(c => c.id === resolvedClientId)?.name || existing.client_name || "")
-        : (existing.client_name || "");
-      const techName = techMatch?.name || existing.technician_name || "";
-
-      // Calculate technician earnings from profit distribution rules
-      const techEarn = getTechEarnings(techName, total, earningsMap);
-
-      await updateServiceOrder(id, {
-        client_id: resolvedClientId,
-        client_name: clientName,
-        technician_name: techName,
-        user_id: finalAssignedUserId,
-        assigned_user_id: finalAssignedUserId,
-        platform: toNullableText(editForm.platform),
-        week: toNullableText(editForm.week),
-        car_name: toNullableText(editForm.car_name),
-        license_plate: formatLicensePlate(editForm.license_plate),
-        service_1_name: toNullableText(editForm.service_1_name),
-        service_1_price: Number(editForm.service_1_price) || 0,
-        service_2_name: toNullableText(editForm.service_2_name),
-        service_2_price: Number(editForm.service_2_price) || 0,
-        service_3_name: toNullableText(editForm.service_3_name),
-        service_3_price: Number(editForm.service_3_price) || 0,
-        service_4_name: toNullableText(editForm.service_4_name),
-        service_4_price: Number(editForm.service_4_price) || 0,
-        total,
-        technician_percentage: techEarn?.percentage ?? 0,
-        technician_earning: techEarn?.earnings ?? 0,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
-      setEditingId(null);
-      setEditForm(null);
-      toast.success(t("toast.updated"));
-    },
-    onError: (err) => toast.error((err as Error).message),
-  });
-
-  const startEdit = (o: ServiceOrderRow) => {
-    // OS extraídas por OCR podem ter apenas client_name (sem client_id):
-    // resolve pelo nome para o seletor não abrir vazio.
-    const clientName = (o.client_name || o.clients?.name || "").trim().toLowerCase();
-    const clientByName = !o.client_id && clientName
-      ? clients.find((c) => c.name.trim().toLowerCase() === clientName)
-      : null;
-    setEditingId(o.id);
-    setEditForm({
-      client_id: o.client_id || clientByName?.id || EMPTY_RELATION_VALUE,
-      platform: o.platform || "",
-      assigned_user_id: o.assigned_user_id || EMPTY_RELATION_VALUE,
-      week: o.week || "",
-      car_name: o.car_name || "",
-      license_plate: o.license_plate || "",
-      service_1_name: o.service_1_name || "",
-      service_1_price: o.service_1_price ?? 0,
-      service_2_name: o.service_2_name || "",
-      service_2_price: o.service_2_price ?? 0,
-      service_3_name: o.service_3_name || "",
-      service_3_price: o.service_3_price ?? 0,
-      service_4_name: o.service_4_name || "",
-      service_4_price: o.service_4_price ?? 0,
-    });
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditForm(null);
-  };
-
   const openPhotos = (id: string) => {
     setPhotosOrderId(id);
     setPhotosOpen(true);
-  };
-
-  const updateField = (field: keyof EditState, value: string | number) => {
-    setEditForm((prev) => (prev ? { ...prev, [field]: value } : prev));
   };
 
   if (isLoading) {
@@ -415,18 +282,8 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
     <div className="space-y-4">
       {/* Bulk actions bar */}
       {selected.size > 0 && (
-        <div className="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 md:flex-row md:items-center md:gap-3 md:px-4 md:py-2">
+        <div className="flex flex-col gap-2 rounded-lg border border-border/40 bg-muted/40 px-3 py-3 md:flex-row md:items-center md:gap-3 md:px-4 md:py-2">
           <span className="text-sm font-medium">{selected.size} selecionado(s)</span>
-          <Can permission="service_orders.delete">
-            <Button
-              variant="destructive"
-              size="sm"
-              className="h-10 text-xs md:h-7"
-              onClick={() => setShowDeleteDialog(true)}
-            >
-              <Trash2 className="h-3 w-3 mr-1" /> Excluir selecionados
-            </Button>
-          </Can>
           <Button variant="ghost" size="sm" className="h-10 text-xs md:h-7" onClick={() => setSelected(new Set())}>
             Limpar seleção
           </Button>
@@ -480,7 +337,6 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
           {!isCollapsed && (
           <div className="space-y-2 md:hidden">
             {group.orders.map((o) => {
-              const isEditing = editingId === o.id && editForm;
               const ps = getPaymentStatus(o);
               const services = [o.service_1_name, o.service_2_name, o.service_3_name, o.service_4_name].filter(Boolean);
               const rowAlert = ps !== "paid" ? getRowAlertLevel(o.created_at) : "none";
@@ -491,9 +347,6 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
               const techEarn = (dbPct != null && dbPct > 0)
                 ? { percentage: dbPct, earnings: dbEarn ?? 0 }
                 : getTechEarnings(techName, o.total, earningsMap);
-              const computedTotal = isEditing
-                ? (Number(editForm.service_1_price) || 0) + (Number(editForm.service_2_price) || 0) + (Number(editForm.service_3_price) || 0) + (Number(editForm.service_4_price) || 0)
-                : Number(o.total) || 0;
               return (
                 <div key={o.id} className={cn("rounded-lg border border-border/50 bg-card p-3 shadow-sm", paymentTextStyle[ps], alertStyle[rowAlert])}>
                   <div className="flex items-start justify-between gap-3">
@@ -512,58 +365,22 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
                     <Badge variant="outline" className={cn("shrink-0 text-[10px]", paymentBadgeStyle[ps])}>{paymentLabel[ps]}</Badge>
                   </div>
 
-                  {isEditing ? (
-                    <div className="mt-3 space-y-2 rounded-md border border-border/50 bg-background/50 p-2">
-                      <div className="grid grid-cols-1 gap-2">
-                        <Select value={editForm.client_id} onValueChange={(value) => updateField("client_id", value)}>
-                          <SelectTrigger className="h-11 text-xs bg-background"><SelectValue placeholder={t("label.client")} /></SelectTrigger>
-                          <SelectContent><SelectItem value={EMPTY_RELATION_VALUE}>—</SelectItem>{editForm.client_id !== EMPTY_RELATION_VALUE && !clients.some((c) => c.id === editForm.client_id) && <SelectItem value={editForm.client_id}>{o.client_name || o.clients?.name || "Cliente atual"}</SelectItem>}{clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}</SelectContent>
-                        </Select>
-                        <Select value={editForm.assigned_user_id} onValueChange={(value) => updateField("assigned_user_id", value)}>
-                          <SelectTrigger className="h-11 text-xs bg-background"><SelectValue placeholder={t("label.technician")} /></SelectTrigger>
-                          <SelectContent><SelectItem value={EMPTY_RELATION_VALUE}>—</SelectItem>{editForm.assigned_user_id !== EMPTY_RELATION_VALUE && !technicians.some((tech) => tech.user_id === editForm.assigned_user_id) && <SelectItem value={editForm.assigned_user_id}>{o.technician_name || o.technicians?.name || "Técnico atual"}</SelectItem>}{technicians.map((technician) => <SelectItem key={technician.user_id} value={technician.user_id}>{technician.name}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input className="h-11 text-xs" value={editForm.platform} placeholder={t("label.platform")} onChange={(e) => updateField("platform", e.target.value)} />
-                        <Input className="h-11 text-xs" value={editForm.week} placeholder={t("label.week")} onChange={(e) => updateField("week", e.target.value)} />
-                        <Input className="h-11 text-xs" value={editForm.car_name} placeholder={t("label.car")} onChange={(e) => updateField("car_name", e.target.value)} />
-                        <Input className="h-11 font-mono text-xs" value={editForm.license_plate} placeholder={t("label.plate")} onChange={(e) => updateField("license_plate", e.target.value)} />
-                      </div>
-                      {[1, 2, 3, 4].map((i) => (
-                        <div key={i} className="grid grid-cols-[minmax(0,1fr)_96px] gap-2">
-                          <Input className="h-10 text-xs" value={(editForm as any)[`service_${i}_name`]} placeholder={`Serviço ${i}`} onChange={(e) => updateField(`service_${i}_name` as keyof EditState, e.target.value)} />
-                          <Input className="h-10 text-right text-xs tabular-nums" type="number" step="0.01" value={(editForm as any)[`service_${i}_price`]} onChange={(e) => updateField(`service_${i}_price` as keyof EditState, Number(e.target.value) || 0)} />
-                        </div>
-                      ))}
-                      <div className="flex items-center justify-between border-t border-border/50 pt-2">
-                        <span className="text-sm font-semibold text-primary tabular-nums">{formatCurrency(computedTotal)}</span>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" className="h-10" onClick={cancelEdit}><X className="h-4 w-4" /></Button>
-                          <Button size="sm" className="h-10" onClick={() => updateMutation.mutate(o.id)} disabled={updateMutation.isPending}>{updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}</Button>
-                        </div>
-                      </div>
+                  <div className="mt-3 space-y-3">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div><span className="text-muted-foreground">Plataforma</span><p className="font-medium">{o.platform || "—"}</p></div>
+                      <div><span className="text-muted-foreground">Total</span><p className="font-semibold text-primary tabular-nums">{o.total != null ? formatCurrency(Number(o.total)) : "—"}</p></div>
                     </div>
-                  ) : (
-                    <div className="mt-3 space-y-3">
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div><span className="text-muted-foreground">Plataforma</span><p className="font-medium">{o.platform || "—"}</p></div>
-                        <div><span className="text-muted-foreground">Total</span><p className="font-semibold text-primary tabular-nums">{o.total != null ? formatCurrency(Number(o.total)) : "—"}</p></div>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{services.length ? services.join(", ") : "Sem serviços"}</p>
-                      {techEarn && <p className="text-[11px] text-muted-foreground">Tec. {techEarn.percentage}% · <span className="text-foreground">{formatCurrency(techEarn.earnings)}</span></p>}
-                      <div className="flex justify-end gap-2 border-t border-border/50 pt-2">
-                        <Button variant="outline" size="sm" className="h-10 bg-indigo-500/5 border-indigo-400/30 hover:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300" onClick={() => { setOperDocOrder({ ...o } as ServiceOrderLike); setOperDocOpen(true); }}>
-                          <FileText className="h-4 w-4 mr-1" /> Doc. Operacional
-                        </Button>
-                        <Button variant="outline" size="sm" className="h-10" onClick={() => openPhotos(o.id)}>
-                          <Camera className="h-4 w-4 mr-1" /> Fotos
-                        </Button>
-                        <Can permission="service_orders.edit"><Button variant="outline" size="sm" className="h-10" onClick={() => startEdit(o)}><Pencil className="h-4 w-4 mr-1" />Editar</Button></Can>
-                        <Can permission="service_orders.delete"><Button variant="ghost" size="sm" className="h-10 text-destructive" onClick={() => deleteMutation.mutate(o.id)}><Trash2 className="h-4 w-4" /></Button></Can>
-                      </div>
+                    <p className="text-xs text-muted-foreground">{services.length ? services.join(", ") : "Sem serviços"}</p>
+                    {techEarn && <p className="text-[11px] text-muted-foreground">Tec. {techEarn.percentage}% · <span className="text-foreground">{formatCurrency(techEarn.earnings)}</span></p>}
+                    <div className="flex justify-end gap-2 border-t border-border/50 pt-2">
+                      <Button variant="outline" size="sm" className="h-10 bg-indigo-500/5 border-indigo-400/30 hover:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300" onClick={() => { setOperDocOrder({ ...o } as ServiceOrderLike); setOperDocOpen(true); }}>
+                        <FileText className="h-4 w-4 mr-1" /> Doc. Operacional
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-10" onClick={() => openPhotos(o.id)}>
+                        <Camera className="h-4 w-4 mr-1" /> Fotos
+                      </Button>
                     </div>
-                  )}
+                  </div>
                 </div>
               );
             })}
@@ -591,123 +408,7 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
               </TableHeader>
               <TableBody>
                 {group.orders.map((o) => {
-                  const isEditing = editingId === o.id && editForm;
                   const ps = getPaymentStatus(o);
-
-                  if (isEditing) {
-                    const computedTotal =
-                      (Number(editForm.service_1_price) || 0) +
-                      (Number(editForm.service_2_price) || 0) +
-                      (Number(editForm.service_3_price) || 0) +
-                      (Number(editForm.service_4_price) || 0);
-
-                    return (
-                      <TableRow key={o.id} className={cn("relative", paymentTextStyle[ps])}>
-                        <TableCell className="p-1">
-                          <Checkbox checked={selected.has(o.id)} onCheckedChange={() => toggleOne(o.id)} />
-                        </TableCell>
-                        <TableCell className="p-1 min-w-[170px]">
-                          <Select value={editForm.client_id} onValueChange={(value) => updateField("client_id", value)}>
-                            <SelectTrigger className="h-7 text-xs bg-background">
-                              <SelectValue placeholder={t("label.client")} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value={EMPTY_RELATION_VALUE}>—</SelectItem>
-                              {editForm.client_id !== EMPTY_RELATION_VALUE && !clients.some((c) => c.id === editForm.client_id) && (
-                                <SelectItem value={editForm.client_id}>{o.client_name || o.clients?.name || "Cliente atual"}</SelectItem>
-                              )}
-                              {clients.map((client) => (
-                                <SelectItem key={client.id} value={client.id}>
-                                  {client.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell className="p-1">
-                          <Input className="h-7 text-xs" value={editForm.platform} onChange={(e) => updateField("platform", e.target.value)} />
-                        </TableCell>
-                        <TableCell className="p-1 min-w-[170px]">
-                          <Select value={editForm.assigned_user_id} onValueChange={(value) => updateField("assigned_user_id", value)}>
-                            <SelectTrigger className="h-7 text-xs bg-background">
-                              <SelectValue placeholder={t("label.technician")} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value={EMPTY_RELATION_VALUE}>—</SelectItem>
-                              {editForm.assigned_user_id !== EMPTY_RELATION_VALUE && !technicians.some((tech) => tech.user_id === editForm.assigned_user_id) && (
-                                <SelectItem value={editForm.assigned_user_id}>{o.technician_name || o.technicians?.name || "Técnico atual"}</SelectItem>
-                              )}
-                              {technicians.map((technician) => (
-                                <SelectItem key={technician.user_id} value={technician.user_id}>
-                                  <span className="font-medium">{technician.name}</span>
-                                  {technician.display_code ? (
-                                    <span className="ml-2 text-[10px] text-muted-foreground">
-                                      {technician.display_code}
-                                    </span>
-                                  ) : null}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell className="p-1">
-                          <Input className="h-7 text-xs w-16" value={editForm.week} onChange={(e) => updateField("week", e.target.value)} />
-                        </TableCell>
-                        <TableCell className="p-1">
-                          <Input className="h-7 text-xs" value={editForm.car_name} onChange={(e) => updateField("car_name", e.target.value)} />
-                        </TableCell>
-                        <TableCell className="p-1">
-                          <Input className="h-7 text-xs w-24 font-mono" value={editForm.license_plate} onChange={(e) => updateField("license_plate", e.target.value)} />
-                        </TableCell>
-                        <TableCell className="p-1">
-                          <div className="space-y-1">
-                            {[1, 2, 3, 4].map((i) => (
-                              <div key={i} className="flex gap-1">
-                                <Input
-                                  className="h-6 text-[11px] px-1 w-20"
-                                  value={(editForm as any)[`service_${i}_name`]}
-                                  placeholder={`S${i}`}
-                                  onChange={(e) => updateField(`service_${i}_name` as keyof EditState, e.target.value)}
-                                />
-                                <Input
-                                  className="h-6 text-[11px] px-1 w-14 text-right tabular-nums"
-                                  type="number"
-                                  step="0.01"
-                                  value={(editForm as any)[`service_${i}_price`]}
-                                  onChange={(e) => updateField(`service_${i}_price` as keyof EditState, Number(e.target.value) || 0)}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right font-semibold text-primary tabular-nums">
-                          {formatCurrency(computedTotal)}
-                        </TableCell>
-                        <TableCell className="text-right text-[10px] text-muted-foreground">—</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={cn("text-[10px]", paymentBadgeStyle[ps])}>
-                            {paymentLabel[ps]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-primary"
-                              onClick={() => updateMutation.mutate(o.id)}
-                              disabled={updateMutation.isPending}
-                            >
-                              {updateMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={cancelEdit}>
-                              <X className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  }
 
                   const services = [o.service_1_name, o.service_2_name, o.service_3_name, o.service_4_name].filter(Boolean);
                   const rowAlert = ps !== "paid" ? getRowAlertLevel(o.created_at) : "none";
@@ -768,16 +469,6 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
                           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openPhotos(o.id)} aria-label="Fotos">
                             <Camera className="h-3 w-3" />
                           </Button>
-                          <Can permission="service_orders.edit">
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(o)}>
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-                          </Can>
-                          <Can permission="service_orders.delete">
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteMutation.mutate(o.id)}>
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </Can>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -790,14 +481,6 @@ export function ServiceOrdersTable({ orders, isLoading }: ServiceOrdersTableProp
         </div>
         );
       })}
-
-      <BulkDeleteDialog
-        open={showDeleteDialog}
-        count={selected.size}
-        onConfirm={() => bulkDeleteMutation.mutate([...selected])}
-        onCancel={() => setShowDeleteDialog(false)}
-        isPending={bulkDeleteMutation.isPending}
-      />
 
       <ServiceOrderPhotosDialog
         open={photosOpen}

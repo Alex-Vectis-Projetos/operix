@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "./useAuth";
 import { useCan } from "./usePermission";
 import { useWorkspace } from "./useWorkspace";
@@ -8,9 +8,6 @@ import { withPromiseTimeout } from "@/lib/asyncGuard";
 import { pdfFirstPageToImageBase64 } from "@/lib/pdfUtils";
 import {
   listServiceOrders,
-  createServiceOrders,
-  putServiceOrder,
-  deleteServiceOrder,
   listClients,
   type ServiceOrderRecord,
 } from "@/lib/apiServiceOrders";
@@ -53,7 +50,6 @@ export function useServiceOrders(filters?: {
   assigned_user_id?: string;
   week?: string;
 }) {
-  const queryClient = useQueryClient();
   const { user } = useAuth();
   const { can, isLoading: permsLoading } = useCan();
   const { workspaceId } = useWorkspace();
@@ -77,66 +73,7 @@ export function useServiceOrders(filters?: {
       }),
   });
 
-  const saveMutation = useMutation({
-    mutationFn: async (orders: ServiceOrderInsert[]) => {
-      const payload = orders.map((o) => ({
-        ...o,
-        id: o.id ?? crypto.randomUUID(),
-        user_id: o.user_id ?? user?.id ?? "",
-        assigned_user_id: o.assigned_user_id ?? user?.id ?? "",
-        workspace_id: o.workspace_id ?? workspaceId,
-        created_at: o.created_at ?? new Date().toISOString(),
-        status: o.status ?? "draft",
-        client_name: o.client_name ?? "",
-        technician_name: o.technician_name ?? "",
-      }));
-      return createServiceOrders(payload as any);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
-      toast.success("Service orders saved successfully");
-    },
-    onError: (err) => {
-      toast.error("Failed to save: " + (err as Error).message);
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<ServiceOrder> & { id: string }) => {
-      if (!id) throw new Error("Service order id is required for update.");
-      const payload: Record<string, unknown> = {
-        ...updates,
-        id,
-        user_id: updates.user_id ?? user?.id ?? "",
-        assigned_user_id: updates.assigned_user_id ?? user?.id ?? "",
-        workspace_id: updates.workspace_id ?? workspaceId,
-        client_name: updates.client_name ?? "",
-        technician_name: updates.technician_name ?? "",
-        created_at: updates.created_at ?? new Date().toISOString(),
-      };
-      return putServiceOrder(id, payload);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
-    },
-    onError: (err) => {
-      toast.error("Failed to update: " + (err as Error).message);
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteServiceOrder(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
-    },
-    onError: (err) => {
-      toast.error("Failed to delete: " + (err as Error).message);
-    },
-  });
-
-  return { ...query, saveMutation, updateMutation, deleteMutation };
+  return query;
 }
 
 const EXTRACT_API_URL = (import.meta.env.VITE_API_URL ?? "/api") + "/extract/service-order";

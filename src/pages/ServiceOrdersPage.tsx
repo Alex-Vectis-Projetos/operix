@@ -49,7 +49,7 @@ export default function ServiceOrdersPage() {
 
   const [extractions, setExtractions] = useState<(ExtractionResult & { _id: string; _file?: File; _documentId?: string; _docState: DocumentVisualState; _ocrVersion: number })[]>([]);
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
-  const { data: orders = [], isLoading, saveMutation } = useServiceOrders({});
+  const { data: orders = [], isLoading } = useServiceOrders({});
   const { extract } = useExtractServiceOrder();
   const { data: clients = [] } = useClients();
   const { data: technicians = [] } = useAssignableUsers();
@@ -191,23 +191,10 @@ export default function ServiceOrdersPage() {
       toast.error(msg, { duration: 7000 });
       return;
     }
-    saveMutation.mutate(inserts, {
-      onSuccess: async () => {
-        if (extraction?._documentId) {
-          await persistDocumentVisualState(extraction._documentId, extraction._docState, true);
-          queryClient.invalidateQueries({ queryKey: ["embedded-docs", "service_order"] });
-        }
-        setExtractions(prev => prev.filter((e) => e._id !== extractionId));
-        toast.success(
-          inserts.length === 1 ? "Ordem salva com sucesso" : `${inserts.length} ordens salvas com sucesso`,
-          { duration: 4000 }
-        );
-      },
-      onError: (err) => {
-        const raw = (err as Error).message || "";
-        toast.error(`Erro ao salvar.\n${raw}`, { duration: 8000 });
-      },
-    });
+    toast.error(
+      "A gravação direta de Ordens de Serviço legadas foi descontinuada (T08). O fluxo canônico de importação e confronto OCR será integrado na Spec 004.",
+      { duration: 8000 }
+    );
   };
 
   const handleDiscard = (extractionId: string) => {
@@ -252,32 +239,9 @@ export default function ServiceOrdersPage() {
 
   const hasExtractions = extractions.length > 0;
 
-  const handleDeleteYear = useCallback(async (year: string) => {
-    const y = parseInt(year, 10);
-    if (!Number.isFinite(y)) return;
-    const workspaceId = ctxWs.resolvedWorkspaceId;
-    if (!workspaceId) {
-      toast.error("Selecione um workspace antes de excluir.");
-      return;
-    }
-    try {
-      await apiRequest<{ deleted: number; documents_deleted: number }>(
-        `/service-orders/by-year/${y}?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "DELETE", timeoutMs: 30000 },
-      );
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["service_orders"] }),
-        queryClient.invalidateQueries({ queryKey: ["embedded-docs", "service_order"] }),
-        queryClient.invalidateQueries({ queryKey: ["financial_records"] }),
-        queryClient.invalidateQueries({ queryKey: ["reconciliations"] }),
-        queryClient.invalidateQueries({ queryKey: ["discrepancies"] }),
-      ]);
-      toast.success(`Operacional de ${year} excluído.`);
-    } catch (err) {
-      toast.error(`Erro ao excluir ${year}: ${(err as Error).message}`, { duration: 8000 });
-      throw err;
-    }
-  }, [queryClient, ctxWs.resolvedWorkspaceId]);
+  const handleDeleteYear = useCallback(async (_year: string) => {
+    toast.error("Exclusão em lote por ano descontinuada (T08). Registros históricos são imutáveis.");
+  }, []);
 
   return (
     <div className="animate-fade-in flex min-h-full w-full min-w-0 flex-col gap-3 overflow-visible md:gap-2">
@@ -363,7 +327,7 @@ export default function ServiceOrdersPage() {
                 notes={extraction.notes}
                 onSave={(rows, opts) => handleSave(extraction._id, rows, opts)}
                 onDiscard={() => handleDiscard(extraction._id)}
-                isSaving={saveMutation.isPending}
+                isSaving={false}
                 technicians={technicians}
                 isTechnicianRole={isTechnicianRole}
                 isAdmin={canAssignAnyTechnician}

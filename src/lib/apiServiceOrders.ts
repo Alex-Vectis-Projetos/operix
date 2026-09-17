@@ -48,44 +48,6 @@ export function listServiceOrders(
   return apiRequest<ServiceOrderRecord[]>(`/service-orders?${params}`, { timeoutMs: 10000 });
 }
 
-export function createServiceOrders(
-  payload: Record<string, unknown> | Record<string, unknown>[],
-): Promise<ServiceOrderRecord | ServiceOrderRecord[]> {
-  return apiRequest<ServiceOrderRecord | ServiceOrderRecord[]>("/service-orders", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    timeoutMs: 12000,
-  });
-}
-
-export function updateServiceOrder(
-  id: string,
-  patch: Record<string, unknown>,
-): Promise<ServiceOrderRecord> {
-  return apiRequest<ServiceOrderRecord>(`/service-orders/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-    timeoutMs: 12000,
-  });
-}
-
-export function putServiceOrder(
-  id: string,
-  payload: Record<string, unknown>,
-): Promise<ServiceOrderRecord> {
-  return apiRequest<ServiceOrderRecord>(`/service-orders/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    timeoutMs: 12000,
-  });
-}
-
-export function deleteServiceOrder(id: string): Promise<void> {
-  return apiRequest<void>(`/service-orders/${id}`, { method: "DELETE", timeoutMs: 10000 });
-}
 
 export function listClients(
   workspaceId?: string,

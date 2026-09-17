@@ -82,9 +82,7 @@ interface Props {
 export function DraftsPanel({ onResumeProductionDraft, refreshKey = 0 }: Props) {
   const { formatCurrency } = useLanguage();
   const navigate = useNavigate();
-  const { data: allOrders = [], isLoading, updateMutation, deleteMutation } = useServiceOrders({});
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const { data: allOrders = [], isLoading } = useServiceOrders({});
   const [productionDrafts, setProductionDrafts] = useState<ProductionDraft[]>([]);
   const [discardingDraftId, setDiscardingDraftId] = useState<string | null>(null);
 
@@ -103,25 +101,6 @@ export function DraftsPanel({ onResumeProductionDraft, refreshKey = 0 }: Props) 
     () => allOrders.filter((o: any) => o.status === "draft"),
     [allOrders],
   );
-
-  const handleConfirm = (id: string) => {
-    updateMutation.mutate(
-      { id, status: "pending" },
-      {
-        onSuccess: () => toast.success("Ordem confirmada e movida para Pendente."),
-        onError: (err) => toast.error((err as Error).message),
-      },
-    );
-    setConfirmingId(null);
-  };
-
-  const handleDelete = (id: string) => {
-    deleteMutation.mutate(id, {
-      onSuccess: () => toast.success("Rascunho excluído."),
-      onError: (err) => toast.error((err as Error).message),
-    });
-    setDeletingId(null);
-  };
 
   if (isLoading) {
     return (
@@ -255,10 +234,6 @@ export function DraftsPanel({ onResumeProductionDraft, refreshKey = 0 }: Props) 
                 order.service_4_name,
               ].filter(Boolean);
 
-              const isPending =
-                (updateMutation.isPending && updateMutation.variables?.id === order.id) ||
-                (deleteMutation.isPending && deleteMutation.variables === order.id);
-
               return (
                 <Card key={order.id} className="transition-all hover:border-primary/30 hover:shadow-sm">
                   <CardHeader className="pb-2 pt-3 px-4">
@@ -319,27 +294,9 @@ export function DraftsPanel({ onResumeProductionDraft, refreshKey = 0 }: Props) 
                         <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
                         {order.total != null ? formatCurrency(order.total) : "—"}
                       </span>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 gap-1.5 px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          disabled={isPending}
-                          onClick={() => setDeletingId(order.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Excluir
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="h-8 gap-1.5 px-3 text-xs"
-                          disabled={isPending}
-                          onClick={() => setConfirmingId(order.id)}
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          Confirmar
-                        </Button>
-                      </div>
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground border-border/70">
+                        Histórico · Somente Leitura
+                      </Badge>
                     </div>
                   </CardContent>
                 </Card>
@@ -365,45 +322,6 @@ export function DraftsPanel({ onResumeProductionDraft, refreshKey = 0 }: Props) 
               onClick={() => discardingDraftId && discardProductionDraft(discardingDraftId)}
             >
               Descartar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Confirm service order dialog */}
-      <AlertDialog open={!!confirmingId} onOpenChange={(o) => !o && setConfirmingId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar ordem de serviço?</AlertDialogTitle>
-            <AlertDialogDescription>
-              A ordem será movida para <strong>Pendente</strong> e ficará visível no módulo financeiro.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => confirmingId && handleConfirm(confirmingId)}>
-              Confirmar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Delete service order dialog */}
-      <AlertDialog open={!!deletingId} onOpenChange={(o) => !o && setDeletingId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir rascunho?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação não pode ser desfeita. O rascunho será permanentemente excluído.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-              onClick={() => deletingId && handleDelete(deletingId)}
-            >
-              Excluir
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
