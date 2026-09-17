@@ -271,6 +271,10 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
     await prisma.weeklogValidation.deleteMany({
       where: { workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] } },
     });
+    await prisma.productionOrder.updateMany({
+      where: { workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] } },
+      data: { rectificationOriginId: null },
+    });
     await prisma.weeklogEntry.deleteMany({
       where: { workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] } },
     });
@@ -332,6 +336,12 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
       where: {
         workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] },
       },
+    });
+    await prisma.productionOrder.updateMany({
+      where: {
+        workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] },
+      },
+      data: { rectificationOriginId: null },
     });
     await prisma.weeklogEntry.deleteMany({
       where: {
@@ -3781,17 +3791,19 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
           },
         });
 
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+
         const wl = await prisma.weeklog.create({
           data: {
             id: "wl-rect-same-week",
             workspaceId: FIXTURES_003.wsAlpha,
-            startsOn: new Date("2026-08-10T00:00:00Z"),
-            endsOn: new Date("2026-08-16T23:59:59Z"),
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
             clientId: FIXTURES_003.clientA.id,
             siteKey: FIXTURES_003.sites.central,
-            week: "2026-W33",
-            weekNumber: 33,
-            yearReference: 2026,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
             status: "open",
           },
         });
@@ -3807,7 +3819,7 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
             technicianName: "Tech A1",
             clientId: FIXTURES_003.clientA.id,
             currencyCode: "EUR",
-            deliveredAt: new Date("2026-08-11T10:00:00Z"),
+            deliveredAt: new Date(),
             validationStatus: "rectification_requested",
           },
         });
@@ -3981,6 +3993,709 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
 
         // Validador não escolhe técnico
         expect([400, 403]).toContain(res.status);
+      });
+
+      it("RECTIFICATION-IDEMPOTENT-01: Retries idênticos da mesma retificação retornam HTTP 200 idempotent=true sem avançar executionSequence", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-idemp-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RECT-IDEMP-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-idemp-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "rectification_pending",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-idemp-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rejected",
+          },
+        });
+
+        const headers = getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha);
+
+        // 1ª Chamada: Solicitação inicial
+        const res1 = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ reason: "Acabamento incompleto na porta" }),
+        });
+        expect(res1.status).toBe(200);
+        const data1 = await res1.json();
+        expect(data1.idempotent).toBe(false);
+        expect(data1.productionOrder.executionSequence).toBe(2);
+
+        // 2ª Chamada: Retry idêntico (idempotente)
+        const res2 = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ reason: "Acabamento incompleto na porta" }),
+        });
+        expect(res2.status).toBe(200);
+        const data2 = await res2.json();
+        expect(data2.idempotent).toBe(true);
+        expect(data2.productionOrder.executionSequence).toBe(2);
+
+        // PO não pode ter avançado para sequência 3
+        const poInDb = await prisma.productionOrder.findUniqueOrThrow({ where: { id: po.id } });
+        expect(poInDb.executionSequence).toBe(2);
+
+        // 3ª Chamada: Motivo conflitante retorna 409
+        const resConflict = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ reason: "Motivo divergente para mesma entrada" }),
+        });
+        expect(resConflict.status).toBe(409);
+      });
+
+      it("RECTIFICATION-CONCURRENT-01: Chamadas concorrentes de retificação sobre a mesma entrada convergem atomicamente para seq 2", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-conc-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RECT-CONC-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-conc-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "rectification_pending",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-conc-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rejected",
+          },
+        });
+
+        const headers = getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha);
+        const payload = JSON.stringify({ reason: "Concorrente: polimento imperfeito" });
+
+        const [r1, r2] = await Promise.all([
+          fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, { method: "POST", headers, body: payload }),
+          fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, { method: "POST", headers, body: payload }),
+        ]);
+
+        expect([200, 409]).toContain(r1.status);
+        expect([200, 409]).toContain(r2.status);
+        expect([r1.status, r2.status]).toContain(200);
+
+        // Estado do banco de dados deve ser determinístico
+        const poAfter = await prisma.productionOrder.findUniqueOrThrow({ where: { id: po.id } });
+        expect(poAfter.executionSequence).toBe(2);
+        expect(poAfter.status).toBe("in_production");
+        expect(poAfter.rectificationOriginId).toBe(entry.id);
+
+        const entryAfter = await prisma.weeklogEntry.findUniqueOrThrow({ where: { id: entry.id } });
+        expect(entryAfter.validationStatus).toBe("rectification_requested");
+      });
+
+      it("RECTIFICATION-STALE-ENTRY-01: Tentativa de retificar execução histórica superada (stale) retorna HTTP 409 Conflict", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-stale-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RECT-STALE-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 2,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-stale-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "rectification_pending",
+          },
+        });
+
+        const e1 = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-stale-seq-1",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rectification_requested",
+          },
+        });
+
+        await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-stale-seq-2",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 2,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rejected",
+            rectificationOriginEntryId: e1.id,
+          },
+        });
+
+        // Tentativa de retificar a entry 1 (que já foi superada pela entry 2)
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${e1.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ reason: "Tentativa ilegal de retificar entry stale" }),
+        });
+
+        expect(res.status).toBe(409);
+      });
+
+      it("RECTIFICATION-CROSS-TENANT-01: Chamada de retificação cross-tenant é rejeitada com 403/404", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-ct-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RECT-CT-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-ct-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "rectification_pending",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-ct-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rejected",
+          },
+        });
+
+        // Usuário de Workspace Bravo tenta retificar entrada do Workspace Alpha
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientB, FIXTURES_003.wsBravo),
+          body: JSON.stringify({ reason: "Ataque cross-tenant" }),
+        });
+
+        expect([403, 404]).toContain(res.status);
+      });
+
+      it("RECTIFICATION-INACTIVE-TECH-01: Atribuir técnico inativo ou inexistente na retificação é rejeitado com HTTP 403", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-inact-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RECT-INACT-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-inact-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "rectification_pending",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-inact-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rejected",
+          },
+        });
+
+        // Owner de wsAlpha tenta atribuir um técnico com ID inexistente
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({
+            reason: "Retrabalho com técnico inexistente",
+            assignedTechnicianUserId: "00000000-0000-4000-8000-000000000000",
+          }),
+        });
+
+        expect(res.status).toBe(403);
+      });
+
+      it("RECTIFICATION-ROLLBACK-01: Falha no PostgreSQL durante a transação atômica aborta sem mutação parcial", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-roll-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-ROLLBACK-CRASH-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-roll-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "rectification_pending",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-roll-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rejected",
+          },
+        });
+
+        // Trigger temporário para simular falha no update de production_orders
+        await prisma.$executeRawUnsafe(`
+          CREATE OR REPLACE FUNCTION sim_rect_abort()
+          RETURNS TRIGGER AS $$
+          BEGIN
+            IF NEW.id = 'po-rect-roll-01' THEN
+              RAISE EXCEPTION 'SIMULATED_RECTIFY_ABORT';
+            END IF;
+            RETURN NEW;
+          END;
+          $$ LANGUAGE plpgsql;
+        `);
+        await prisma.$executeRawUnsafe(`
+          CREATE TRIGGER trg_sim_rect_abort
+          BEFORE UPDATE ON production_orders
+          FOR EACH ROW EXECUTE FUNCTION sim_rect_abort();
+        `);
+
+        try {
+          const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+            method: "POST",
+            headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+            body: JSON.stringify({ reason: "Simulação de crash relacional" }),
+          });
+          expect(res.status).toBe(500);
+
+          // Verificar rollback estrito:
+          const poDb = await prisma.productionOrder.findUniqueOrThrow({ where: { id: po.id } });
+          expect(poDb.status).toBe("delivered");
+          expect(poDb.executionSequence).toBe(1);
+
+          const entryDb = await prisma.weeklogEntry.findUniqueOrThrow({ where: { id: entry.id } });
+          expect(entryDb.validationStatus).toBe("rejected");
+        } finally {
+          await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS trg_sim_rect_abort ON production_orders;`);
+          await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS sim_rect_abort();`);
+        }
+      });
+
+      it("RECTIFICATION-ROUND-IMMUTABLE-01: Retificação pós-validação preserva a Validation Round anterior estritamente intacta", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-rnd-imm-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RND-IMM-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-rnd-imm-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "validated",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-rnd-imm-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "approved",
+          },
+        });
+
+        const round = await prisma.weeklogValidation.create({
+          data: {
+            id: "val-round-imm-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            submittedAt: new Date("2026-09-01T10:00:00Z"),
+            submittedBy: FIXTURES_003.ownerA.userId,
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date("2026-09-01T11:00:00Z"),
+            coverageSnapshot: [{ weeklogEntryId: entry.id, totalAmount: "100.00" }],
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ reason: "Contestação posterior de inspeção física" }),
+        });
+
+        expect(res.status).toBe(200);
+
+        // A rodada de validação original deve permanecer 100% inalterada
+        const roundAfter = await prisma.weeklogValidation.findUniqueOrThrow({ where: { id: round.id } });
+        expect(roundAfter.id).toBe(round.id);
+        expect(roundAfter.validationSequence).toBe(1);
+        expect(roundAfter.status).toBe("validated");
+        expect(roundAfter.validatorUserId).toBe(round.validatorUserId);
+        expect(roundAfter.validationMethod).toBe(round.validationMethod);
+        expect(roundAfter.validatedAt?.toISOString()).toBe(round.validatedAt?.toISOString());
+        expect(roundAfter.coverageSnapshot).toEqual(round.coverageSnapshot);
+      });
+
+      it("RECTIFICATION-RESUBMIT-01: Re-finalização e submitForValidation criam Round 2 mantendo Round 1 intacta", async () => {
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-resub-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-RESUB-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            performedServices: [{ description: "Reparo Inicial", amount: "100.00" }],
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-resub-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "rectification_pending",
+          },
+        });
+
+        const e1 = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-resub-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rejected",
+          },
+        });
+
+        // Round 1 arquivada
+        const round1 = await prisma.weeklogValidation.create({
+          data: {
+            id: "val-resub-round-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            validationSequence: 1,
+            status: "validated",
+            validatorUserId: FIXTURES_003.validatorClientA.userId,
+            validationMethod: "authenticated_confirmation",
+            validatedAt: new Date(),
+            coverageSnapshot: [{ weeklogEntryId: e1.id }],
+          },
+        });
+
+        // 1. Rectify da entry 1
+        const resRect = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${e1.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ reason: "Necessita novo polimento" }),
+        });
+        expect(resRect.status).toBe(200);
+
+        // 2. Re-finaliza PO sequência 2
+        const resFin2 = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(resFin2.status).toBe(200);
+        const dataFin2 = await resFin2.json();
+        const e2Id = dataFin2.weeklogEntry.id;
+        expect(dataFin2.weeklogEntry.executionSequence).toBe(2);
+
+        // 3. Submeter para nova rodada de validação
+        const resSub = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(resSub.status).toBe(200);
+        const dataSub = await resSub.json();
+        expect(dataSub.validationRound.validationSequence).toBe(2);
+        expect(dataSub.validationRound.status).toBe("pending");
+
+        // Round 1 continua intacta
+        const r1After = await prisma.weeklogValidation.findUniqueOrThrow({ where: { id: round1.id } });
+        expect(r1After.validationSequence).toBe(1);
+        expect(r1After.status).toBe("validated");
+
+        // Coverage de Round 2 cobre a nova entrada e2
+        const r2After = await prisma.weeklogValidation.findUniqueOrThrow({ where: { id: dataSub.validationRound.id } });
+        const snapshot = r2After.coverageSnapshot as any[];
+        expect(snapshot.some((item) => item.weeklogEntryId === e2Id)).toBe(true);
+      });
+
+      it("RECTIFICATION-NO-FINANCE-01: Ciclo completo de retificação não gera efeito colateral financeiro", async () => {
+        const initialPaymentOrders = await prisma.paymentOrder.count({
+          where: { workspaceId: FIXTURES_003.wsAlpha },
+        });
+        const initialFinancialRecords = await prisma.financialRecord.count({
+          where: { workspaceId: FIXTURES_003.wsAlpha },
+        });
+
+        const currentWeek = operationalWeekOf(new Date(), "Europe/Paris");
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-rect-nofin-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-NOFIN-01",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            executionSequence: 1,
+            performedServices: [{ description: "Reparo Pintura", amount: "300.00" }],
+            status: "delivered",
+          },
+        });
+
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-rect-nofin-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: currentWeek.startsOn,
+            endsOn: currentWeek.endsOn,
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: currentWeek.week,
+            weekNumber: currentWeek.weekNumber,
+            yearReference: currentWeek.yearReference,
+            status: "rectification_pending",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-rect-nofin-01",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+            validationStatus: "rejected",
+          },
+        });
+
+        // 1. Rectify
+        const resRect = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries/${entry.id}/rectify`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.validatorClientA, FIXTURES_003.wsAlpha),
+          body: JSON.stringify({ reason: "Zero efeitos financeiros esperados" }),
+        });
+        expect(resRect.status).toBe(200);
+
+        // 2. Re-finalize
+        const resFin = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(resFin.status).toBe(200);
+
+        // 3. Resubmit
+        const resSub = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(resSub.status).toBe(200);
+
+        // Invariante Financeiro Estrito: zero novos registros financeiros
+        const finalPaymentOrders = await prisma.paymentOrder.count({
+          where: { workspaceId: FIXTURES_003.wsAlpha },
+        });
+        const finalFinancialRecords = await prisma.financialRecord.count({
+          where: { workspaceId: FIXTURES_003.wsAlpha },
+        });
+
+        expect(finalPaymentOrders).toBe(initialPaymentOrders);
+        expect(finalFinancialRecords).toBe(initialFinancialRecords);
       });
     });
 
