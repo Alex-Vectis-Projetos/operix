@@ -1719,6 +1719,421 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         expect(data.status).toBe("pending_validation");
       });
 
+      it("WEEKLOG-LIST-TENANT-01: Isolamento estrito de tenant na listagem canônica de WEEKLOGs", async () => {
+        const wlAlpha = await prisma.weeklog.create({
+          data: {
+            id: "wl-list-ten-alpha",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-07-06T00:00:00Z"),
+            endsOn: new Date("2026-07-12T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W28",
+            weekNumber: 28,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+
+        const wlBravo = await prisma.weeklog.create({
+          data: {
+            id: "wl-list-ten-bravo",
+            workspaceId: FIXTURES_003.wsBravo,
+            startsOn: new Date("2026-07-06T00:00:00Z"),
+            endsOn: new Date("2026-07-12T23:59:59Z"),
+            clientId: FIXTURES_003.clientBravo.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W28",
+            weekNumber: 28,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+
+        const resAlpha = await fetch(`${baseUrl}/api/weeklogs`, {
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(resAlpha.status).toBe(200);
+        const listAlpha = await resAlpha.json();
+        expect(listAlpha.some((w: any) => w.id === wlAlpha.id)).toBe(true);
+        expect(listAlpha.every((w: any) => w.workspaceId === FIXTURES_003.wsAlpha)).toBe(true);
+        expect(listAlpha.some((w: any) => w.id === wlBravo.id)).toBe(false);
+
+        const resBravo = await fetch(`${baseUrl}/api/weeklogs`, {
+          headers: getAuthHeader(FIXTURES_003.ownerB, FIXTURES_003.wsBravo),
+        });
+        expect(resBravo.status).toBe(200);
+        const listBravo = await resBravo.json();
+        expect(listBravo.some((w: any) => w.id === wlBravo.id)).toBe(true);
+        expect(listBravo.every((w: any) => w.workspaceId === FIXTURES_003.wsBravo)).toBe(true);
+        expect(listBravo.some((w: any) => w.id === wlAlpha.id)).toBe(false);
+      });
+
+      it("WEEKLOG-DETAIL-TECH-OWN-01: Técnico scope own só recebe suas próprias entries no detalhe do lote", async () => {
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-detail-to-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-07-13T00:00:00Z"),
+            endsOn: new Date("2026-07-19T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W29",
+            weekNumber: 29,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+
+        const po1 = await prisma.productionOrder.create({
+          data: {
+            id: "po-dto-1",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-DTO-1",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+          },
+        });
+        const po2 = await prisma.productionOrder.create({
+          data: {
+            id: "po-dto-2",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-DTO-2",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA2.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+          },
+        });
+
+        await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-dto-1",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po1.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+          },
+        });
+
+        await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-dto-2",
+            weeklogId: wl.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po2.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA2.userId,
+            technicianName: "Tech A2",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+          },
+        });
+
+        // Tech A1 busca lote
+        const resA1 = await fetch(`${baseUrl}/api/weeklogs/${wl.id}`, {
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(resA1.status).toBe(200);
+        const dataA1 = await resA1.json();
+        expect(dataA1.entries).toHaveLength(1);
+        expect(dataA1.entries[0].technicianUserId).toBe(FIXTURES_003.techA1.userId);
+
+        // Técnico sem nenhuma entry no lote recebe 404/403
+        const resNone = await fetch(`${baseUrl}/api/weeklogs/${wl.id}`, {
+          headers: getAuthHeader(FIXTURES_003.independentTechC, FIXTURES_003.wsAlpha),
+        });
+        expect([403, 404]).toContain(resNone.status);
+      });
+
+      it("WEEKLOG-ENTRY-PARENT-01: entryId válido com weeklogId divergente na URL falha com 404", async () => {
+        const wl1 = await prisma.weeklog.create({
+          data: {
+            id: "wl-parent-1",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-07-20T00:00:00Z"),
+            endsOn: new Date("2026-07-26T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W30",
+            weekNumber: 30,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+        const wl2 = await prisma.weeklog.create({
+          data: {
+            id: "wl-parent-2",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-07-27T00:00:00Z"),
+            endsOn: new Date("2026-08-02T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W31",
+            weekNumber: 31,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-parent-test",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-PARENT",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+          },
+        });
+
+        const entry = await prisma.weeklogEntry.create({
+          data: {
+            id: "wle-parent-test",
+            weeklogId: wl1.id,
+            workspaceId: FIXTURES_003.wsAlpha,
+            productionOrderId: po.id,
+            executionSequence: 1,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            technicianName: "Tech A1",
+            clientId: FIXTURES_003.clientA.id,
+            currencyCode: "EUR",
+            deliveredAt: new Date(),
+          },
+        });
+
+        // Acessar com wl1 (correto) -> 200
+        const resOk = await fetch(`${baseUrl}/api/weeklogs/${wl1.id}/entries/${entry.id}`, {
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(resOk.status).toBe(200);
+
+        // Acessar com wl2 (errado) -> 404
+        const resFail = await fetch(`${baseUrl}/api/weeklogs/${wl2.id}/entries/${entry.id}`, {
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(resFail.status).toBe(404);
+      });
+
+      it("SUBMIT-COVERAGE-FREEZE-01: Nova entry criada pós-submit não altera coverage da rodada anterior", async () => {
+        const po1 = await prisma.productionOrder.create({
+          data: {
+            id: "po-freeze-1",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-FRZ-1",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Serviço 1", amount: "100.00" }],
+            status: "in_production",
+          },
+        });
+
+        const headers = getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha);
+        const fin1Res = await fetch(`${baseUrl}/api/production-orders/${po1.id}/finalize`, {
+          method: "POST",
+          headers,
+        });
+        expect(fin1Res.status).toBe(200);
+        const fin1Data = await fin1Res.json();
+        const wlId = fin1Data.weeklog.id;
+
+        // Submete lote com 1 item
+        const subRes = await fetch(`${baseUrl}/api/weeklogs/${wlId}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+        expect(subRes.status).toBe(200);
+        const subData = await subRes.json();
+        expect(subData.coverageSnapshot).toHaveLength(1);
+        expect(subData.coverageSnapshot[0].weeklogEntryId).toBe(fin1Data.weeklogEntry.id);
+
+        // Agora finaliza uma segunda ordem na mesma semana
+        const po2 = await prisma.productionOrder.create({
+          data: {
+            id: "po-freeze-2",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-FRZ-2",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Serviço 2", amount: "200.00" }],
+            status: "in_production",
+          },
+        });
+
+        const fin2Res = await fetch(`${baseUrl}/api/production-orders/${po2.id}/finalize`, {
+          method: "POST",
+          headers,
+        });
+        expect(fin2Res.status).toBe(200);
+
+        // O snapshot da rodada 1 gravado no banco NÃO pode ter sido alterado
+        const round1 = await prisma.weeklogValidation.findUniqueOrThrow({
+          where: {
+            weeklogId_validationSequence: {
+              weeklogId: wlId,
+              validationSequence: 1,
+            },
+          },
+        });
+        const frozenCoverage = round1.coverageSnapshot as any[];
+        expect(frozenCoverage).toHaveLength(1);
+        expect(frozenCoverage[0].weeklogEntryId).toBe(fin1Data.weeklogEntry.id);
+      });
+
+      it("SUBMIT-CONCURRENT-01: Duas submissões simultâneas criam exatamente uma rodada", async () => {
+        const po = await prisma.productionOrder.create({
+          data: {
+            id: "po-sub-conc-1",
+            workspaceId: FIXTURES_003.wsAlpha,
+            code: "PO-SCONC-1",
+            clientId: FIXTURES_003.clientA.id,
+            technicianUserId: FIXTURES_003.techA1.userId,
+            operationalSiteKey: FIXTURES_003.sites.central,
+            currencyCode: "EUR",
+            performedServices: [{ description: "Serviço Conc", amount: "100.00" }],
+            status: "in_production",
+          },
+        });
+
+        const finRes = await fetch(`${baseUrl}/api/production-orders/${po.id}/finalize`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+        expect(finRes.status).toBe(200);
+        const wlId = (await finRes.json()).weeklog.id;
+
+        const headers = getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha);
+        const [r1, r2] = await Promise.all([
+          fetch(`${baseUrl}/api/weeklogs/${wlId}/submit-for-validation`, { method: "POST", headers }),
+          fetch(`${baseUrl}/api/weeklogs/${wlId}/submit-for-validation`, { method: "POST", headers }),
+        ]);
+
+        expect(r1.status).toBe(200);
+        expect(r2.status).toBe(200);
+
+        const validationsCount = await prisma.weeklogValidation.count({
+          where: { weeklogId: wlId },
+        });
+        expect(validationsCount).toBe(1);
+      });
+
+      it("SUBMIT-INVALID-STATE-01: Submeter lote já validado retorna HTTP 409 Conflict", async () => {
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-sub-conflict-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-08-03T00:00:00Z"),
+            endsOn: new Date("2026-08-09T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W32",
+            weekNumber: 32,
+            yearReference: 2026,
+            status: "validated",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha),
+        });
+
+        expect(res.status).toBe(409);
+      });
+
+      it("SUBMIT-CROSS-TENANT-01: Usuário de outro workspace não submete lote", async () => {
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-sub-xt-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-08-03T00:00:00Z"),
+            endsOn: new Date("2026-08-09T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W32",
+            weekNumber: 32,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.ownerB, FIXTURES_003.wsBravo),
+        });
+
+        expect([403, 404]).toContain(res.status);
+      });
+
+      it("SUBMIT-TECH-FORBIDDEN-01: Técnico executor não possui autoridade para submeter o lote semanal", async () => {
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-sub-tech-forbid-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-08-03T00:00:00Z"),
+            endsOn: new Date("2026-08-09T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W32",
+            weekNumber: 32,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/weeklogs/${wl.id}/submit-for-validation`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_003.techA1, FIXTURES_003.wsAlpha),
+        });
+
+        expect(res.status).toBe(403);
+      });
+
+      it("GET-NO-WRITE-01: Requisições GET possuem zero efeitos colaterais no banco", async () => {
+        const wl = await prisma.weeklog.create({
+          data: {
+            id: "wl-no-write-01",
+            workspaceId: FIXTURES_003.wsAlpha,
+            startsOn: new Date("2026-08-03T00:00:00Z"),
+            endsOn: new Date("2026-08-09T23:59:59Z"),
+            clientId: FIXTURES_003.clientA.id,
+            siteKey: FIXTURES_003.sites.central,
+            week: "2026-W32",
+            weekNumber: 32,
+            yearReference: 2026,
+            status: "open",
+          },
+        });
+
+        const initialWl = await prisma.weeklog.findUniqueOrThrow({ where: { id: wl.id } });
+        const initialCount = await prisma.weeklog.count();
+
+        // 3 chamadas GET sucessivas
+        const headers = getAuthHeader(FIXTURES_003.ownerA, FIXTURES_003.wsAlpha);
+        await fetch(`${baseUrl}/api/weeklogs`, { headers });
+        await fetch(`${baseUrl}/api/weeklogs/${wl.id}`, { headers });
+        await fetch(`${baseUrl}/api/weeklogs/${wl.id}/entries`, { headers });
+
+        const finalWl = await prisma.weeklog.findUniqueOrThrow({ where: { id: wl.id } });
+        const finalCount = await prisma.weeklog.count();
+
+        expect(finalWl.updatedAt.toISOString()).toBe(initialWl.updatedAt.toISOString());
+        expect(finalCount).toBe(initialCount);
+      });
+
       it("VALIDATE-01: Validador com capability weeklog.validate aprova o lote semanal gerando WeeklogValidation versionado", async () => {
         const wl = await prisma.weeklog.create({
           data: {
