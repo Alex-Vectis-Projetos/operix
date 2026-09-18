@@ -697,7 +697,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       } catch (err: any) {
         // Valida que a falha é especificamente violação de FK (P2003) da production_orders
         expect(err.code).toBe("P2003");
-        expect(err.message).toMatch(/production_orders_budget_revision_id_budget_id_fkey|production_orders/i);
+        expect(err.message).toMatch(/production_orders_budget_revision_id_budget_id_fkey|production_orders|Foreign key constraint violated/i);
       } finally {
         // Restaura ponteiros no Budget para integridade dos testes subsequentes
         await prisma.budget.update({

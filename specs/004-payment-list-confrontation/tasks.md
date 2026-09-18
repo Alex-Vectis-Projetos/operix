@@ -27,7 +27,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
 ## 2. Inventário Detalhado de Tarefas
 
 ### Fase 1: Baseline de Testes Automatizados (Test First)
-- [ ] **T01**: Criar suíte de testes de integração `tests/integration/payment-list-invariants.test.ts`:
+- [x] **T01**: Criar suíte de testes de integração `tests/integration/payment-list-invariants.test.ts`:
   - Cenário multissemanas consolidando múltiplos WEEKLOGs (`LIST-MULTIWEEK-01`).
   - Isolamento estrito de tenant A/B (`LIST-TENANT-01`).
   - Restrição de escopo de técnico com sanitização de totais da empresa (`LIST-TECH-OWN-01`).
@@ -45,7 +45,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Transição estrita de lifecycle exigindo `confronted` antes de `pending` (`LIST-PENDING-01`).
   - Autoridade exclusiva de gestor na liquidação e idempotência (`LIST-PAID-IDEMPOTENT-01`, `LIST-PAID-FORBIDDEN-01`).
   - Rotas legadas em `paymentOrders.ts` tornadas somente-leitura (`LEGACY-PAYMENTORDER-READONLY-01`).
-- [ ] **T02**: Criar suíte de testes do motor de confronto comercial `tests/integration/commercial-confrontation.test.ts`:
+- [x] **T02**: Criar suíte de testes do motor de confronto comercial `tests/integration/commercial-confrontation.test.ts`:
   - Estado inicial default `not_evaluated` (`CONFRONT-NOT-EVALUATED-01`).
   - Idempotência de execução de confronto repetido sem alterações (`CONFRONT-IDEMPOTENT-01`).
   - Histórico preservado de rodadas anteriores via `PaymentListConfrontationRun` (`CONFRONT-RERUN-HISTORY-01`).
@@ -57,7 +57,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Bloqueio de transição para `pending` por disputas em aberto (`LIST-PENDING-BLOCKED-CONTEST-01`, `LIST-PENDING-BLOCKED-RECTIFICATION-01`).
   - Invocação transacional da retificação da Spec 003 sem entidade artificial (`LIST-RECTIFICATION-LINEAGE-01`).
   - Ausência de side-effects contábeis em `financial_records` (`NO-FINANCE-SIDE-EFFECT-04`).
-- [ ] **T03**: Criar suíte de testes de importação e validação externa `tests/integration/external-import-validation.test.ts`:
+- [x] **T03**: Criar suítes de testes de importação e validação externa `tests/integration/payment-list-import.test.ts` e `tests/integration/external-weeklog-import.test.ts`:
   - Upload e staging relacional em `ExternalListImport` + `ExternalListImportItem` (`IMPORT-LIST-REVIEW-01`, `IMPORT-PROVENANCE-01`).
   - Preservação da formatação textual bruta de valores (`IMPORT-MONEY-RAW-PRESERVED-01`).
   - Proibição de commit automático sem validação humana e campos obrigatórios (`IMPORT-NO-AUTO-COMMIT-01`).
