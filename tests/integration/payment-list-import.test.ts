@@ -257,18 +257,29 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
     });
 
     it("IMPORT-CROSS-TENANT-01: Bloqueio de Commit Cross-Tenant de Staging", async () => {
-      // Given: Import de staging existente no Workspace B
-      const importBId = "44000000-0000-4000-8000-000000000099";
+      // Given: Upload e criação de staging relacional no Workspace B
+      const createRes = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_IMPORT.ownerB, FIXTURES_004_IMPORT.wsBravo),
+        body: JSON.stringify({
+          fileName: "lista_cliente_bravo.pdf",
+          mimeType: "application/pdf",
+          contentBase64: Buffer.from("DUMMY_PDF_CONTENT").toString("base64"),
+          clientId: FIXTURES_004_IMPORT.clientA.id,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { importId } = await createRes.json();
 
       // When: Usuário do Workspace A tenta comitar o import do Workspace B
-      const res = await fetch(`${baseUrl}/api/payment-lists/imports/${importBId}/commit`, {
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports/${importId}/commit`, {
         method: "POST",
         headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
         body: JSON.stringify({}),
       });
 
-      // Then: Requisição falha com HTTP 404 Not Found (ou 403 Forbidden)
-      expect([403, 404]).toContain(res.status);
+      // Then: Requisição falha com HTTP 404 Not Found deny-by-default
+      expect(res.status).toBe(404);
     });
   });
 });

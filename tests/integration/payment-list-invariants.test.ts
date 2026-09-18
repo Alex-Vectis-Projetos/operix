@@ -474,24 +474,33 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
     });
 
     it("LIST-TENANT-01: Isolamento Estrito de Tenant em Listas Comerciais", async () => {
-      // Given: Usuário do Workspace A e uma PaymentList pertencente ao Workspace B
-      const listBId = "44000000-0000-4000-8000-000000000099";
+      // Given: Criação de PaymentList no Workspace B
+      const createRes = await fetch(`${baseUrl}/api/payment-lists`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004.ownerB, FIXTURES_004.wsBravo),
+        body: JSON.stringify({
+          clientId: FIXTURES_004.clientBravo.id,
+          currencyCode: "EUR",
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const listB = await createRes.json();
 
       // When: Usuário de A tenta GET na lista de B
-      const resGet = await fetch(`${baseUrl}/api/payment-lists/${listBId}`, {
+      const resGet = await fetch(`${baseUrl}/api/payment-lists/${listB.id}`, {
         headers: getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha),
       });
 
       // When: Usuário de A tenta mutar status na lista de B
-      const resPatch = await fetch(`${baseUrl}/api/payment-lists/${listBId}/status`, {
+      const resPatch = await fetch(`${baseUrl}/api/payment-lists/${listB.id}/status`, {
         method: "PATCH",
         headers: getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha),
         body: JSON.stringify({ toStatus: "pending" }),
       });
 
-      // Then: Todas as requisições devem retornar HTTP 404 (ou 403 Forbidden) deny-by-default
-      expect([403, 404]).toContain(resGet.status);
-      expect([403, 404]).toContain(resPatch.status);
+      // Then: Todas as requisições devem retornar HTTP 404 deny-by-default
+      expect(resGet.status).toBe(404);
+      expect(resPatch.status).toBe(404);
     });
 
     it("LIST-TECH-OWN-01: Restrição de Escopo de Técnico (scope: own) e Ocultação de Faturamento Global", async () => {
@@ -694,28 +703,19 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       });
 
       // When: Executa o script de seed discovery sem a flag --apply
-      try {
-        // @ts-expect-error script created in T05
-        const { discoverLegacySeed } = await import("../../scripts/seed-legacy-counters.js");
-        const report = await discoverLegacySeed({ apply: false });
-        expect(report.scanned).toBeGreaterThan(0);
-        expect(report.seedByWorkspace[FIXTURES_004.wsAlpha]).toBe(450);
-      } catch (err: any) {
-        // Em T01/T02 o script ainda não existe
-        expect(err.code).toBe("ERR_MODULE_NOT_FOUND");
-      }
+      // @ts-expect-error script created in T05
+      const { discoverLegacySeed } = await import("../../scripts/seed-legacy-counters.js");
+      const report = await discoverLegacySeed({ apply: false });
+      expect(report.scanned).toBeGreaterThan(0);
+      expect(report.seedByWorkspace[FIXTURES_004.wsAlpha]).toBe(450);
     });
 
     it("LIST-NUMBER-SEED-AMBIGUOUS-SKIP-01: Ignorar Códigos sem Workspace Determinístico no Seed", async () => {
       // Given: Código em production_lists sem workspace_id
-      try {
-        // @ts-expect-error script created in T05
-        const { discoverLegacySeed } = await import("../../scripts/seed-legacy-counters.js");
-        const report = await discoverLegacySeed({ apply: false });
-        expect(report.skippedAmbiguous).toBeDefined();
-      } catch (err: any) {
-        expect(err.code).toBe("ERR_MODULE_NOT_FOUND");
-      }
+      // @ts-expect-error script created in T05
+      const { discoverLegacySeed } = await import("../../scripts/seed-legacy-counters.js");
+      const report = await discoverLegacySeed({ apply: false });
+      expect(report.skippedAmbiguous).toBeDefined();
     });
 
     it("LIST-NUMBER-LEGACY-SEED-01: Descoberta de Maior Código Legado Compatível como Seed", async () => {
@@ -728,27 +728,23 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       });
 
       // When: Script executado com --apply
-      try {
-        // @ts-expect-error script created in T05
-        const { discoverLegacySeed } = await import("../../scripts/seed-legacy-counters.js");
-        const report = await discoverLegacySeed({ apply: true });
-        expect(report.seedByWorkspace[FIXTURES_004.wsAlpha]).toBe(250);
+      // @ts-expect-error script created in T05
+      const { discoverLegacySeed } = await import("../../scripts/seed-legacy-counters.js");
+      const report = await discoverLegacySeed({ apply: true });
+      expect(report.seedByWorkspace[FIXTURES_004.wsAlpha]).toBe(250);
 
-        // Then: A primeira lista canônica criada recebe L000251
-        const res = await fetch(`${baseUrl}/api/payment-lists`, {
-          method: "POST",
-          headers: getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha),
-          body: JSON.stringify({
-            clientId: FIXTURES_004.clientA.id,
-            currencyCode: "EUR",
-          }),
-        });
-        expect(res.status).toBe(201);
-        const data = await res.json();
-        expect(data.listNumber).toBe("L000251");
-      } catch (err: any) {
-        expect(err.code).toBe("ERR_MODULE_NOT_FOUND");
-      }
+      // Then: A primeira lista canônica criada recebe L000251
+      const res = await fetch(`${baseUrl}/api/payment-lists`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha),
+        body: JSON.stringify({
+          clientId: FIXTURES_004.clientA.id,
+          currencyCode: "EUR",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const data = await res.json();
+      expect(data.listNumber).toBe("L000251");
     });
 
     it("LIST-NUMBER-NO-COLLISION-01: Prevenção de Colisão com Histórico Legado", async () => {
@@ -778,14 +774,10 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       });
 
       // When: Algoritmo de seed é executado
-      try {
-        // @ts-expect-error script created in T05
-        const { discoverLegacySeed } = await import("../../scripts/seed-legacy-counters.js");
-        const report = await discoverLegacySeed({ apply: false });
-        expect(report.malformedIgnored).toBeGreaterThan(0);
-      } catch (err: any) {
-        expect(err.code).toBe("ERR_MODULE_NOT_FOUND");
-      }
+      // @ts-expect-error script created in T05
+      const { discoverLegacySeed } = await import("../../scripts/seed-legacy-counters.js");
+      const report = await discoverLegacySeed({ apply: false });
+      expect(report.malformedIgnored).toBeGreaterThan(0);
     });
 
     it("LIST-CURRENCY-REQUIRED-01: Rejeição de Criação de Lista sem Moeda Válida (3 Letras Maiúsculas)", async () => {

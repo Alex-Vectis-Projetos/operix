@@ -93,7 +93,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
 ### Fase 4: Domínio de Lista de Pagamento, Numeração Atômica & Claims
 - [ ] **T07**: Implementar serviço canônico `backend/src/services/paymentListService.ts`:
   - Alocador atômico sequencial `L0xxxxx` com lock pessimista via `TenantSequenceCounter`.
-  - Criação de lista e gestão de claims em `PaymentListEntryClaim` (`reserved` $\rightarrow$ `consumed` $\rightarrow$ `released`).
+  - Criação de lista e gestão de claims em `PaymentListEntryClaim` (`reserved` $\rightarrow$ `consumed` OU `reserved` $\rightarrow$ `released`; `consumed` é terminal).
   - Governança estrita da máquina de estados: `draft` $\rightarrow$ `under_review` $\rightarrow$ `confronted` $\rightarrow$ `pending` $\rightarrow$ `paid`.
   - Autoridade restrita para `paid` (`owner`/`admin`), operação idempotente sem mutações em `financial_records`.
   - Liberação de claims no cancelamento da lista.

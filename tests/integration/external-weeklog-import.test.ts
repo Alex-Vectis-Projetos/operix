@@ -242,25 +242,30 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
     });
 
     it("IMPORT-WEEKLOG-COMMIT-IDEMPOTENT-01: Idempotência de Retry no Commit de Importação Operacional Externa", async () => {
-      // Given: Lote já efetivado anteriormente
+      // Given: Lote de importação operacional externa em staging
       const importId = "44000000-0000-4000-8000-000000000032";
-
-      // When: Dispara duas chamadas consecutivas de commit
       const headers = getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha);
+
+      // When: Primeiro commit
       const res1 = await fetch(`${baseUrl}/api/external-operational-imports/${importId}/commit`, {
         method: "POST",
         headers,
         body: JSON.stringify({}),
       });
+      // Then: Primeiro commit retorna HTTP 201 Created (materialização)
+      expect(res1.status).toBe(201);
+      const data1 = await res1.json();
+
+      // When: Retry da MESMA operação já materializada
       const res2 = await fetch(`${baseUrl}/api/external-operational-imports/${importId}/commit`, {
         method: "POST",
         headers,
         body: JSON.stringify({}),
       });
-
-      // Then: Ambas retornam HTTP 200 com os mesmos dados sem duplicar
-      expect(res1.status).toBe(200);
+      // Then: Retry idempotente retorna HTTP 200 OK com exatamente os mesmos dados sem duplicar
       expect(res2.status).toBe(200);
+      const data2 = await res2.json();
+      expect(data2.materializationId || data2.weeklogId).toBe(data1.materializationId || data1.weeklogId);
     });
 
     it("IMPORT-WEEKLOG-CONCURRENT-COMMIT-01: Prevenção de Materialização Concorrente Duplicada", async () => {
@@ -282,8 +287,12 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
         }),
       ]);
 
-      // Then: Exatamente uma obtém 200 (ou ambas convergem idempotentemente), sem duplicatas no banco
-      expect([res1.status, res2.status]).toContain(200);
+      // Then: Ambas convergem para sucesso (uma 201 e uma 200 idempotente, ou ambas 200), sem erro 500 nem colisão vazada
+      expect([200, 201]).toContain(res1.status);
+      expect([200, 201]).toContain(res2.status);
+      const data1 = await res1.json();
+      const data2 = await res2.json();
+      expect(data1.weeklogId || data1.materializationId).toBe(data2.weeklogId || data2.materializationId);
     });
 
     it("IMPORT-WEEKLOG-COVERAGE-01: Validação Formal com Snapshot Congelado de Cobertura", async () => {
@@ -376,8 +385,8 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
         }),
       });
 
-      // Then: Rejeitada com HTTP 422 (ou 404/405 se rota de criação direta não existe)
-      expect([404, 405, 422]).toContain(res.status);
+      // Then: Rejeitada com HTTP 422 Unprocessable Entity
+      expect(res.status).toBe(422);
     });
   });
 });

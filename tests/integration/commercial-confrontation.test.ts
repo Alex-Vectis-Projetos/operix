@@ -447,24 +447,56 @@ describe("Spec 004 — Commercial Confrontation & Disputes Suite (T01/T02 Baseli
     });
 
     it("NO-FINANCE-SIDE-EFFECT-04: Ausência Estrita de Side-Effects Financeiros Automáticos", async () => {
-      // Given: Contagem inicial de financial_records
-      const initialCount = await prisma.financialRecord.count({
+      // Given: Contagens iniciais financeiras e de distribuição
+      const initialFinancialCount = await prisma.financialRecord.count({
         where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
       });
+      const initialDistributionCount = await prisma.serviceOrderDistribution.count();
 
-      // When: Executa ações do ciclo da Spec 004
-      const listId = "44000000-0000-4000-8000-000000000064";
-      await fetch(`${baseUrl}/api/payment-lists/${listId}/status`, {
+      // When: Executa o ciclo canônico completo da Spec 004
+      // 1. Criar Lista
+      const createRes = await fetch(`${baseUrl}/api/payment-lists`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
+        body: JSON.stringify({
+          clientId: FIXTURES_004_CONFRONT.clientA.id,
+          currencyCode: "EUR",
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const list = await createRes.json();
+
+      // 2. Executar Confronto
+      const confrontRes = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confront`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
+      });
+      expect(confrontRes.status).toBe(200);
+
+      // 3. Avançar para Pending
+      const pendingRes = await fetch(`${baseUrl}/api/payment-lists/${list.id}/status`, {
+        method: "PATCH",
+        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
+        body: JSON.stringify({ toStatus: "pending" }),
+      });
+      expect(pendingRes.status).toBe(200);
+
+      // 4. Liquidar como Paid
+      const paidRes = await fetch(`${baseUrl}/api/payment-lists/${list.id}/status`, {
         method: "PATCH",
         headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
         body: JSON.stringify({ toStatus: "paid" }),
       });
+      expect(paidRes.status).toBe(200);
 
-      // Then: financial_records permanece estritamente inalterada
-      const finalCount = await prisma.financialRecord.count({
+      // Then: Provar ausência estrita de mutações em tabelas contábeis/financeiras
+      const finalFinancialCount = await prisma.financialRecord.count({
         where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
       });
-      expect(finalCount).toBe(initialCount);
+      const finalDistributionCount = await prisma.serviceOrderDistribution.count();
+
+      expect(finalFinancialCount).toBe(initialFinancialCount);
+      expect(finalDistributionCount).toBe(initialDistributionCount);
     });
   });
 });
