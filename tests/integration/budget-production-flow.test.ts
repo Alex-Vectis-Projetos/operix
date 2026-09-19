@@ -679,6 +679,21 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
     });
 
     it("PO-LINEAGE-02: Excluir BudgetRevision referenciada por ProductionOrder é bloqueado por ON DELETE RESTRICT", async () => {
+      // 1. Prova estrutural no PostgreSQL:
+      // Consulta pg_constraint para verificar que a foreign key composta liga production_orders -> budget_revisions com ON DELETE RESTRICT
+      const fkConstraints: Array<{ conname: string; def: string }> = await prisma.$queryRawUnsafe(`
+        SELECT conname, pg_get_constraintdef(oid) as def 
+        FROM pg_constraint 
+        WHERE conrelid = 'production_orders'::regclass AND contype = 'f';
+      `);
+
+      const lineageFk = fkConstraints.find(
+        (c) =>
+          c.def.includes("FOREIGN KEY (budget_revision_id, budget_id) REFERENCES budget_revisions(id, budget_id)") &&
+          c.def.includes("ON DELETE RESTRICT")
+      );
+      expect(lineageFk).toBeDefined();
+
       // Neutraliza os ponteiros de Budget (currentRevisionId e approvedRevisionId) para isolar
       // estritamente o bloqueio da Foreign Key da ProductionOrder (production_orders_budget_revision_id_budget_id_fkey)
       await prisma.budget.update({
@@ -689,15 +704,14 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         },
       });
 
+      // 2. Prova de runtime: Prisma retorna P2003 (contrato semântico estável de violação de FK)
       try {
         await prisma.budgetRevision.delete({
           where: { id: "r1111111-1111-4111-8111-111111111111" },
         });
         expect.unreachable("Deveria ter falhado por restrição de FK da ProductionOrder");
       } catch (err: any) {
-        // Valida que a falha é especificamente violação de FK (P2003) da production_orders
         expect(err.code).toBe("P2003");
-        expect(err.message).toMatch(/production_orders_budget_revision_id_budget_id_fkey|production_orders/i);
       } finally {
         // Restaura ponteiros no Budget para integridade dos testes subsequentes
         await prisma.budget.update({
@@ -708,6 +722,20 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           },
         });
       }
+
+      // 3. Prova de efeito real: dados e vínculo permanecem preservados no banco
+      const survivingRevision = await prisma.budgetRevision.findUnique({
+        where: { id: "r1111111-1111-4111-8111-111111111111" },
+      });
+      expect(survivingRevision).not.toBeNull();
+      expect(survivingRevision?.id).toBe("r1111111-1111-4111-8111-111111111111");
+
+      const linkedPo = await prisma.productionOrder.findFirst({
+        where: { budgetRevisionId: "r1111111-1111-4111-8111-111111111111" },
+      });
+      expect(linkedPo).not.toBeNull();
+      expect(linkedPo?.budgetId).toBe("b1111111-1111-4111-8111-111111111111");
+      expect(linkedPo?.budgetRevisionId).toBe("r1111111-1111-4111-8111-111111111111");
     });
   });
 
