@@ -82,7 +82,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Migration forward-only `20260921120000_spec004_payment_list_domain` aplicada com checks e partial indexes.
   - Hardening forward-only `20260921130000_spec004_relational_hardening`: FK de resultado para `(runId, paymentListId, workspaceId)`, estado `ambiguous_match` e lifecycle de claims estrito; upgrade real preservando duas `WeeklogEntry` da Spec 003 e FKs cross-tenant cobertos estruturalmente.
 ### Fase 3: Storage MinIO & Ingestão Externa (Staging Relacional)
-- [ ] **T05**: Implementar ingestão externa governada e staging relacional (implementação estática concluída; validação de integração pendente: PostgreSQL de testes indisponível):
+- [x] **T05**: Implementar ingestão externa governada e staging relacional (validação PostgreSQL concluída em banco local descartável):
   - `backend/src/services/externalListImportService.ts`: upload MinIO, hash SHA-256, extração IA preservando `rawTotalText` e persistência em `ExternalListImportItem`.
   - `backend/src/services/externalOperationalImportService.ts`: esteira de WEEKLOG externo com staging revisável, sem materialização em `Weeklog` + `WeeklogEntry`. A materialização idempotente, `coverageSnapshot` congelado e `WeeklogValidation` formal permanecem em fatia posterior autorizada.
   - Endpoints REST de importação e edição interativa de staging.
