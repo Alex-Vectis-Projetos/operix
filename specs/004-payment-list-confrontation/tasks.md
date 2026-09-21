@@ -68,7 +68,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Inelegibilidade de entradas tardias para cobertura em validação antiga (`IMPORT-WEEKLOG-LATE-ENTRY-01`).
   - Rejeição de aprovação direta sem evidência auditável (`IMPORT-WEEKLOG-NO-DIRECT-APPROVE-01`).
 
-### Fase 2: Schema Prisma, Migração Forward-Only & CLI de Seed
+### Fase 2: Schema Prisma e Migração Forward-Only
 - [x] **T04**: Atualizar `backend/prisma/schema.prisma` com os modelos canônicos e aplicar migração forward-only:
   - `PaymentList` com `@@unique([id, workspaceId])`, `@@unique([workspaceId, listNumber])`, `sourceDocumentTotal`, `recognizedTotal` e `currencyCode` sem default.
   - `PaymentListItem` com composite keys `@@unique([id, paymentListId, workspaceId])` e `@@unique([id, workspaceId])`.
@@ -81,19 +81,15 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Flexibilização de `WeeklogEntry` com discriminador `sourceType` ("production_order" | "external_import") e chave única `externalImportItemId`.
   - Migration forward-only `20260921120000_spec004_payment_list_domain` aplicada com checks e partial indexes.
   - Hardening forward-only `20260921130000_spec004_relational_hardening`: FK de resultado para `(runId, paymentListId, workspaceId)`, estado `ambiguous_match` e lifecycle de claims estrito; upgrade real preservando duas `WeeklogEntry` da Spec 003 e FKs cross-tenant cobertos estruturalmente.
-- [ ] **T05**: Criar script CLI `scripts/seed-legacy-counters.ts`:
-  - CLI com flags: default DRY-RUN (exibe relatório) e `--apply` (grava em `tenant_sequence_counters`).
-  - Escopo estritamente determinístico: ignora códigos sem workspace vinculado.
-  - Aplicar migration no banco de desenvolvimento e validar integridade relacional.
-
 ### Fase 3: Storage MinIO & Ingestão Externa (Staging Relacional)
-- [ ] **T06**: Implementar serviços de importação e staging relacional:
+- [ ] **T05**: Implementar ingestão externa governada e staging relacional:
   - `backend/src/services/externalListImportService.ts`: upload MinIO, hash SHA-256, extração IA preservando `rawTotalText` e persistência em `ExternalListImportItem`.
-  - `backend/src/services/externalOperationalImportService.ts`: esteira de WEEKLOG externo com materialização idempotente em `Weeklog` + `WeeklogEntry` (`sourceType = 'external_import'`), geração de `coverageSnapshot` congelado e criação de `WeeklogValidation` formal (`validationMethod = "external_import_review"`).
+  - `backend/src/services/externalOperationalImportService.ts`: esteira de WEEKLOG externo com staging revisável, materialização idempotente em `Weeklog` + `WeeklogEntry` (`sourceType = 'external_import'`), geração de `coverageSnapshot` congelado e criação de `WeeklogValidation` formal (`validationMethod = "external_import_review"`).
   - Endpoints REST de importação e edição interativa de staging.
+  - Antes de promoção física, `storagePath` e metadados derivados podem permanecer `NULL`; após promoção bem-sucedida, o serviço preenche a proveniência real. Antes de `reviewed`/commit, valida cliente tenant-safe, moeda ISO, técnico membro, `reviewedOperationalSiteKey` e `reviewedDeliveredAt`.
 
 ### Fase 4: Domínio de Lista de Pagamento, Numeração Atômica & Claims
-- [ ] **T07**: Implementar serviço canônico `backend/src/services/paymentListService.ts`:
+- [ ] **T06**: Implementar serviço canônico `backend/src/services/paymentListService.ts` e o seed discovery determinístico `scripts/seed-legacy-counters.ts` (DRY-RUN por default):
   - Alocador atômico sequencial `L0xxxxx` com lock pessimista via `TenantSequenceCounter`.
   - Criação de lista e gestão de claims em `PaymentListEntryClaim` (`reserved` $\rightarrow$ `consumed` OU `reserved` $\rightarrow$ `released`; `consumed` é terminal).
   - Governança estrita da máquina de estados: `draft` $\rightarrow$ `under_review` $\rightarrow$ `confronted` $\rightarrow$ `pending` $\rightarrow$ `paid`.
@@ -103,7 +99,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Endpoints REST: `GET /api/payment-lists`, `GET /api/payment-lists/:id`, `POST /api/payment-lists`, `PATCH /api/payment-lists/:id/status`.
 
 ### Fase 5: Motor de Confronto Comercial Versionado
-- [ ] **T08**: Implementar serviço de confronto `backend/src/services/confrontationService.ts`:
+- [ ] **T07**: Implementar serviço de confronto `backend/src/services/confrontationService.ts`:
   - Criação de rodadas versionadas `PaymentListConfrontationRun`.
   - Verificação de idempotência e bloqueio de rerun caso existam decisões humanas ativas (`decision != 'none'`).
   - Algoritmo de normalização e pareamento único por Veículo (VIN / Placa), Serviços e Valor.
@@ -113,31 +109,31 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Validação de invariante: bloqueio de transição para `pending` caso existam disputas em aberto (`CONTEST` ou `REQUEST_RECTIFICATION`).
 
 ### Fase 6: Integração de Retificação da Lista com a Spec 003
-- [ ] **T09**: Implementar integração da ação `REQUEST_RECTIFICATION` no `confrontationService.ts`:
+- [ ] **T08**: Implementar integração da ação `REQUEST_RECTIFICATION` no `confrontationService.ts`:
   - Resolução da `WeeklogEntry` original. Se `sourceType == 'external_import'`, recusar com HTTP 422.
   - Invocação transacional de `rectifyWeeklogEntry` da Spec 003.
   - Registro de `reopenedProductionOrderId` e `targetExecutionSequence` em `PaymentListConfrontationResult`.
 
 ### Fase 7: Downstream Legacy Adapter & Transição de Call Sites Legados
-- [ ] **T10**: Implementar `backend/src/services/downstreamPaymentOrderAdapter.ts`:
+- [ ] **T09**: Implementar `backend/src/services/downstreamPaymentOrderAdapter.ts`:
   - Espelhamento estritamente unidirecional de `PaymentListItem` na tabela legada `payment_orders`.
   - Sanitização de `backend/src/routes/paymentOrders.ts`: aplicar `RequestContext`, converter mutações legadas para HTTP 410 Gone / 409 Conflict e tornar rotas de leitura seguras.
   - Desativação do endpoint destrutivo `/finance/reconciliations/run`.
 
 ### Fase 8: Frontend Client & Eliminação do Supabase Client
-- [ ] **T11**: Implementar cliente de API e hooks TanStack Query:
+- [ ] **T10**: Implementar cliente de API e hooks TanStack Query:
   - Criar `src/hooks/usePaymentLists.ts` e `src/hooks/useConfrontation.ts`.
   - Erradicar 100% dos imports de `@/integrations/supabase/client` em `PaymentOrdersTable.tsx`.
   - Adaptar chamadas de mutação para as rotas REST autoritativas Express.
 
 ### Fase 9: Interface de Revisão e Confronto Comercial em Operações
-- [ ] **T12**: Adaptar interface em `src/pages/PaymentOrdersPage.tsx`:
+- [ ] **T11**: Adaptar interface em `src/pages/PaymentOrdersPage.tsx`:
   - Tela de conferência lado a lado: visualizador de documento (zoom/rotação) + tabela editável de staging relacional.
   - Integração dos componentes de confronto ([FusaoManualTab.tsx](file:///c:/Users/Gustavo%20Fugulin/Downloads/operix/src/components/confronto/FusaoManualTab.tsx), [PendentesTab.tsx](file:///c:/Users/Gustavo%20Fugulin/Downloads/operix/src/components/confronto/PendentesTab.tsx), [HistoricoTab.tsx](file:///c:/Users/Gustavo%20Fugulin/Downloads/operix/src/components/confronto/HistoricoTab.tsx)) dentro da visualização da Lista em Operações.
   - Aplicação estrita da visão do técnico (`scope: own`): ocultação de faturamento global e margens.
 
 ### Fase 10: Quality Gates, Verificação e Handoff
-- [ ] **T13**: Executar suíte completa de validação:
+- [ ] **T12**: Executar suíte completa de validação:
   - Execução de 100% dos testes unitários e de integração (`npm run test:run`).
   - Verificação de tipos TypeScript (`npm run typecheck`).
   - Verificação de formatação e linter (`npm run lint`).

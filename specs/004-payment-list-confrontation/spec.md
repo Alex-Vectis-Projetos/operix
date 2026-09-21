@@ -95,6 +95,8 @@ flowchart TD
 - **INV-018 (Snapshot Congelado de Cobertura de WEEKLOG Externo)**: A validação formal de importação externa registra em `coverageSnapshot` o schema completo com array de entradas aprovadas, `sourceImportId` e `sha256`. Nenhuma entrada inserida a posteriori herda essa validação.
 - **INV-019 (Unicidade Estrutural de Fonte Externa)**: Um `ExternalOperationalImportItem` só pode materializar uma única `WeeklogEntry` (`UNIQUE(external_import_item_id)`). Retries de commit são rigorosamente idempotentes.
 - **INV-020 (Autoridade e Idempotência da Liquidação)**: A transição para `paid` é restrita a usuários `owner` e `admin`, opera de forma idempotente e não produz side-effects contábeis.
+- **INV-021 (Proveniência de Storage sem Chaves Fictícias)**: Antes da promoção física, `storagePath`, hash, MIME e tamanho podem ser `NULL`; após promoção bem-sucedida, o serviço T05 deve persistir os quatro valores derivados do objeto real. `failed` nunca recebe path sentinela.
+- **INV-022 (Authority Revisada de Staging)**: `ExternalListImport` concentra cliente e moeda revisados para a lista single-client/single-currency. `ExternalOperationalImportItem` preserva raw separado de authority revisada, incluindo cliente, moeda, site, técnico, veículo, serviços, total e `reviewedDeliveredAt`; somente o serviço T05 pode exigir esses campos antes de `reviewed` ou materialização.
 
 ---
 
@@ -307,10 +309,12 @@ model ExternalListImport {
   workspaceId         String                  @map("workspace_id")
   paymentListId       String?                 @map("payment_list_id")
   fileName            String                  @map("file_name")
-  storagePath         String                  @map("storage_path")
-  fileSha256          String                  @map("file_sha256")
-  mimeType            String                  @map("mime_type")
-  sizeBytes           Int                     @map("size_bytes")
+  storagePath         String?                 @map("storage_path")
+  fileSha256          String?                 @map("file_sha256")
+  mimeType            String?                 @map("mime_type")
+  sizeBytes           Int?                    @map("size_bytes")
+  reviewedClientId    String?                 @map("reviewed_client_id")
+  reviewedCurrencyCode String?                @map("reviewed_currency_code")
   status              ImportStatus            @default(uploaded)
   rawOcrResult        Json?                   @map("raw_ocr_result")
   errorMessage        String?                 @map("error_message")
@@ -320,6 +324,7 @@ model ExternalListImport {
 
   workspace           Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   paymentList         PaymentList?            @relation(fields: [paymentListId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  reviewedClient      Client?                 @relation("ExternalListImportReviewedClient", fields: [reviewedClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   items               ExternalListImportItem[]
 
   @@unique([id, workspaceId])
@@ -378,10 +383,10 @@ model ExternalOperationalImport {
   id                  String                          @id @default(uuid())
   workspaceId         String                          @map("workspace_id")
   fileName            String                          @map("file_name")
-  storagePath         String                          @map("storage_path")
-  fileSha256          String                          @map("file_sha256")
-  mimeType            String                          @map("mime_type")
-  sizeBytes           Int                             @map("size_bytes")
+  storagePath         String?                         @map("storage_path")
+  fileSha256          String?                         @map("file_sha256")
+  mimeType            String?                         @map("mime_type")
+  sizeBytes           Int?                            @map("size_bytes")
   status              ImportStatus                    @default(uploaded)
   rawOcrResult        Json?                           @map("raw_ocr_result")
   errorMessage        String?                         @map("error_message")
@@ -403,16 +408,26 @@ model ExternalOperationalImportItem {
   importId              String                    @map("import_id")
   
   rawLicensePlate       String?                   @map("raw_license_plate")
+  rawVin                String?                   @map("raw_vin")
   rawCarName            String?                   @map("raw_car_name")
+  rawClientName         String?                   @map("raw_client_name")
+  rawCurrencyCode       String?                   @map("raw_currency_code")
+  rawOperationalSiteKey String?                   @map("raw_operational_site_key")
   rawTechnician         String?                   @map("raw_technician")
   rawWeek               String?                   @map("raw_week")
+  rawDeliveredAtText    String?                   @map("raw_delivered_at_text")
   rawServices           Json?                     @map("raw_services")
   rawTotalText          String?                   @map("raw_total_text")
   fieldConfidence       Json?                     @map("field_confidence")
   
   reviewedLicensePlate  String?                   @map("reviewed_license_plate")
+  reviewedVin           String?                   @map("reviewed_vin")
   reviewedCarName       String?                   @map("reviewed_car_name")
+  reviewedClientId      String?                   @map("reviewed_client_id")
+  reviewedCurrencyCode  String?                   @map("reviewed_currency_code")
+  reviewedOperationalSiteKey String?              @map("reviewed_operational_site_key")
   reviewedTechnicianUserId String?                @map("reviewed_technician_user_id")
+  reviewedDeliveredAt   DateTime?                 @map("reviewed_delivered_at")
   reviewedServices      Json?                     @map("reviewed_services")
   reviewedTotal         Decimal?                  @map("reviewed_total") @db.Decimal(12, 2)
   
@@ -421,6 +436,7 @@ model ExternalOperationalImportItem {
   reviewedAt            DateTime?                 @map("reviewed_at")
 
   import                ExternalOperationalImport @relation(fields: [importId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  reviewedClient        Client?                    @relation("ExternalOperationalImportItemReviewedClient", fields: [reviewedClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   weeklogEntries        WeeklogEntry[]
 
   @@index([workspaceId, importId])

@@ -15,9 +15,11 @@ O plano divide a entrega em **fatias verticais progressivas e auditáveis**:
 1. **Fatia Relacional & Migração Forward-Only**:
    - Modelos canônicos: `PaymentList` (com `@@unique([id, workspaceId])` e `@@unique([workspaceId, listNumber])`), `PaymentListItem` (com `@@unique([id, paymentListId, workspaceId])`), `PaymentListEntryClaim`, `PaymentListConfrontationRun`, `PaymentListConfrontationResult`, `ExternalListImport`, `ExternalListImportItem`, `ExternalOperationalImport`, `ExternalOperationalImportItem`, `TenantSequenceCounter`.
    - Evolução de `WeeklogEntry`: inclusão de `sourceType` ("production_order" | "external_import") com XOR estrutural e unicidade em `externalImportItemId`.
-   - Script seguro de seed discovery determinístico para continuidade da numeração sequencial histórica `L0xxxxx` (default DRY-RUN).
+   - `20260921140000_spec004_import_staging_unblock`: proveniência nullable antes da promoção, authority revisada por staging e FKs compostas de cliente tenant-safe, sem alterar dados existentes.
 2. **Fatia de Storage & Ingestão com Staging Relacional**:
    - Upload governado no MinIO, cálculo SHA-256 e persistência em `ExternalListImport` + `ExternalListImportItem` (preservando `rawTotalText`).
+   - O serviço T05 cria cabeçalho sem path fictício quando a promoção falha; depois de promoção bem-sucedida, persiste `storagePath`, `fileSha256`, `mimeType` e `sizeBytes`. Antes de marcar `reviewed` ou materializar, valida moeda ISO, cliente do tenant e todos os campos revisados exigidos.
+   - Para WEEKLOG externo, `reviewedDeliveredAt` determina a semana operacional porque a Spec 003 usa `WeeklogEntry.deliveredAt` como instante canônico. `reviewedTechnicianUserId` é validado via `Membership`/`AppUser` pelo serviço: a identidade atual não possui chave composta segura compatível com o `User.id` operacional.
 3. **Fatia de Domínio da Lista, Numeração Atômica & Claims Semânticos**:
    - Máquina de estados formal: `draft` $\rightarrow$ `under_review` $\rightarrow$ `confronted` $\rightarrow$ `pending` $\rightarrow$ `paid`.
    - Alocador sequencial monotônico via lock pessimista no PostgreSQL.
@@ -153,7 +155,7 @@ O plano divide a entrega em **fatias verticais progressivas e auditáveis**:
   - Ingestão, cálculo de hash SHA-256, MinIO, extração via IA e população em `ExternalListImportItem` (preservando `rawTotalText`).
   - Validação estrita de campos obrigatórios antes do commit.
 - `externalOperationalImportService.ts`:
-  - Ingestão de folhas de WEEKLOG externo, revisão humana e materialização canônica idempotente em `Weeklog` + `WeeklogEntry` (`sourceType = 'external_import'`).
+  - Ingestão de folhas de WEEKLOG externo, revisão humana e materialização canônica idempotente em `Weeklog` + `WeeklogEntry` (`sourceType = 'external_import'`); `reviewedOperationalSiteKey` é a key canônica já adotada na Spec 003, sem nova entidade Site.
   - Criação de rodada formal em `WeeklogValidation` com `validationMethod = "external_import_review"`, `coverageSnapshot` congelado e chancela auditável do gestor.
 - `downstreamPaymentOrderAdapter.ts`:
   - Espelhamento estritamente unidirecional (`canonical` $\rightarrow$ `payment_orders`).
