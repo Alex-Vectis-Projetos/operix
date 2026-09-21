@@ -377,6 +377,20 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
       expect(aiImportExtractionProvider.extractListDocument).not.toHaveBeenCalled();
     });
 
+    it("IMPORT-SIZE-01: multipart acima do limite é rejeitado pela rota antes de staging", async () => {
+      const form = new FormData();
+      form.set("file", new Blob([Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(10 * 1024 * 1024)])], { type: "application/pdf" }), "oversized.pdf");
+      const token = signAccessToken({ id: FIXTURES_004_IMPORT.ownerA.userId, email: FIXTURES_004_IMPORT.ownerA.email, role: "admin" });
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "X-Workspace-Id": FIXTURES_004_IMPORT.wsAlpha },
+        body: form,
+      });
+      expect(res.status).toBe(422);
+      expect((await res.json()).code).toBe("IMPORT_FILE_SIZE_INVALID");
+      expect(minioImportDocumentStorage.put).not.toHaveBeenCalled();
+    });
+
     it("IMPORT-STORAGE-FAILURE-01: falha de promoção preserva cabeçalho failed sem path fictício", async () => {
       vi.spyOn(minioImportDocumentStorage, "put").mockRejectedValueOnce(new Error("synthetic storage failure"));
       const res = await fetch(`${baseUrl}/api/payment-lists/imports`, {

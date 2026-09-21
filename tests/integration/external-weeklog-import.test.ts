@@ -44,6 +44,17 @@ const FIXTURES_004_WEEKLOG = {
     appUserId: "42000000-0000-4000-8000-000000000041",
     email: "foreign.tech.wlimport@example.com",
   },
+  activeTechnician: {
+    userId: "41000000-0000-4000-8000-000000000042",
+    appUserId: "42000000-0000-4000-8000-000000000042",
+    email: "active.tech.wlimport@example.com",
+  },
+  inactiveTechnician: {
+    userId: "41000000-0000-4000-8000-000000000043",
+    appUserId: "42000000-0000-4000-8000-000000000043",
+    email: "inactive.tech.wlimport@example.com",
+  },
+  wsBravo: "40000000-0000-4000-8000-000000000041",
   clientA: {
     id: "43000000-0000-4000-8000-000000000030",
     name: "Cliente Parceiro Oficina Externa",
@@ -76,6 +87,15 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
       },
     });
 
+    for (const actor of [FIXTURES_004_WEEKLOG.activeTechnician, FIXTURES_004_WEEKLOG.inactiveTechnician]) {
+      await prisma.user.create({
+        data: {
+          id: actor.userId, email: actor.email, fullName: actor.email.split("@")[0], role: "user", passwordHash: "hash-spec004-tech-test", isActive: true,
+          appUser: { create: { id: actor.appUserId, email: actor.email, name: actor.email.split("@")[0] } },
+        },
+      });
+    }
+
     await prisma.user.create({
       data: {
         id: FIXTURES_004_WEEKLOG.foreignTechnician.userId,
@@ -101,6 +121,20 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
         },
       },
     });
+
+    await prisma.workspace.create({
+      data: {
+        id: FIXTURES_004_WEEKLOG.wsBravo,
+        name: "Workspace Bravo External WL 004",
+        timezone: "Europe/Paris",
+        ownerUserId: FIXTURES_004_WEEKLOG.foreignTechnician.appUserId,
+        memberships: { create: [{ id: "mem-004-wl-foreign-bravo", userId: FIXTURES_004_WEEKLOG.foreignTechnician.appUserId, role: "technician", status: "active" }] },
+      },
+    });
+    await prisma.membership.createMany({ data: [
+      { id: "mem-004-wl-active-alpha", workspaceId: FIXTURES_004_WEEKLOG.wsAlpha, userId: FIXTURES_004_WEEKLOG.activeTechnician.appUserId, role: "technician", status: "active" },
+      { id: "mem-004-wl-inactive-alpha", workspaceId: FIXTURES_004_WEEKLOG.wsAlpha, userId: FIXTURES_004_WEEKLOG.inactiveTechnician.appUserId, role: "technician", status: "inactive" },
+    ] });
 
     await prisma.client.create({
       data: {
@@ -188,13 +222,13 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
       where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha },
     });
     await prisma.membership.deleteMany({
-      where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha },
+      where: { workspaceId: { in: [FIXTURES_004_WEEKLOG.wsAlpha, FIXTURES_004_WEEKLOG.wsBravo] } },
     });
     await prisma.workspace.deleteMany({
-      where: { id: FIXTURES_004_WEEKLOG.wsAlpha },
+      where: { id: { in: [FIXTURES_004_WEEKLOG.wsAlpha, FIXTURES_004_WEEKLOG.wsBravo] } },
     });
     await prisma.user.deleteMany({
-      where: { id: { in: [FIXTURES_004_WEEKLOG.ownerA.userId, FIXTURES_004_WEEKLOG.foreignTechnician.userId] } },
+      where: { id: { in: [FIXTURES_004_WEEKLOG.ownerA.userId, FIXTURES_004_WEEKLOG.foreignTechnician.userId, FIXTURES_004_WEEKLOG.activeTechnician.userId, FIXTURES_004_WEEKLOG.inactiveTechnician.userId] } },
     });
   }
 
@@ -249,9 +283,12 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
       const item = importData.items[0];
       const before = await Promise.all([
         prisma.paymentList.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentListItem.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
         prisma.weeklog.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
         prisma.weeklogEntry.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
         prisma.weeklogValidation.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.financialRecord.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
       ]);
       const rejected = await fetch(`${baseUrl}/api/external-operational-imports/${importData.importId}/rows`, {
         method: "PATCH", headers,
@@ -278,10 +315,31 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
       expect(reviewBody.items[0].reviewedDeliveredAt).toBeDefined();
       expect(await Promise.all([
         prisma.paymentList.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentListItem.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
         prisma.weeklog.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
         prisma.weeklogEntry.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
         prisma.weeklogValidation.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.financialRecord.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
       ])).toEqual(before);
+    });
+
+    it("IMPORT-TECH-MEMBERSHIP-01: aceita membro técnico ativo e rejeita membro inativo ou de outro workspace", async () => {
+      const headers = getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha);
+      const create = await fetch(`${baseUrl}/api/external-operational-imports`, {
+        method: "POST", headers,
+        body: JSON.stringify({ fileName: "tech-membership.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\ntechnician membership").toString("base64") }),
+      });
+      const { importId, items } = await create.json();
+      const patch = (reviewedTechnicianUserId: string) => fetch(`${baseUrl}/api/external-operational-imports/${importId}/rows`, {
+        method: "PATCH", headers,
+        body: JSON.stringify({ rows: [{ id: items[0].id, patch: { reviewedTechnicianUserId } }] }),
+      });
+      expect((await patch(FIXTURES_004_WEEKLOG.inactiveTechnician.userId)).status).toBe(403);
+      expect((await patch(FIXTURES_004_WEEKLOG.foreignTechnician.userId)).status).toBe(403);
+      expect((await patch(FIXTURES_004_WEEKLOG.activeTechnician.userId)).status).toBe(200);
+      const stored = await prisma.externalOperationalImportItem.findUniqueOrThrow({ where: { id: items[0].id } });
+      expect(stored.reviewedTechnicianUserId).toBe(FIXTURES_004_WEEKLOG.activeTechnician.userId);
     });
 
     it("IMPORT-WEEKLOG-NO-FAKE-PO-01: Materialização Canônica sem Fabricação de OPs Fictícias", async () => {
