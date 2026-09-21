@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 // @ts-expect-error backend dependency
 import express, { type Request, type Response, type NextFunction } from "../../backend/node_modules/express/index.js";
 import { prisma } from "../../backend/src/lib/prisma.js";
 import { signAccessToken } from "../../backend/src/lib/jwt.js";
 import { ForbiddenError } from "../../backend/src/lib/objectAuth.js";
+import { aiImportExtractionProvider, minioImportDocumentStorage } from "../../backend/src/services/externalImportAdapters.js";
 
 // Configurações de ambiente mínimas para testes
 process.env.NODE_ENV = "test";
@@ -44,6 +45,10 @@ const FIXTURES_004_IMPORT = {
   clientA: {
     id: "43000000-0000-4000-8000-000000000010",
     name: "Cliente Import Alpha",
+  },
+  clientB: {
+    id: "43000000-0000-4000-8000-000000000020",
+    name: "Cliente Import Bravo",
   },
 };
 
@@ -106,6 +111,9 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
         name: FIXTURES_004_IMPORT.clientA.name,
       },
     });
+    await prisma.client.create({
+      data: { id: FIXTURES_004_IMPORT.clientB.id, workspaceId: FIXTURES_004_IMPORT.wsBravo, name: FIXTURES_004_IMPORT.clientB.name },
+    });
   });
 
   afterAll(async () => {
@@ -114,6 +122,12 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
   });
 
   beforeEach(async () => {
+    vi.spyOn(minioImportDocumentStorage, "put").mockResolvedValue();
+    vi.spyOn(minioImportDocumentStorage, "read").mockResolvedValue(Buffer.from("%PDF-1.7\nretry original"));
+    vi.spyOn(aiImportExtractionProvider, "extractListDocument").mockResolvedValue({
+      raw: { provider: "synthetic-test" },
+      rows: [{ rawLicensePlate: "AA-11-BB", rawVin: "WVWZZZ1JZXW000001", rawCarName: "Golf", rawServices: [{ code: "PDR" }], rawTotalText: "€ 1.250,50" }],
+    });
     app = express();
     app.use(express.json());
 
@@ -148,9 +162,12 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
     if (server) {
       server.close();
     }
+    vi.restoreAllMocks();
   });
 
   async function cleanupTestData() {
+    await prisma.externalListImportItem.deleteMany({ where: { workspaceId: { in: [FIXTURES_004_IMPORT.wsAlpha, FIXTURES_004_IMPORT.wsBravo] } } });
+    await prisma.externalListImport.deleteMany({ where: { workspaceId: { in: [FIXTURES_004_IMPORT.wsAlpha, FIXTURES_004_IMPORT.wsBravo] } } });
     await prisma.client.deleteMany({
       where: { workspaceId: { in: [FIXTURES_004_IMPORT.wsAlpha, FIXTURES_004_IMPORT.wsBravo] } },
     });
@@ -189,8 +206,7 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
       const dummyFilePayload = {
         fileName: "fatura_pdr_32.pdf",
         mimeType: "application/pdf",
-        contentBase64: Buffer.from("DUMMY_PDF_CONTENT_FOR_IMPORT").toString("base64"),
-        clientId: FIXTURES_004_IMPORT.clientA.id,
+          contentBase64: Buffer.from("%PDF-1.7\nsynthetic import").toString("base64"),
       };
 
       // When: Upload no endpoint de staging de importação
@@ -205,15 +221,20 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
       const data = await res.json();
       expect(data.importId).toBeDefined();
       expect(data.sha256).toBeDefined();
-      expect(data.status).toBe("staged");
+      expect(data.status).toBe("extracted");
       expect(data.items).toBeInstanceOf(Array);
     });
 
     it("IMPORT-MONEY-RAW-PRESERVED-01: Preservação de Texto Monetário Bruto de OCR sem Conversão Float Prematura", async () => {
       // Given: Upload de documento contendo texto monetário '€ 1.250,50'
-      const res = await fetch(`${baseUrl}/api/payment-lists/imports/test-raw-import`, {
+      const create = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST",
         headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ fileName: "raw-money.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nraw money").toString("base64") }),
       });
+      expect(create.status).toBe(201);
+      const created = await create.json();
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports/${created.importId}`, { headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha) });
 
       // Then: Retorna o item de staging com rawTotalText verbatim '€ 1.250,50' e reviewedTotal null
       expect(res.status).toBe(200);
@@ -223,25 +244,37 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
     });
 
     it("IMPORT-PROVENANCE-01: Auditoria e Rastreabilidade de Arquivo Original", async () => {
-      // Given: Uma PaymentList criada a partir de uma importação externa efetivada
-      const listId = "44000000-0000-4000-8000-000000000021";
+      // Given: Uma importação externa estagiada; materialização em PaymentList é T06.
+      const create = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ fileName: "provenance.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nprovenance").toString("base64") }),
+      });
+      const created = await create.json();
 
-      // When: Gestor consulta os detalhes da lista
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}`, {
+      // When: Gestor consulta a proveniência persistida no staging
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports/${created.importId}`, {
         headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
       });
 
-      // Then: A lista referencia formalmente o sourceImport com hash SHA-256 e download URL MinIO
+      // Then: staging preserva nome original, hash e chave governada; não cria PaymentList em T05.
       expect(res.status).toBe(200);
       const data = await res.json();
-      expect(data.sourceImport).toBeDefined();
-      expect(data.sourceImport.sha256).toBeDefined();
-      expect(data.sourceImport.originalDownloadUrl).toBeDefined();
+      expect(data.import.fileName).toBe("provenance.pdf");
+      expect(data.import.fileSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(data.import.storagePath).toMatch(/^tenants\/.+\/lists\/imports\/.+\/original_provenance\.pdf$/);
+      expect(await prisma.paymentList.count({ where: { workspaceId: FIXTURES_004_IMPORT.wsAlpha } })).toBe(0);
     });
 
     it("IMPORT-NO-AUTO-COMMIT-01: Proibição de Commit Automático sem Validação Humana e Campos Obrigatórios", async () => {
       // Given: Staging com identidade veicular incompleta (reviewedVin = null e reviewedLicensePlate = null)
-      const importId = "44000000-0000-4000-8000-000000000022";
+      const create = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ fileName: "incomplete-review.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nincomplete review").toString("base64") }),
+      });
+      expect(create.status).toBe(201);
+      const { importId } = await create.json();
 
       // When: Operador tenta comitar o import incompleto
       const res = await fetch(`${baseUrl}/api/payment-lists/imports/${importId}/commit`, {
@@ -264,8 +297,7 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
         body: JSON.stringify({
           fileName: "lista_cliente_bravo.pdf",
           mimeType: "application/pdf",
-          contentBase64: Buffer.from("DUMMY_PDF_CONTENT").toString("base64"),
-          clientId: FIXTURES_004_IMPORT.clientA.id,
+          contentBase64: Buffer.from("%PDF-1.7\nother tenant").toString("base64"),
         }),
       });
       expect(createRes.status).toBe(201);
@@ -280,6 +312,134 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
 
       // Then: Requisição falha com HTTP 404 Not Found deny-by-default
       expect(res.status).toBe(404);
+    });
+
+    it("IMPORT-AUTH-01: upload exige bearer válido", async () => {
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: "unauthenticated.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nunauthenticated").toString("base64") }),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("IMPORT-WORKSPACE-SPOOF-01: header de workspace sem membership é rejeitado", async () => {
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsBravo),
+        body: JSON.stringify({ fileName: "spoof.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nspoof").toString("base64") }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("IMPORT-OBJECT-CROSS-TENANT-01: leitura de import de outro tenant é deny-by-default", async () => {
+      const created = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ fileName: "alpha.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nalpha").toString("base64") }),
+      });
+      const { importId } = await created.json();
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports/${importId}`, { headers: getAuthHeader(FIXTURES_004_IMPORT.ownerB, FIXTURES_004_IMPORT.wsBravo) });
+      expect(res.status).toBe(404);
+    });
+
+    it("IMPORT-ROW-CROSS-IMPORT-01: uma linha não pode ser revisada através de outro import", async () => {
+      const makeImport = async (fileName: string) => {
+        const res = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+          method: "POST",
+          headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+          body: JSON.stringify({ fileName, mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nrow scope").toString("base64") }),
+        });
+        return res.json();
+      };
+      const [first, second] = await Promise.all([makeImport("first.pdf"), makeImport("second.pdf")]);
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports/${first.importId}/rows`, {
+        method: "PATCH",
+        headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ rows: [{ id: second.items[0].id, patch: { reviewedLicensePlate: "AA11BB" } }] }),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("IMPORT-PATH-TRAVERSAL-01 e IMPORT-MIME-01: arquivo inseguro é rejeitado antes de storage/extraction", async () => {
+      const headers = getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha);
+      const traversal = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST", headers,
+        body: JSON.stringify({ fileName: "../escape.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nunsafe").toString("base64") }),
+      });
+      const mime = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST", headers,
+        body: JSON.stringify({ fileName: "unsafe.txt", mimeType: "text/plain", contentBase64: Buffer.from("not a document").toString("base64") }),
+      });
+      expect(traversal.status).toBe(422);
+      expect(mime.status).toBe(422);
+      expect(minioImportDocumentStorage.put).not.toHaveBeenCalled();
+      expect(aiImportExtractionProvider.extractListDocument).not.toHaveBeenCalled();
+    });
+
+    it("IMPORT-STORAGE-FAILURE-01: falha de promoção preserva cabeçalho failed sem path fictício", async () => {
+      vi.spyOn(minioImportDocumentStorage, "put").mockRejectedValueOnce(new Error("synthetic storage failure"));
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ fileName: "storage-failure.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nstorage failure").toString("base64") }),
+      });
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      const record = await prisma.externalListImport.findUniqueOrThrow({ where: { id: body.importId } });
+      expect(record.status).toBe("failed");
+      expect(record.storagePath).toBeNull();
+      expect(record.fileSha256).toBeNull();
+    });
+
+    it("IMPORT-CLIENT-CROSS-TENANT-01: authority revisada de cliente é validada no workspace ativo", async () => {
+      const create = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST", headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ fileName: "review-client.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nreview client").toString("base64") }),
+      });
+      const imported = await create.json();
+      const rejected = await fetch(`${baseUrl}/api/payment-lists/imports/${imported.importId}/rows`, {
+        method: "PATCH", headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ header: { reviewedClientId: FIXTURES_004_IMPORT.clientB.id, reviewedCurrencyCode: "EUR" } }),
+      });
+      expect(rejected.status).toBe(422);
+    });
+
+    it("IMPORT-EXTRACTION-FAILURE-01: falha de provider preserva proveniência, sem staging authority", async () => {
+      vi.spyOn(aiImportExtractionProvider, "extractListDocument").mockRejectedValueOnce(new Error("synthetic provider timeout"));
+      const res = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST", headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ fileName: "provider-failure.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nprovider failure").toString("base64") }),
+      });
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      const record = await prisma.externalListImport.findUniqueOrThrow({ where: { id: body.importId }, include: { items: true } });
+      expect(record.status).toBe("failed");
+      expect(record.storagePath).toMatch(/^tenants\//);
+      expect(record.fileSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(record.items).toHaveLength(0);
+      expect(record.reviewedClientId).toBeNull();
+      expect(record.reviewedCurrencyCode).toBeNull();
+    });
+
+    it("IMPORT-RETRY-IDEMPOTENT-01: retry explícito reutiliza o original uma vez e concorrência não duplica staging", async () => {
+      vi.spyOn(aiImportExtractionProvider, "extractListDocument").mockRejectedValueOnce(new Error("synthetic provider timeout"));
+      const create = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST", headers: getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha),
+        body: JSON.stringify({ fileName: "retry.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nretry").toString("base64") }),
+      });
+      expect(create.status).toBe(503);
+      const { importId } = await create.json();
+      const headers = getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha);
+      const [first, second] = await Promise.all([
+        fetch(`${baseUrl}/api/payment-lists/imports/${importId}/retry-extraction`, { method: "POST", headers }),
+        fetch(`${baseUrl}/api/payment-lists/imports/${importId}/retry-extraction`, { method: "POST", headers }),
+      ]);
+      expect([first.status, second.status].sort()).toEqual([200, 409]);
+      const record = await prisma.externalListImport.findUniqueOrThrow({ where: { id: importId }, include: { items: true } });
+      expect(record.status).toBe("extracted");
+      expect(record.items).toHaveLength(1);
+      expect(minioImportDocumentStorage.read).toHaveBeenCalledTimes(1);
     });
   });
 });
