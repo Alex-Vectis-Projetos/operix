@@ -34,6 +34,8 @@ import { countryDocumentRequirementsRouter } from "./routes/countryDocumentRequi
 import { clientsRouter } from "./routes/clients.js";
 import { budgetsRouter } from "./routes/budgets.js";
 import { weeklogsRouter } from "./routes/weeklogs.js";
+import { paymentListsRouter } from "./routes/paymentLists.js";
+import { externalOperationalImportsRouter } from "./routes/externalOperationalImports.js";
 import { runWeatherIngest } from "./services/weatherIngest.js";
 
 const app = express();
@@ -85,6 +87,8 @@ app.use("/api/people", peopleRouter);
 app.use("/api/clients", clientsRouter);
 app.use("/api/budgets", budgetsRouter);
 app.use("/api/weeklogs", weeklogsRouter);
+app.use("/api/payment-lists", paymentListsRouter);
+app.use("/api/external-operational-imports", externalOperationalImportsRouter);
 app.use("/api/country-document-requirements", countryDocumentRequirementsRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
