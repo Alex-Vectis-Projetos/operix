@@ -20,6 +20,7 @@ O plano divide a entrega em **fatias verticais progressivas e auditáveis**:
    - Upload governado no MinIO, cálculo SHA-256 e persistência em `ExternalListImport` + `ExternalListImportItem` (preservando `rawTotalText`).
    - O serviço T05 cria cabeçalho sem path fictício quando a promoção falha; depois de promoção bem-sucedida, persiste `storagePath`, `fileSha256`, `mimeType` e `sizeBytes`. Antes de marcar `reviewed` ou materializar, valida moeda ISO, cliente do tenant e todos os campos revisados exigidos.
    - Para WEEKLOG externo, `reviewedDeliveredAt` determina a semana operacional porque a Spec 003 usa `WeeklogEntry.deliveredAt` como instante canônico. `reviewedTechnicianUserId` é validado via `Membership`/`AppUser` pelo serviço: a identidade atual não possui chave composta segura compatível com o `User.id` operacional.
+   - Retry de extração é explícito e condicionado a `failed` sem linhas de staging; a mudança condicional de estado serializa concorrência, reutiliza o objeto original e bloqueia qualquer substituição de dados revisados. A evidência dinâmica permanece pendente enquanto o PostgreSQL local de testes estiver indisponível.
 3. **Fatia de Domínio da Lista, Numeração Atômica & Claims Semânticos**:
    - Máquina de estados formal: `draft` $\rightarrow$ `under_review` $\rightarrow$ `confronted` $\rightarrow$ `pending` $\rightarrow$ `paid`.
    - Alocador sequencial monotônico via lock pessimista no PostgreSQL.
@@ -155,8 +156,8 @@ O plano divide a entrega em **fatias verticais progressivas e auditáveis**:
   - Ingestão, cálculo de hash SHA-256, MinIO, extração via IA e população em `ExternalListImportItem` (preservando `rawTotalText`).
   - Validação estrita de campos obrigatórios antes do commit.
 - `externalOperationalImportService.ts`:
-  - Ingestão de folhas de WEEKLOG externo, revisão humana e materialização canônica idempotente em `Weeklog` + `WeeklogEntry` (`sourceType = 'external_import'`); `reviewedOperationalSiteKey` é a key canônica já adotada na Spec 003, sem nova entidade Site.
-  - Criação de rodada formal em `WeeklogValidation` com `validationMethod = "external_import_review"`, `coverageSnapshot` congelado e chancela auditável do gestor.
+  - T05 entrega ingestão, proveniência e revisão humana relacional; materialização canônica em `Weeklog` + `WeeklogEntry` (`sourceType = 'external_import'`) não pertence a esta fatia. `reviewedOperationalSiteKey` é a key canônica já adotada na Spec 003, sem nova entidade Site.
+  - A rodada formal em `WeeklogValidation` com `validationMethod = "external_import_review"` e `coverageSnapshot` congelado é posterior à fatia de staging.
 - `downstreamPaymentOrderAdapter.ts`:
   - Espelhamento estritamente unidirecional (`canonical` $\rightarrow$ `payment_orders`).
 

@@ -82,11 +82,12 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Migration forward-only `20260921120000_spec004_payment_list_domain` aplicada com checks e partial indexes.
   - Hardening forward-only `20260921130000_spec004_relational_hardening`: FK de resultado para `(runId, paymentListId, workspaceId)`, estado `ambiguous_match` e lifecycle de claims estrito; upgrade real preservando duas `WeeklogEntry` da Spec 003 e FKs cross-tenant cobertos estruturalmente.
 ### Fase 3: Storage MinIO & Ingestão Externa (Staging Relacional)
-- [ ] **T05**: Implementar ingestão externa governada e staging relacional:
+- [ ] **T05**: Implementar ingestão externa governada e staging relacional (implementação estática concluída; validação de integração pendente: PostgreSQL de testes indisponível):
   - `backend/src/services/externalListImportService.ts`: upload MinIO, hash SHA-256, extração IA preservando `rawTotalText` e persistência em `ExternalListImportItem`.
-  - `backend/src/services/externalOperationalImportService.ts`: esteira de WEEKLOG externo com staging revisável, materialização idempotente em `Weeklog` + `WeeklogEntry` (`sourceType = 'external_import'`), geração de `coverageSnapshot` congelado e criação de `WeeklogValidation` formal (`validationMethod = "external_import_review"`).
+  - `backend/src/services/externalOperationalImportService.ts`: esteira de WEEKLOG externo com staging revisável, sem materialização em `Weeklog` + `WeeklogEntry`. A materialização idempotente, `coverageSnapshot` congelado e `WeeklogValidation` formal permanecem em fatia posterior autorizada.
   - Endpoints REST de importação e edição interativa de staging.
   - Antes de promoção física, `storagePath` e metadados derivados podem permanecer `NULL`; após promoção bem-sucedida, o serviço preenche a proveniência real. Antes de `reviewed`/commit, valida cliente tenant-safe, moeda ISO, técnico membro, `reviewedOperationalSiteKey` e `reviewedDeliveredAt`.
+  - Testes de T05 usam adapters sintéticos controlados para storage/extração; a validação de acurácia e cobertura com documentos reais aguarda amostras do cliente.
 
 ### Fase 4: Domínio de Lista de Pagamento, Numeração Atômica & Claims
 - [ ] **T06**: Implementar serviço canônico `backend/src/services/paymentListService.ts` e o seed discovery determinístico `scripts/seed-legacy-counters.ts` (DRY-RUN por default):
