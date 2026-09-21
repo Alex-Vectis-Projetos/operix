@@ -1584,6 +1584,9 @@ export async function rectifyWeeklogEntry(
       const currentEntry = await tx.weeklogEntry.findUniqueOrThrow({
         where: { id: entryId },
       });
+      if (!currentEntry.productionOrderId) {
+        throw new NotFoundError("Entrada não possui ordem de produção vinculada.");
+      }
       const currentPo = await tx.productionOrder.findUniqueOrThrow({
         where: { id: currentEntry.productionOrderId },
       });

@@ -69,7 +69,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Rejeição de aprovação direta sem evidência auditável (`IMPORT-WEEKLOG-NO-DIRECT-APPROVE-01`).
 
 ### Fase 2: Schema Prisma, Migração Forward-Only & CLI de Seed
-- [ ] **T04**: Atualizar `backend/prisma/schema.prisma` com os modelos canônicos:
+- [x] **T04**: Atualizar `backend/prisma/schema.prisma` com os modelos canônicos e aplicar migração forward-only:
   - `PaymentList` com `@@unique([id, workspaceId])`, `@@unique([workspaceId, listNumber])`, `sourceDocumentTotal`, `recognizedTotal` e `currencyCode` sem default.
   - `PaymentListItem` com composite keys `@@unique([id, paymentListId, workspaceId])` e `@@unique([id, workspaceId])`.
   - `PaymentListEntryClaim` com status (`reserved`, `consumed`, `released`) e partial unique index `WHERE status IN ('reserved', 'consumed')`.
@@ -79,7 +79,8 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - `ExternalOperationalImport` e `ExternalOperationalImportItem` (com `rawTotalText String?`).
   - `TenantSequenceCounter`.
   - Flexibilização de `WeeklogEntry` com discriminador `sourceType` ("production_order" | "external_import") e chave única `externalImportItemId`.
-- [ ] **T05**: Criar script CLI `scripts/seed-legacy-counters.ts` e gerar migração forward-only `20260918000000_spec_004_payment_list_and_confrontation.sql`:
+  - Migration forward-only `20260921120000_spec004_payment_list_domain` aplicada com checks e partial indexes.
+- [ ] **T05**: Criar script CLI `scripts/seed-legacy-counters.ts`:
   - CLI com flags: default DRY-RUN (exibe relatório) e `--apply` (grava em `tenant_sequence_counters`).
   - Escopo estritamente determinístico: ignora códigos sem workspace vinculado.
   - Aplicar migration no banco de desenvolvimento e validar integridade relacional.

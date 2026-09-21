@@ -101,6 +101,13 @@ model Workspace {
   weeklogs           Weeklog[]
   weeklogEntries     WeeklogEntry[]
   weeklogValidations WeeklogValidation[]
+  paymentLists                    PaymentList[]
+  paymentListEntryClaims          PaymentListEntryClaim[]
+  paymentListConfrontationRuns    PaymentListConfrontationRun[]
+  paymentListConfrontationResults PaymentListConfrontationResult[]
+  externalListImports             ExternalListImport[]
+  tenantSequenceCounters          TenantSequenceCounter[]
+  externalOperationalImports      ExternalOperationalImport[]
 
   @@map("workspaces")
 }
@@ -480,6 +487,7 @@ model Client {
   clientAccessGrants ClientAccessGrant[]
   weeklogs           Weeklog[]
   weeklogEntries     WeeklogEntry[]
+  paymentLists       PaymentList[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId])
@@ -683,7 +691,9 @@ model WeeklogEntry {
   id                         String    @id @default(uuid())
   weeklogId                  String    @map("weeklog_id")
   workspaceId                String    @map("workspace_id")
-  productionOrderId          String    @map("production_order_id")
+  sourceType                 String    @default("production_order") @map("source_type")
+  productionOrderId          String?   @map("production_order_id")
+  externalImportItemId       String?   @map("external_import_item_id")
   executionSequence          Int       @default(1) @map("execution_sequence")
   budgetId                   String?   @map("budget_id")
   budgetRevisionId           String?   @map("budget_revision_id")
@@ -717,13 +727,17 @@ model WeeklogEntry {
   updatedAt                  DateTime  @updatedAt @map("updated_at")
 
   weeklog                    Weeklog           @relation(fields: [weeklogId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  productionOrder            ProductionOrder   @relation(fields: [productionOrderId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  productionOrder            ProductionOrder?  @relation(fields: [productionOrderId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  externalImportItem         ExternalOperationalImportItem? @relation(fields: [externalImportItemId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   workspace                  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   client                     Client            @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   legacyServiceOrder         ServiceOrder?     @relation(fields: [legacyServiceOrderId], references: [id], onDelete: SetNull)
   rectificationOriginEntry   WeeklogEntry?     @relation("WeeklogEntryRectification", fields: [rectificationOriginEntryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   rectifiedSubsequentEntries WeeklogEntry[]    @relation("WeeklogEntryRectification")
   originForProductionOrders  ProductionOrder[] @relation("ProductionOrderRectificationOrigin")
+  paymentListItems           PaymentListItem[]
+  paymentListEntryClaims     PaymentListEntryClaim[]
+  confrontationResults       PaymentListConfrontationResult[]
 
   @@unique([productionOrderId, executionSequence])
   @@unique([id, workspaceId])
@@ -1275,4 +1289,323 @@ model CountryDocumentRequirement {
   @@unique([country, documentName])
   @@index([country, active])
   @@map("country_document_requirements")
+}
+
+// ---------------------------------------------------------------------------
+// Spec 004 — Domínio Canônico de Lista de Pagamento, Importação e Confronto
+// ---------------------------------------------------------------------------
+
+enum PaymentListStatus {
+  draft
+  under_review
+  confronted
+  pending
+  paid
+  cancelled
+}
+
+enum ConfrontationStatus {
+  not_evaluated
+  exact_match
+  value_difference
+  service_discrepancy
+  vehicle_not_found
+  unmatched_weeklog
+}
+
+enum ConfrontationDecision {
+  none
+  accept_difference
+  contest
+  request_rectification
+  reject_item
+}
+
+enum ImportStatus {
+  uploaded
+  extracting
+  extracted
+  under_review
+  reviewed
+  committed
+  failed
+  discarded
+}
+
+model PaymentList {
+  id                  String            @id @default(uuid())
+  workspaceId         String            @map("workspace_id")
+  listNumber          String            @map("list_number")
+  clientId            String            @map("client_id")
+  clientName          String            @map("client_name")
+  currencyCode        String            @map("currency_code")
+  status              PaymentListStatus @default(draft)
+  
+  itemCount           Int               @default(0) @map("item_count")
+  sourceDocumentTotal Decimal           @default(0.00) @map("source_document_total") @db.Decimal(12, 2)
+  recognizedTotal     Decimal           @default(0.00) @map("recognized_total") @db.Decimal(12, 2)
+  
+  issueDate           DateTime?         @map("issue_date")
+  dueDate             DateTime?         @map("due_date")
+  paidAt              DateTime?         @map("paid_at")
+  paidBy              String?           @map("paid_by")
+  documentId          String?           @map("document_id")
+  invoiceId           String?           @map("invoice_id")
+  notes               String?
+  
+  createdBy           String            @map("created_by")
+  confrontedBy        String?           @map("confronted_by")
+  confrontedAt        DateTime?         @map("confronted_at")
+  validatedBy         String?           @map("validated_by")
+  validatedAt         DateTime?         @map("validated_at")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client              Client            @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  items               PaymentListItem[]
+  claims              PaymentListEntryClaim[]
+  confrontationRuns   PaymentListConfrontationRun[]
+  confrontationResults PaymentListConfrontationResult[]
+  externalImports     ExternalListImport[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, listNumber])
+  @@index([workspaceId, status])
+  @@index([clientId, status])
+  @@map("payment_lists")
+}
+
+model PaymentListItem {
+  id                    String                @id @default(uuid())
+  workspaceId           String                @map("workspace_id")
+  paymentListId         String                @map("payment_list_id")
+  
+  weeklogEntryId        String?               @map("weeklog_entry_id")
+  legacyPaymentOrderId  String?               @map("legacy_payment_order_id")
+  
+  carName               String?               @map("car_name")
+  licensePlate          String?               @map("license_plate")
+  vin                   String?               @map("vin")
+  
+  technicianUserId      String?               @map("technician_user_id")
+  technicianName        String?               @map("technician_name")
+  operationalSiteKey    String?               @map("operational_site_key")
+  
+  servicesSnapshot      Json                  @map("services_snapshot")
+  totalAmount           Decimal               @map("total_amount") @db.Decimal(12, 2)
+  
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+
+  paymentList           PaymentList           @relation(fields: [paymentListId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  weeklogEntry          WeeklogEntry?         @relation(fields: [weeklogEntryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  confrontationResults  PaymentListConfrontationResult[]
+
+  @@unique([id, workspaceId])
+  @@unique([id, paymentListId, workspaceId])
+  @@index([workspaceId, paymentListId])
+  @@index([weeklogEntryId])
+  @@map("payment_list_items")
+}
+
+model PaymentListEntryClaim {
+  id              String       @id @default(uuid())
+  workspaceId     String       @map("workspace_id")
+  paymentListId   String       @map("payment_list_id")
+  weeklogEntryId  String       @map("weeklog_entry_id")
+  status          String       @default("reserved")
+  claimedAt       DateTime     @default(now()) @map("claimed_at")
+  consumedAt      DateTime?    @map("consumed_at")
+  releasedAt      DateTime?    @map("released_at")
+  releasedReason  String?      @map("released_reason")
+
+  workspace       Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  paymentList     PaymentList  @relation(fields: [paymentListId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  weeklogEntry    WeeklogEntry @relation(fields: [weeklogEntryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, paymentListId])
+  @@index([workspaceId, weeklogEntryId])
+  @@map("payment_list_entry_claims")
+}
+
+model PaymentListConfrontationRun {
+  id            String   @id @default(uuid())
+  workspaceId   String   @map("workspace_id")
+  paymentListId String   @map("payment_list_id")
+  sequence      Int      @default(1)
+  status        String   @default("started")
+  startedAt     DateTime @default(now()) @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  paymentList   PaymentList @relation(fields: [paymentListId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  results       PaymentListConfrontationResult[]
+
+  @@unique([paymentListId, sequence])
+  @@unique([id, paymentListId, workspaceId])
+  @@unique([id, workspaceId])
+  @@index([workspaceId, paymentListId])
+  @@map("payment_list_confrontation_runs")
+}
+
+model PaymentListConfrontationResult {
+  id                        String                      @id @default(uuid())
+  workspaceId               String                      @map("workspace_id")
+  paymentListId             String                      @map("payment_list_id")
+  runId                     String                      @map("run_id")
+  paymentListItemId         String?                     @map("payment_list_item_id")
+  weeklogEntryId            String?                     @map("weeklog_entry_id")
+  
+  status                    ConfrontationStatus         @default(not_evaluated) @map("status")
+  decision                  ConfrontationDecision       @default(none) @map("decision")
+  differenceAmount          Decimal                     @default(0.00) @map("difference_amount") @db.Decimal(12, 2)
+  notes                     String?
+  
+  decidedBy                 String?                     @map("decided_by")
+  decidedAt                 DateTime?                   @map("decided_at")
+  
+  reopenedProductionOrderId String?                     @map("reopened_production_order_id")
+  targetExecutionSequence   Int?                        @map("target_execution_sequence")
+
+  createdAt                 DateTime                    @default(now()) @map("created_at")
+  updatedAt                 DateTime                    @updatedAt @map("updated_at")
+
+  workspace                 Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  paymentList               PaymentList                 @relation(fields: [paymentListId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  confrontationRun          PaymentListConfrontationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  paymentListItem           PaymentListItem?            @relation(fields: [paymentListItemId, paymentListId, workspaceId], references: [id, paymentListId, workspaceId], onDelete: Restrict)
+  weeklogEntry              WeeklogEntry?               @relation(fields: [weeklogEntryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, paymentListId])
+  @@index([runId])
+  @@index([weeklogEntryId])
+  @@map("payment_list_confrontation_results")
+}
+
+model ExternalListImport {
+  id                  String                  @id @default(uuid())
+  workspaceId         String                  @map("workspace_id")
+  paymentListId       String?                 @map("payment_list_id")
+  fileName            String                  @map("file_name")
+  storagePath         String                  @map("storage_path")
+  fileSha256          String                  @map("file_sha256")
+  mimeType            String                  @map("mime_type")
+  sizeBytes           Int                     @map("size_bytes")
+  status              ImportStatus            @default(uploaded)
+  rawOcrResult        Json?                   @map("raw_ocr_result")
+  errorMessage        String?                 @map("error_message")
+  uploadedBy          String                  @map("uploaded_by")
+  createdAt           DateTime                @default(now()) @map("created_at")
+  updatedAt           DateTime                @updatedAt @map("updated_at")
+
+  workspace           Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  paymentList         PaymentList?            @relation(fields: [paymentListId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  items               ExternalListImportItem[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, status])
+  @@map("external_list_imports")
+}
+
+model ExternalListImportItem {
+  id                    String                  @id @default(uuid())
+  workspaceId           String                  @map("workspace_id")
+  importId              String                  @map("import_id")
+  
+  rawLicensePlate       String?                 @map("raw_license_plate")
+  rawVin                String?                 @map("raw_vin")
+  rawCarName            String?                 @map("raw_car_name")
+  rawClient             String?                 @map("raw_client")
+  rawTechnician         String?                 @map("raw_technician")
+  rawPlatform           String?                 @map("raw_platform")
+  rawServices           Json?                   @map("raw_services")
+  rawTotalText          String?                 @map("raw_total_text")
+  fieldConfidence       Json?                   @map("field_confidence")
+  
+  reviewedLicensePlate  String?                 @map("reviewed_license_plate")
+  reviewedVin           String?                 @map("reviewed_vin")
+  reviewedCarName       String?                 @map("reviewed_car_name")
+  reviewedTechnicianUserId String?              @map("reviewed_technician_user_id")
+  reviewedServices      Json?                   @map("reviewed_services")
+  reviewedTotal         Decimal?                @map("reviewed_total") @db.Decimal(12, 2)
+  
+  status                String                  @default("staged")
+  reviewedBy            String?                 @map("reviewed_by")
+  reviewedAt            DateTime?               @map("reviewed_at")
+
+  import                ExternalListImport      @relation(fields: [importId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, importId])
+  @@map("external_list_import_items")
+}
+
+model TenantSequenceCounter {
+  id            String   @id @default(uuid())
+  workspaceId   String   @map("workspace_id")
+  sequenceType  String   @map("sequence_type")
+  currentValue  Int      @default(0) @map("current_value")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, sequenceType])
+  @@map("tenant_sequence_counters")
+}
+
+model ExternalOperationalImport {
+  id                  String                          @id @default(uuid())
+  workspaceId         String                          @map("workspace_id")
+  fileName            String                          @map("file_name")
+  storagePath         String                          @map("storage_path")
+  fileSha256          String                          @map("file_sha256")
+  mimeType            String                          @map("mime_type")
+  sizeBytes           Int                             @map("size_bytes")
+  status              ImportStatus                    @default(uploaded)
+  rawOcrResult        Json?                           @map("raw_ocr_result")
+  errorMessage        String?                         @map("error_message")
+  uploadedBy          String                          @map("uploaded_by")
+  createdAt           DateTime                        @default(now()) @map("created_at")
+  updatedAt           DateTime                        @updatedAt @map("updated_at")
+
+  workspace           Workspace                       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  items               ExternalOperationalImportItem[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, status])
+  @@map("external_operational_imports")
+}
+
+model ExternalOperationalImportItem {
+  id                    String                    @id @default(uuid())
+  workspaceId           String                    @map("workspace_id")
+  importId              String                    @map("import_id")
+  
+  rawLicensePlate       String?                   @map("raw_license_plate")
+  rawCarName            String?                   @map("raw_car_name")
+  rawTechnician         String?                   @map("raw_technician")
+  rawWeek               String?                   @map("raw_week")
+  rawServices           Json?                     @map("raw_services")
+  rawTotalText          String?                   @map("raw_total_text")
+  fieldConfidence       Json?                     @map("field_confidence")
+  
+  reviewedLicensePlate  String?                   @map("reviewed_license_plate")
+  reviewedCarName       String?                   @map("reviewed_car_name")
+  reviewedTechnicianUserId String?                @map("reviewed_technician_user_id")
+  reviewedServices      Json?                     @map("reviewed_services")
+  reviewedTotal         Decimal?                  @map("reviewed_total") @db.Decimal(12, 2)
+  
+  status                String                    @default("staged")
+  reviewedBy            String?                   @map("reviewed_by")
+  reviewedAt            DateTime?                 @map("reviewed_at")
+
+  import                ExternalOperationalImport @relation(fields: [importId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  weeklogEntries        WeeklogEntry[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, importId])
+  @@map("external_operational_import_items")
 }
