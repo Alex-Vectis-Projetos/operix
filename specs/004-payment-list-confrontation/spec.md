@@ -117,6 +117,7 @@ enum PaymentListStatus {
 enum ConfrontationStatus {
   not_evaluated
   exact_match
+  ambiguous_match
   value_difference
   service_discrepancy
   vehicle_not_found
@@ -260,6 +261,7 @@ model PaymentListConfrontationRun {
   results       PaymentListConfrontationResult[]
 
   @@unique([paymentListId, sequence])
+  @@unique([id, paymentListId, workspaceId])
   @@index([workspaceId, paymentListId])
   @@map("payment_list_confrontation_runs")
 }
@@ -290,12 +292,12 @@ model PaymentListConfrontationResult {
 
   workspace                 Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   paymentList               PaymentList                 @relation(fields: [paymentListId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  confrontationRun          PaymentListConfrontationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  confrontationRun          PaymentListConfrontationRun @relation(fields: [runId, paymentListId, workspaceId], references: [id, paymentListId, workspaceId], onDelete: Cascade)
   paymentListItem           PaymentListItem?            @relation(fields: [paymentListItemId, paymentListId, workspaceId], references: [id, paymentListId, workspaceId], onDelete: Restrict)
   weeklogEntry              WeeklogEntry?               @relation(fields: [weeklogEntryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@index([workspaceId, paymentListId])
-  @@index([runId])
+  @@index([runId, paymentListId, workspaceId])
   @@index([weeklogEntryId])
   @@map("payment_list_confrontation_results")
 }

@@ -80,6 +80,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - `TenantSequenceCounter`.
   - Flexibilização de `WeeklogEntry` com discriminador `sourceType` ("production_order" | "external_import") e chave única `externalImportItemId`.
   - Migration forward-only `20260921120000_spec004_payment_list_domain` aplicada com checks e partial indexes.
+  - Hardening forward-only `20260921130000_spec004_relational_hardening`: FK de resultado para `(runId, paymentListId, workspaceId)`, estado `ambiguous_match` e lifecycle de claims estrito; upgrade real preservando duas `WeeklogEntry` da Spec 003 e FKs cross-tenant cobertos estruturalmente.
 - [ ] **T05**: Criar script CLI `scripts/seed-legacy-counters.ts`:
   - CLI com flags: default DRY-RUN (exibe relatório) e `--apply` (grava em `tenant_sequence_counters`).
   - Escopo estritamente determinístico: ignora códigos sem workspace vinculado.

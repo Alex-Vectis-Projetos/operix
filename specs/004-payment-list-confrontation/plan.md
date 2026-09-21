@@ -50,7 +50,7 @@ O plano divide a entrega em **fatias verticais progressivas e auditáveis**:
 ### 2.2. DDL Essencial da Migração
 1. **Criação dos Enums**:
    - `PaymentListStatus`: `draft`, `under_review`, `confronted`, `pending`, `paid`, `cancelled`.
-   - `ConfrontationStatus`: `not_evaluated`, `exact_match`, `value_difference`, `service_discrepancy`, `vehicle_not_found`, `unmatched_weeklog`.
+   - `ConfrontationStatus`: `not_evaluated`, `exact_match`, `ambiguous_match`, `value_difference`, `service_discrepancy`, `vehicle_not_found`, `unmatched_weeklog`.
    - `ConfrontationDecision`: `none`, `accept_difference`, `contest`, `request_rectification`, `reject_item`.
    - `ImportStatus`: `uploaded`, `extracting`, `extracted`, `under_review`, `reviewed`, `committed`, `failed`, `discarded`.
 2. **Criação da Tabela `payment_lists`**:
@@ -86,6 +86,7 @@ O plano divide a entrega em **fatias verticais progressivas e auditáveis**:
    - `status VARCHAR(16) NOT NULL DEFAULT 'started'`, `started_at TIMESTAMP NOT NULL DEFAULT NOW()`, `completed_at TIMESTAMP`.
    - Constraints:
      - `UNIQUE (payment_list_id, sequence)`
+     - `UNIQUE (id, payment_list_id, workspace_id)`
      - `FOREIGN KEY (payment_list_id, workspace_id) REFERENCES payment_lists(id, workspace_id) ON DELETE CASCADE`.
 6. **Criação da Tabela `payment_list_confrontation_results`**:
    - `id UUID PRIMARY KEY`, `workspace_id UUID NOT NULL`, `payment_list_id UUID NOT NULL`, `run_id UUID NOT NULL`.
@@ -95,7 +96,7 @@ O plano divide a entrega em **fatias verticais progressivas e auditáveis**:
    - `difference_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00`.
    - `reopened_production_order_id UUID`, `target_execution_sequence INT`.
    - Constraints e Unicidade por Rodada:
-     - `FOREIGN KEY (run_id) REFERENCES payment_list_confrontation_runs(id) ON DELETE CASCADE`.
+     - `FOREIGN KEY (run_id, payment_list_id, workspace_id) REFERENCES payment_list_confrontation_runs(id, payment_list_id, workspace_id) ON DELETE CASCADE`.
      - `FOREIGN KEY (payment_list_id, workspace_id) REFERENCES payment_lists(id, workspace_id) ON DELETE CASCADE`.
      - `FOREIGN KEY (payment_list_item_id, payment_list_id, workspace_id) REFERENCES payment_list_items(id, payment_list_id, workspace_id) ON DELETE RESTRICT`.
      - `FOREIGN KEY (weeklog_entry_id, workspace_id) REFERENCES weeklog_entries(id, workspace_id) ON DELETE RESTRICT`.
