@@ -488,6 +488,8 @@ model Client {
   weeklogs           Weeklog[]
   weeklogEntries     WeeklogEntry[]
   paymentLists       PaymentList[]
+  reviewedExternalListImports ExternalListImport[] @relation("ExternalListImportReviewedClient")
+  reviewedExternalOperationalImportItems ExternalOperationalImportItem[] @relation("ExternalOperationalImportItemReviewedClient")
 
   @@unique([id, workspaceId])
   @@index([workspaceId])
@@ -1491,10 +1493,12 @@ model ExternalListImport {
   workspaceId         String                  @map("workspace_id")
   paymentListId       String?                 @map("payment_list_id")
   fileName            String                  @map("file_name")
-  storagePath         String                  @map("storage_path")
-  fileSha256          String                  @map("file_sha256")
-  mimeType            String                  @map("mime_type")
-  sizeBytes           Int                     @map("size_bytes")
+  storagePath         String?                 @map("storage_path")
+  fileSha256          String?                 @map("file_sha256")
+  mimeType            String?                 @map("mime_type")
+  sizeBytes           Int?                    @map("size_bytes")
+  reviewedClientId    String?                 @map("reviewed_client_id")
+  reviewedCurrencyCode String?                @map("reviewed_currency_code")
   status              ImportStatus            @default(uploaded)
   rawOcrResult        Json?                   @map("raw_ocr_result")
   errorMessage        String?                 @map("error_message")
@@ -1504,6 +1508,7 @@ model ExternalListImport {
 
   workspace           Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   paymentList         PaymentList?            @relation(fields: [paymentListId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  reviewedClient      Client?                 @relation("ExternalListImportReviewedClient", fields: [reviewedClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   items               ExternalListImportItem[]
 
   @@unique([id, workspaceId])
@@ -1561,10 +1566,10 @@ model ExternalOperationalImport {
   id                  String                          @id @default(uuid())
   workspaceId         String                          @map("workspace_id")
   fileName            String                          @map("file_name")
-  storagePath         String                          @map("storage_path")
-  fileSha256          String                          @map("file_sha256")
-  mimeType            String                          @map("mime_type")
-  sizeBytes           Int                             @map("size_bytes")
+  storagePath         String?                         @map("storage_path")
+  fileSha256          String?                         @map("file_sha256")
+  mimeType            String?                         @map("mime_type")
+  sizeBytes           Int?                            @map("size_bytes")
   status              ImportStatus                    @default(uploaded)
   rawOcrResult        Json?                           @map("raw_ocr_result")
   errorMessage        String?                         @map("error_message")
@@ -1586,16 +1591,26 @@ model ExternalOperationalImportItem {
   importId              String                    @map("import_id")
   
   rawLicensePlate       String?                   @map("raw_license_plate")
+  rawVin                String?                   @map("raw_vin")
   rawCarName            String?                   @map("raw_car_name")
+  rawClientName         String?                   @map("raw_client_name")
+  rawCurrencyCode       String?                   @map("raw_currency_code")
+  rawOperationalSiteKey String?                   @map("raw_operational_site_key")
   rawTechnician         String?                   @map("raw_technician")
   rawWeek               String?                   @map("raw_week")
+  rawDeliveredAtText    String?                   @map("raw_delivered_at_text")
   rawServices           Json?                     @map("raw_services")
   rawTotalText          String?                   @map("raw_total_text")
   fieldConfidence       Json?                     @map("field_confidence")
   
   reviewedLicensePlate  String?                   @map("reviewed_license_plate")
+  reviewedVin           String?                   @map("reviewed_vin")
   reviewedCarName       String?                   @map("reviewed_car_name")
+  reviewedClientId      String?                   @map("reviewed_client_id")
+  reviewedCurrencyCode  String?                   @map("reviewed_currency_code")
+  reviewedOperationalSiteKey String?              @map("reviewed_operational_site_key")
   reviewedTechnicianUserId String?                @map("reviewed_technician_user_id")
+  reviewedDeliveredAt   DateTime?                 @map("reviewed_delivered_at")
   reviewedServices      Json?                     @map("reviewed_services")
   reviewedTotal         Decimal?                  @map("reviewed_total") @db.Decimal(12, 2)
   
@@ -1604,6 +1619,7 @@ model ExternalOperationalImportItem {
   reviewedAt            DateTime?                 @map("reviewed_at")
 
   import                ExternalOperationalImport @relation(fields: [importId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  reviewedClient        Client?                    @relation("ExternalOperationalImportItemReviewedClient", fields: [reviewedClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   weeklogEntries        WeeklogEntry[]
 
   @@unique([id, workspaceId])

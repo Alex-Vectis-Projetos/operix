@@ -27,6 +27,7 @@ const PRE_SPEC004_MIGRATIONS = [
 const SPEC004_MIGRATIONS = [
   "20260921120000_spec004_payment_list_domain",
   "20260921130000_spec004_relational_hardening",
+  "20260921140000_spec004_import_staging_unblock",
 ] as const;
 
 function deployMigrations(schemaPath: string, databaseUrl: string) {
@@ -703,6 +704,178 @@ describe("Spec 004 — T03/T04 Relational Schema & Migration Verification Suite"
     ).rejects.toMatchObject({ code: "P2003" });
   });
 
+  it("SCHEMA-IMPORT-STORAGE-NULLABLE-01: import pode existir antes de a proveniência física estar disponível", async () => {
+    const listImport = await prisma.externalListImport.create({
+      data: {
+        workspaceId: WS_A,
+        fileName: "pending-list.pdf",
+        uploadedBy: USER_A,
+      },
+    });
+    const operationalImport = await prisma.externalOperationalImport.create({
+      data: {
+        workspaceId: WS_A,
+        fileName: "pending-weeklog.xlsx",
+        uploadedBy: USER_A,
+      },
+    });
+
+    expect(listImport.storagePath).toBeNull();
+    expect(listImport.fileSha256).toBeNull();
+    expect(listImport.mimeType).toBeNull();
+    expect(listImport.sizeBytes).toBeNull();
+    expect(operationalImport.storagePath).toBeNull();
+    expect(operationalImport.fileSha256).toBeNull();
+    expect(operationalImport.mimeType).toBeNull();
+    expect(operationalImport.sizeBytes).toBeNull();
+  });
+
+  it("SCHEMA-IMPORT-FAILED-NO-FAKE-PATH-01: falha de upload não exige chave de objeto fictícia", async () => {
+    const failedImport = await prisma.externalListImport.create({
+      data: {
+        workspaceId: WS_A,
+        fileName: "failed-list.pdf",
+        uploadedBy: USER_A,
+        status: "failed",
+        errorMessage: "MINIO_UPLOAD_FAILED",
+      },
+    });
+
+    expect(failedImport.status).toBe("failed");
+    expect(failedImport.storagePath).toBeNull();
+    expect(failedImport.fileSha256).toBeNull();
+  });
+
+  it("SCHEMA-LIST-STAGING-AUTHORITY-01: cliente e moeda revisados persistem no cabeçalho relacional", async () => {
+    const listImport = await prisma.externalListImport.create({
+      data: {
+        workspaceId: WS_A,
+        fileName: "reviewed-list.pdf",
+        storagePath: "tenants/ws-a/lists/imports/reviewed-list.pdf",
+        fileSha256: "a".repeat(64),
+        mimeType: "application/pdf",
+        sizeBytes: 2048,
+        uploadedBy: USER_A,
+        reviewedClientId: CLIENT_A,
+        reviewedCurrencyCode: "EUR",
+      },
+      include: { reviewedClient: true },
+    });
+
+    expect(listImport.reviewedClientId).toBe(CLIENT_A);
+    expect(listImport.reviewedClient?.workspaceId).toBe(WS_A);
+    expect(listImport.reviewedCurrencyCode).toBe("EUR");
+  });
+
+  it("SCHEMA-LIST-STAGING-CLIENT-TENANT-01: cliente revisado cross-tenant é rejeitado", async () => {
+    await expect(
+      prisma.externalListImport.create({
+        data: {
+          workspaceId: WS_A,
+          fileName: "invalid-client-list.pdf",
+          uploadedBy: USER_A,
+          reviewedClientId: CLIENT_B,
+          reviewedCurrencyCode: "EUR",
+        },
+      })
+    ).rejects.toMatchObject({ code: "P2003" });
+  });
+
+  it("SCHEMA-OP-STAGING-AUTHORITY-01: staging operacional preserva authority revisada sem JSON implícito", async () => {
+    const operationalImport = await prisma.externalOperationalImport.create({
+      data: {
+        workspaceId: WS_A,
+        fileName: "reviewed-weeklog.xlsx",
+        uploadedBy: USER_A,
+      },
+    });
+    const deliveredAt = new Date("2026-09-21T12:00:00.000Z");
+    const item = await prisma.externalOperationalImportItem.create({
+      data: {
+        workspaceId: WS_A,
+        importId: operationalImport.id,
+        rawLicensePlate: "AA-11-BB",
+        rawVin: "WVWZZZ1JZXW000001",
+        rawCarName: "Golf",
+        rawClientName: "Cliente Alpha OCR",
+        rawCurrencyCode: "EUR",
+        rawOperationalSiteKey: "lisbon-main",
+        rawTechnician: "Técnico OCR",
+        rawDeliveredAtText: "21/09/2026 12:00",
+        rawServices: [{ code: "PDR" }],
+        rawTotalText: "€ 125,50",
+        reviewedLicensePlate: "AA-11-BB",
+        reviewedVin: "WVWZZZ1JZXW000001",
+        reviewedClientId: CLIENT_A,
+        reviewedCurrencyCode: "EUR",
+        reviewedOperationalSiteKey: "lisbon-main",
+        reviewedTechnicianUserId: USER_A,
+        reviewedDeliveredAt: deliveredAt,
+        reviewedServices: [{ code: "PDR", quantity: 1 }],
+        reviewedTotal: new Prisma.Decimal("125.50"),
+      },
+      include: { reviewedClient: true },
+    });
+
+    expect(item.reviewedClient?.workspaceId).toBe(WS_A);
+    expect(item.reviewedCurrencyCode).toBe("EUR");
+    expect(item.reviewedOperationalSiteKey).toBe("lisbon-main");
+    expect(item.reviewedTechnicianUserId).toBe(USER_A);
+    expect(item.reviewedDeliveredAt).toEqual(deliveredAt);
+    expect(item.reviewedVin).toBe("WVWZZZ1JZXW000001");
+    expect(item.reviewedTotal?.toString()).toBe("125.5");
+  });
+
+  it("SCHEMA-OP-STAGING-CLIENT-TENANT-01: cliente operacional revisado cross-tenant é rejeitado", async () => {
+    const operationalImport = await prisma.externalOperationalImport.create({
+      data: {
+        workspaceId: WS_A,
+        fileName: "invalid-client-weeklog.xlsx",
+        uploadedBy: USER_A,
+      },
+    });
+
+    await expect(
+      prisma.externalOperationalImportItem.create({
+        data: {
+          workspaceId: WS_A,
+          importId: operationalImport.id,
+          reviewedClientId: CLIENT_B,
+        },
+      })
+    ).rejects.toMatchObject({ code: "P2003" });
+  });
+
+  it("SCHEMA-OP-STAGING-NO-DEFAULT-DATE-01: data revisada não é fabricada automaticamente", async () => {
+    const operationalImport = await prisma.externalOperationalImport.create({
+      data: {
+        workspaceId: WS_A,
+        fileName: "undated-weeklog.xlsx",
+        uploadedBy: USER_A,
+      },
+    });
+    const item = await prisma.externalOperationalImportItem.create({
+      data: { workspaceId: WS_A, importId: operationalImport.id },
+    });
+
+    expect(item.reviewedDeliveredAt).toBeNull();
+  });
+
+  it("SCHEMA-OP-STAGING-NO-DEFAULT-CURRENCY-01: moeda revisada não recebe default silencioso", async () => {
+    const operationalImport = await prisma.externalOperationalImport.create({
+      data: {
+        workspaceId: WS_A,
+        fileName: "uncurried-weeklog.xlsx",
+        uploadedBy: USER_A,
+      },
+    });
+    const item = await prisma.externalOperationalImportItem.create({
+      data: { workspaceId: WS_A, importId: operationalImport.id },
+    });
+
+    expect(item.reviewedCurrencyCode).toBeNull();
+  });
+
   it("SCHEMA-MONEY-DECIMAL-01: Campos monetários são Decimal(12,2) e preservam precisão exata", async () => {
     const list = await prisma.paymentList.create({
       data: {
@@ -1049,13 +1222,15 @@ describe("Spec 004 — T03/T04 Relational Schema & Migration Verification Suite"
       FROM "_prisma_migrations" 
       WHERE migration_name IN (
         '20260921120000_spec004_payment_list_domain',
-        '20260921130000_spec004_relational_hardening'
+        '20260921130000_spec004_relational_hardening',
+        '20260921140000_spec004_import_staging_unblock'
       )
       ORDER BY migration_name
     `);
     expect(applied.map((migration) => migration.migration_name)).toEqual([
       "20260921120000_spec004_payment_list_domain",
       "20260921130000_spec004_relational_hardening",
+      "20260921140000_spec004_import_staging_unblock",
     ]);
     expect(applied.every((migration) => migration.finished_at !== null)).toBe(true);
   });
