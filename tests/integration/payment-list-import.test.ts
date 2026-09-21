@@ -6,6 +6,9 @@ import { prisma } from "../../backend/src/lib/prisma.js";
 import { signAccessToken } from "../../backend/src/lib/jwt.js";
 import { ForbiddenError } from "../../backend/src/lib/objectAuth.js";
 import { aiImportExtractionProvider, minioImportDocumentStorage } from "../../backend/src/services/externalImportAdapters.js";
+import { fetchAICompletion, parseToolCall } from "../../backend/src/lib/ai.js";
+
+vi.mock("../../backend/src/lib/ai.js", () => ({ fetchAICompletion: vi.fn(), parseToolCall: vi.fn() }));
 
 // Configurações de ambiente mínimas para testes
 process.env.NODE_ENV = "test";
@@ -434,6 +437,19 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
       expect(record.items).toHaveLength(0);
       expect(record.reviewedClientId).toBeNull();
       expect(record.reviewedCurrencyCode).toBeNull();
+    });
+
+    it("IMPORT-PROVIDER-DTO-01: saída vazia, serviço inválido e JSON malformado são rejeitados pelo adapter Zod", async () => {
+      vi.mocked(aiImportExtractionProvider.extractListDocument).mockRestore();
+      vi.mocked(fetchAICompletion).mockResolvedValue({ ok: true, json: async () => ({}) } as any);
+      vi.mocked(parseToolCall).mockReturnValue({ rows: [] });
+      await expect(aiImportExtractionProvider.extractListDocument({ bytes: Buffer.from("%PDF-"), mimeType: "application/pdf", fileName: "dto.pdf" })).rejects.toThrow("IMPORT_EXTRACTION_INVALID_OUTPUT");
+
+      vi.mocked(parseToolCall).mockReturnValue({ rows: [{ rawServices: [{ description: "PDR", amount: "not-a-number" }] }] });
+      await expect(aiImportExtractionProvider.extractListDocument({ bytes: Buffer.from("%PDF-"), mimeType: "application/pdf", fileName: "dto.pdf" })).rejects.toThrow("IMPORT_EXTRACTION_INVALID_OUTPUT");
+
+      vi.mocked(fetchAICompletion).mockResolvedValue({ ok: true, json: async () => { throw new SyntaxError("malformed provider json"); } } as any);
+      await expect(aiImportExtractionProvider.extractListDocument({ bytes: Buffer.from("%PDF-"), mimeType: "application/pdf", fileName: "dto.pdf" })).rejects.toThrow("malformed provider json");
     });
 
     it("IMPORT-RETRY-IDEMPOTENT-01: retry explícito reutiliza o original uma vez e concorrência não duplica staging", async () => {

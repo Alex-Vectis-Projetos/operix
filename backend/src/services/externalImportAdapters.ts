@@ -37,6 +37,13 @@ export interface ImportExtractionProvider {
 }
 
 const nullableText = z.string().trim().max(1_000).nullable().optional();
+const rawServiceSchema = z.object({
+  code: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().min(1).max(500).optional(),
+  quantity: z.union([z.number().positive(), z.string().regex(/^\d+(\.\d+)?$/)]).optional(),
+  amount: z.union([z.number().positive(), z.string().regex(/^\d+(\.\d+)?$/)]).optional(),
+  unitPrice: z.union([z.number().positive(), z.string().regex(/^\d+(\.\d+)?$/)]).optional(),
+}).passthrough().refine((service) => Boolean(service.code || service.description), "RAW_SERVICE_IDENTIFIER_REQUIRED");
 const extractedRowSchema = z.object({
   rawLicensePlate: nullableText,
   rawVin: nullableText,
@@ -47,7 +54,7 @@ const extractedRowSchema = z.object({
   rawTechnician: nullableText,
   rawWeek: nullableText,
   rawDeliveredAtText: nullableText,
-  rawServices: z.unknown().optional(),
+  rawServices: z.array(rawServiceSchema).min(1).max(100).optional(),
   rawTotalText: nullableText,
   fieldConfidence: z.unknown().optional(),
 }).strict();
