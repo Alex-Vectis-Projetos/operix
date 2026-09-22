@@ -171,6 +171,8 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
   async function cleanupTestData() {
     await prisma.externalListImportItem.deleteMany({ where: { workspaceId: { in: [FIXTURES_004_IMPORT.wsAlpha, FIXTURES_004_IMPORT.wsBravo] } } });
     await prisma.externalListImport.deleteMany({ where: { workspaceId: { in: [FIXTURES_004_IMPORT.wsAlpha, FIXTURES_004_IMPORT.wsBravo] } } });
+    await prisma.paymentListItem.deleteMany({ where: { workspaceId: { in: [FIXTURES_004_IMPORT.wsAlpha, FIXTURES_004_IMPORT.wsBravo] } } });
+    await prisma.paymentList.deleteMany({ where: { workspaceId: { in: [FIXTURES_004_IMPORT.wsAlpha, FIXTURES_004_IMPORT.wsBravo] } } });
     await prisma.client.deleteMany({
       where: { workspaceId: { in: [FIXTURES_004_IMPORT.wsAlpha, FIXTURES_004_IMPORT.wsBravo] } },
     });
@@ -436,6 +438,38 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
       expect(body.items[0].reviewedTotal).toBe("1250.5");
       expect(body.items[0].reviewedBy).toBe(FIXTURES_004_IMPORT.ownerA.userId);
       expect(body.items[0].reviewedAt).toBeTruthy();
+    });
+
+    it("IMPORT-LIST-COMMIT-IDEMPOTENT-01: staging reviewed só materializa uma PaymentList por commit explícito", async () => {
+      const headers = getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha);
+      const create = await fetch(`${baseUrl}/api/payment-lists/imports`, {
+        method: "POST", headers,
+        body: JSON.stringify({ fileName: "commit-reviewed.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\\ncommit reviewed").toString("base64") }),
+      });
+      const imported = await create.json();
+      const review = await fetch(`${baseUrl}/api/payment-lists/imports/${imported.importId}/rows`, {
+        method: "PATCH", headers,
+        body: JSON.stringify({ header: { reviewedClientId: FIXTURES_004_IMPORT.clientA.id, reviewedCurrencyCode: "EUR" }, rows: [{ id: imported.items[0].id, patch: { reviewedLicensePlate: "AA-11-BB", reviewedServices: [{ code: "PDR", amount: "1250.50" }], reviewedTotal: "1250.50" } }] }),
+      });
+      expect(review.status).toBe(200);
+      expect(await prisma.paymentList.count({ where: { workspaceId: FIXTURES_004_IMPORT.wsAlpha } })).toBe(0);
+
+      const [first, retry] = await Promise.all([
+        fetch(`${baseUrl}/api/payment-lists/imports/${imported.importId}/commit`, { method: "POST", headers }),
+        fetch(`${baseUrl}/api/payment-lists/imports/${imported.importId}/commit`, { method: "POST", headers }),
+      ]);
+      expect([first.status, retry.status]).toEqual([201, 201]);
+      const firstBody = await first.json();
+      const retryBody = await retry.json();
+      expect(retryBody.id).toBe(firstBody.id);
+      expect(firstBody.sourceDocumentTotal).toBe("1250.50");
+      expect(firstBody.recognizedTotal).toBe("0.00");
+      expect(firstBody.items[0].weeklogEntryId).toBeNull();
+      expect(await prisma.paymentList.count({ where: { workspaceId: FIXTURES_004_IMPORT.wsAlpha } })).toBe(1);
+      expect(await prisma.paymentListEntryClaim.count({ where: { paymentListId: firstBody.id } })).toBe(0);
+      const persisted = await prisma.externalListImport.findUniqueOrThrow({ where: { id: imported.importId } });
+      expect(persisted.status).toBe("committed");
+      expect(persisted.paymentListId).toBe(firstBody.id);
     });
 
     it("IMPORT-EXTRACTION-FAILURE-01: falha de provider preserva proveniência, sem staging authority", async () => {

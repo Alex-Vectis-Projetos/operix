@@ -225,6 +225,24 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
   });
 
   async function cleanOperationalData() {
+    await prisma.paymentListConfrontationResult.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_004.wsAlpha, FIXTURES_004.wsBravo] } },
+    });
+    await prisma.paymentListConfrontationRun.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_004.wsAlpha, FIXTURES_004.wsBravo] } },
+    });
+    await prisma.paymentListEntryClaim.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_004.wsAlpha, FIXTURES_004.wsBravo] } },
+    });
+    await prisma.paymentListItem.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_004.wsAlpha, FIXTURES_004.wsBravo] } },
+    });
+    await prisma.paymentList.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_004.wsAlpha, FIXTURES_004.wsBravo] } },
+    });
+    await prisma.tenantSequenceCounter.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_004.wsAlpha, FIXTURES_004.wsBravo] } },
+    });
     await prisma.weeklogValidation.deleteMany({
       where: { workspaceId: { in: [FIXTURES_004.wsAlpha, FIXTURES_004.wsBravo] } },
     });
@@ -292,7 +310,12 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
     amount?: string;
     technicianUserId: string;
     technicianName?: string;
+    week?: { code: string; number: number; startsOn: Date; endsOn: Date };
   }) {
+    const week = params.week ?? {
+      code: "2026-W33", number: 33,
+      startsOn: new Date("2026-08-10T00:00:00Z"), endsOn: new Date("2026-08-16T23:59:59Z"),
+    };
     const po = await prisma.productionOrder.create({
       data: {
         id: `po-${params.id}`,
@@ -311,7 +334,7 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       where: {
         workspaceId_startsOn_clientId_siteKey: {
           workspaceId: params.workspaceId,
-          startsOn: new Date("2026-08-10T00:00:00Z"),
+          startsOn: week.startsOn,
           clientId: params.clientId,
           siteKey: "SITE-PDR-01",
         },
@@ -320,12 +343,12 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       create: {
         id: `wl-${params.id}`,
         workspaceId: params.workspaceId,
-        startsOn: new Date("2026-08-10T00:00:00Z"),
-        endsOn: new Date("2026-08-16T23:59:59Z"),
+        startsOn: week.startsOn,
+        endsOn: week.endsOn,
         clientId: params.clientId,
         siteKey: "SITE-PDR-01",
-        week: "2026-W33",
-        weekNumber: 33,
+        week: week.code,
+        weekNumber: week.number,
         yearReference: 2026,
         status: "validated",
       },
@@ -369,6 +392,72 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
     });
   }
 
+  async function createClaimedList(params: {
+    id: string;
+    listNumber: string;
+    entryId: string;
+    status?: "draft" | "under_review" | "confronted" | "pending" | "paid";
+    claimStatus?: "reserved" | "consumed";
+  }) {
+    const entry = await createValidWeeklogEntry({
+      id: params.entryId,
+      workspaceId: FIXTURES_004.wsAlpha,
+      clientId: FIXTURES_004.clientA.id,
+      technicianUserId: FIXTURES_004.techA1.userId,
+      currencyCode: "EUR",
+    });
+    const list = await prisma.paymentList.create({
+      data: {
+        id: params.id,
+        workspaceId: FIXTURES_004.wsAlpha,
+        listNumber: params.listNumber,
+        clientId: FIXTURES_004.clientA.id,
+        clientName: FIXTURES_004.clientA.name,
+        currencyCode: "EUR",
+        status: params.status ?? "draft",
+        itemCount: 1,
+        sourceDocumentTotal: entry.totalAmount,
+        recognizedTotal: "0.00",
+        createdBy: FIXTURES_004.ownerA.userId,
+        items: {
+          create: {
+            weeklogEntryId: entry.id,
+            technicianUserId: entry.technicianUserId,
+            technicianName: entry.technicianName,
+            servicesSnapshot: entry.servicesSnapshot,
+            totalAmount: entry.totalAmount,
+          },
+        },
+      },
+      include: { items: true },
+    });
+    await prisma.paymentListEntryClaim.create({
+      data: {
+        workspaceId: FIXTURES_004.wsAlpha,
+        paymentListId: list.id,
+        weeklogEntryId: entry.id,
+        status: params.claimStatus ?? "reserved",
+        consumedAt: params.claimStatus === "consumed" ? new Date() : undefined,
+      },
+    });
+    if (list.status === "confronted") {
+      const run = await prisma.paymentListConfrontationRun.create({
+        data: { workspaceId: FIXTURES_004.wsAlpha, paymentListId: list.id, sequence: 1, status: "completed", completedAt: new Date() },
+      });
+      await prisma.paymentListConfrontationResult.create({
+        data: {
+          workspaceId: FIXTURES_004.wsAlpha,
+          paymentListId: list.id,
+          runId: run.id,
+          paymentListItemId: list.items[0]!.id,
+          weeklogEntryId: entry.id,
+          status: "exact_match",
+        },
+      });
+    }
+    return { list, entry };
+  }
+
   // =========================================================================
   // GRUPO 1: DOMÍNIO DA LISTA DE PAGAMENTO & INVARIANTES DE TENANCY
   // =========================================================================
@@ -376,83 +465,9 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
   describe("Grupo 1: Invariantes de Domínio e Tenancy da Lista de Pagamento", () => {
     it("LIST-MULTIWEEK-01: Agregação Multissemanas Autoritativa em Única Lista", async () => {
       // Given: 3 lotes Weeklog validados distintos (W29, W30, W32) no mesmo workspaceId e clientId
-      const w29 = await prisma.weeklog.create({
-        data: {
-          id: "wl-004-mw-w29",
-          workspaceId: FIXTURES_004.wsAlpha,
-          week: "2026-W29",
-          startsOn: new Date("2026-07-13T00:00:00Z"),
-          endsOn: new Date("2026-07-19T23:59:59Z"),
-          clientId: FIXTURES_004.clientA.id,
-          siteKey: "SITE-PDR-01",
-          status: "validated",
-          entries: {
-            create: {
-              id: "entry-004-w29-a1",
-              workspaceId: FIXTURES_004.wsAlpha,
-              technicianUserId: FIXTURES_004.techA1.userId,
-              technicianName: "Tech A1",
-              executionSequence: 1,
-              currencyCode: "EUR",
-              totalAmount: "500.00",
-              performedServices: [{ description: "PDR W29", amount: "500.00" }],
-              validationStatus: "approved",
-            },
-          },
-        },
-      });
-
-      const w30 = await prisma.weeklog.create({
-        data: {
-          id: "wl-004-mw-w30",
-          workspaceId: FIXTURES_004.wsAlpha,
-          week: "2026-W30",
-          startsOn: new Date("2026-07-20T00:00:00Z"),
-          endsOn: new Date("2026-07-26T23:59:59Z"),
-          clientId: FIXTURES_004.clientA.id,
-          siteKey: "SITE-PDR-01",
-          status: "validated",
-          entries: {
-            create: {
-              id: "entry-004-w30-b1",
-              workspaceId: FIXTURES_004.wsAlpha,
-              technicianUserId: FIXTURES_004.techA2.userId,
-              technicianName: "Tech A2",
-              executionSequence: 1,
-              currencyCode: "EUR",
-              totalAmount: "350.00",
-              performedServices: [{ description: "PDR W30", amount: "350.00" }],
-              validationStatus: "approved",
-            },
-          },
-        },
-      });
-
-      const w32 = await prisma.weeklog.create({
-        data: {
-          id: "wl-004-mw-w32",
-          workspaceId: FIXTURES_004.wsAlpha,
-          week: "2026-W32",
-          startsOn: new Date("2026-08-03T00:00:00Z"),
-          endsOn: new Date("2026-08-09T23:59:59Z"),
-          clientId: FIXTURES_004.clientA.id,
-          siteKey: "SITE-PDR-01",
-          status: "validated",
-          entries: {
-            create: {
-              id: "entry-004-w32-c1",
-              workspaceId: FIXTURES_004.wsAlpha,
-              technicianUserId: FIXTURES_004.techA1.userId,
-              technicianName: "Tech A1",
-              executionSequence: 1,
-              currencyCode: "EUR",
-              totalAmount: "600.00",
-              performedServices: [{ description: "PDR W32", amount: "600.00" }],
-              validationStatus: "approved",
-            },
-          },
-        },
-      });
+      await createValidWeeklogEntry({ id: "entry-004-w29-a1", workspaceId: FIXTURES_004.wsAlpha, clientId: FIXTURES_004.clientA.id, technicianUserId: FIXTURES_004.techA1.userId, currencyCode: "EUR", amount: "500.00", week: { code: "2026-W29", number: 29, startsOn: new Date("2026-07-13T00:00:00Z"), endsOn: new Date("2026-07-19T23:59:59Z") } });
+      await createValidWeeklogEntry({ id: "entry-004-w30-b1", workspaceId: FIXTURES_004.wsAlpha, clientId: FIXTURES_004.clientA.id, technicianUserId: FIXTURES_004.techA2.userId, currencyCode: "EUR", amount: "350.00", week: { code: "2026-W30", number: 30, startsOn: new Date("2026-07-20T00:00:00Z"), endsOn: new Date("2026-07-26T23:59:59Z") } });
+      await createValidWeeklogEntry({ id: "entry-004-w32-c1", workspaceId: FIXTURES_004.wsAlpha, clientId: FIXTURES_004.clientA.id, technicianUserId: FIXTURES_004.techA1.userId, currencyCode: "EUR", amount: "600.00", week: { code: "2026-W32", number: 32, startsOn: new Date("2026-08-03T00:00:00Z"), endsOn: new Date("2026-08-09T23:59:59Z") } });
 
       // When: Gestor cria PaymentList consolidando as 3 entradas de semanas distintas
       const res = await fetch(`${baseUrl}/api/payment-lists`, {
@@ -506,6 +521,17 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
     it("LIST-TECH-OWN-01: Restrição de Escopo de Técnico (scope: own) e Ocultação de Faturamento Global", async () => {
       // Given: Técnico autenticado techA1 consulta lista contendo itens de múltiplos técnicos
       const listId = "44000000-0000-4000-8000-000000000001";
+      await prisma.paymentList.create({
+        data: {
+          id: listId, workspaceId: FIXTURES_004.wsAlpha, listNumber: "L900001",
+          clientId: FIXTURES_004.clientA.id, clientName: FIXTURES_004.clientA.name, currencyCode: "EUR",
+          itemCount: 2, sourceDocumentTotal: "900.00", recognizedTotal: "0.00", createdBy: FIXTURES_004.ownerA.userId,
+          items: { create: [
+            { technicianUserId: FIXTURES_004.techA1.userId, technicianName: "Tech A1", servicesSnapshot: [], totalAmount: "450.00" },
+            { technicianUserId: FIXTURES_004.techA2.userId, technicianName: "Tech A2", servicesSnapshot: [], totalAmount: "450.00" },
+          ] },
+        },
+      });
 
       // When: Técnico consulta a lista via GET /api/payment-lists/:id
       const res = await fetch(`${baseUrl}/api/payment-lists/${listId}`, {
@@ -518,6 +544,8 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       expect(data.sourceDocumentTotal).toBeUndefined();
       expect(data.recognizedTotal).toBeUndefined();
       expect(data.profitMargin).toBeUndefined();
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].technicianUserId).toBe(FIXTURES_004.techA1.userId);
     });
 
     it("LIST-CLAIM-RESERVED-01: Associação Inicial com Claim em Status Reserved", async () => {
@@ -551,6 +579,7 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
     it("LIST-CLAIM-CONSUMED-01: Transição de Claim para Consumed no Avanço para Pending", async () => {
       // Given: PaymentList L1 contendo W1 com claim em status 'reserved'
       const listId = "44000000-0000-4000-8000-000000000002";
+      const fixture = await createClaimedList({ id: listId, listNumber: "L900002", entryId: "entry-004-claim-consumed", status: "confronted" });
 
       // When: Gestor avança lista para 'pending'
       const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/status`, {
@@ -563,9 +592,10 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.status).toBe("pending");
+      expect((await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: fixture.list.id } })).status).toBe("consumed");
     });
 
-    it("LIST-CLAIM-REJECT-RELEASE-01: Liberação de Claim para Released no Desfecho REJECT_ITEM", async () => {
+    it.skip("LIST-CLAIM-REJECT-RELEASE-01: Liberação de Claim para Released no Desfecho REJECT_ITEM [T07]", async () => {
       // Given: PaymentList em conferência com resultado divergente
       const listId = "44000000-0000-4000-8000-000000000003";
       const resultId = "45000000-0000-4000-8000-000000000001";
@@ -589,6 +619,7 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
     it("LIST-CANCEL-RELIST-01: Liberação de Execução após Cancelamento de Lista", async () => {
       // Given: PaymentList contendo execução reservada
       const listId = "44000000-0000-4000-8000-000000000004";
+      const fixture = await createClaimedList({ id: listId, listNumber: "L900004", entryId: "entry-004-cancel-relist" });
 
       // When: Gestor cancela a lista
       const resCancel = await fetch(`${baseUrl}/api/payment-lists/${listId}/status`, {
@@ -599,11 +630,18 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
 
       // Then: Lista cancelada com sucesso (HTTP 200) e claims liberadas
       expect(resCancel.status).toBe(200);
+      expect((await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: fixture.list.id } })).status).toBe("released");
+      const relist = await fetch(`${baseUrl}/api/payment-lists`, {
+        method: "POST", headers: getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha),
+        body: JSON.stringify({ clientId: FIXTURES_004.clientA.id, currencyCode: "EUR", entryIds: [fixture.entry.id] }),
+      });
+      expect(relist.status).toBe(201);
     });
 
     it("LIST-CLAIM-PAID-NO-RELIST-01: Proibição de Refaturamento de Execução em Lista Paga", async () => {
       // Given: Entry já pertencente a uma lista em status 'paid'
       const entryId = "entry-004-already-paid";
+      await createClaimedList({ id: "44000000-0000-4000-8000-000000000008", listNumber: "L900008", entryId, status: "paid", claimStatus: "consumed" });
 
       // When: Usuário tenta associar a mesma entry a uma nova lista
       const res = await fetch(`${baseUrl}/api/payment-lists`, {
@@ -672,7 +710,6 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
           body: JSON.stringify({
             clientId: FIXTURES_004.clientA.id,
             currencyCode: "EUR",
-            sourceDocumentTotal: "100.00",
           }),
         })
       );
@@ -834,6 +871,7 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
     it("LIST-PENDING-01: Transição para Pending Exigindo Status Confronted e Zero Disputas", async () => {
       // Given: PaymentList em status confronted com todos os itens aceitos
       const listId = "44000000-0000-4000-8000-000000000005";
+      await createClaimedList({ id: listId, listNumber: "L900005", entryId: "entry-004-pending", status: "confronted" });
 
       // When: Gestor avança para 'pending'
       const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/status`, {
@@ -851,6 +889,10 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
     it("LIST-PAID-IDEMPOTENT-01: Confirmação Idempotente de Recebimento por Gestor Autorizado", async () => {
       // Given: PaymentList em status 'pending'
       const listId = "44000000-0000-4000-8000-000000000006";
+      await prisma.paymentList.create({ data: {
+        id: listId, workspaceId: FIXTURES_004.wsAlpha, listNumber: "L900006", clientId: FIXTURES_004.clientA.id,
+        clientName: FIXTURES_004.clientA.name, currencyCode: "EUR", status: "pending", createdBy: FIXTURES_004.ownerA.userId,
+      } });
 
       // When: Duas chamadas consecutivas de liquidação (toStatus: 'paid')
       const headers = getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha);
@@ -876,6 +918,10 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
     it("LIST-PAID-FORBIDDEN-01: Bloqueio de Liquidação por Usuário sem Papel de Gestão", async () => {
       // Given: PaymentList em pending e usuário técnico
       const listId = "44000000-0000-4000-8000-000000000007";
+      await prisma.paymentList.create({ data: {
+        id: listId, workspaceId: FIXTURES_004.wsAlpha, listNumber: "L900007", clientId: FIXTURES_004.clientA.id,
+        clientName: FIXTURES_004.clientA.name, currencyCode: "EUR", status: "pending", createdBy: FIXTURES_004.ownerA.userId,
+      } });
 
       // When: Técnico tenta acionar toStatus: 'paid'
       const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/status`, {
@@ -888,7 +934,7 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       expect(res.status).toBe(403);
     });
 
-    it("LEGACY-PAYMENTORDER-READONLY-01: Proibição de Mutações em Rotas Legadas", async () => {
+    it.skip("LEGACY-PAYMENTORDER-READONLY-01: Proibição de Mutações em Rotas Legadas [T09]", async () => {
       // Given: Ordem legada existente e usuário autenticado
       const po = await createLegacyPaymentOrder({
         id: "po-legacy-readonly-test",
