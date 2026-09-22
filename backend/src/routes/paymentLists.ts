@@ -18,6 +18,7 @@ import {
   listPaymentLists,
   transitionPaymentList,
 } from "../services/paymentListService.js";
+import { decideConfrontationResult, getConfrontation, runConfrontation } from "../services/confrontationService.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const jsonUploadSchema = z.object({
@@ -29,6 +30,7 @@ const rowsReviewSchema = z.object({
   header: z.unknown().optional(),
   rows: z.array(z.object({ id: z.string().uuid(), patch: z.object({}).passthrough() }).strict()).optional(),
 }).strict();
+const confrontSchema = z.object({ mode: z.enum(["current", "new_round"]).optional() }).strict();
 
 export const paymentListsRouter = Router();
 paymentListsRouter.use(requireAuth);
@@ -134,6 +136,32 @@ paymentListsRouter.get("/", async (req: Request, res: Response) => {
 paymentListsRouter.post("/", async (req: Request, res: Response) => {
   try {
     return res.status(201).json(await createPaymentList(req.ctx!, req.body));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.get("/:id/confrontation", async (req: Request, res: Response) => {
+  try {
+    return res.json(await getConfrontation(req.ctx!, routeParam(req, "id")));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.post("/:id/confront", async (req: Request, res: Response) => {
+  try {
+    const payload = confrontSchema.parse(req.body ?? {});
+    const result = await runConfrontation(req.ctx!, routeParam(req, "id"), payload);
+    return res.status(result.idempotent ? 200 : 201).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.patch("/:id/confrontation/:resultId/decision", async (req: Request, res: Response) => {
+  try {
+    return res.json(await decideConfrontationResult(req.ctx!, routeParam(req, "id"), routeParam(req, "resultId"), req.body));
   } catch (error) {
     return sendError(res, error);
   }

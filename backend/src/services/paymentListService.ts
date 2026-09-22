@@ -165,17 +165,20 @@ export async function transitionPaymentList(ctx: RequestContext, id: string, tar
     const allowed: Record<string, string[]> = { draft: ["under_review", "cancelled"], under_review: ["confronted", "cancelled"], confronted: ["pending"], pending: ["paid"], paid: [], cancelled: [] };
     if (!allowed[list.status].includes(toStatus)) throw new ConflictError("LIST_INVALID_STATE_TRANSITION");
     if (toStatus === "pending") {
-      // T06 deliberately does not manufacture confrontation decisions. Until
-      // T07 provides a complete reviewed run, an absence of results is never
-      // interpreted as commercial approval.
-      const results = await tx.paymentListConfrontationResult.findMany({
-        where: { paymentListId: list.id, workspaceId },
-        select: { id: true, decision: true },
+      const currentRun = await tx.paymentListConfrontationRun.findFirst({
+        where: { paymentListId: list.id, workspaceId, status: "completed" },
+        orderBy: { sequence: "desc" },
+        include: { results: { select: { paymentListItemId: true, status: true, decision: true } } },
       });
-      if (results.length !== list.itemCount || results.some((result) => result.decision === "reject_item")) {
+      if (!currentRun) {
         throw new ConflictError("LIST_CONFRONTATION_REQUIRED");
       }
-      if (results.some((result) => result.decision === "contest" || result.decision === "request_rectification")) {
+      const itemResults = currentRun.results.filter((result) => result.paymentListItemId !== null);
+      const evaluatedItems = new Set(itemResults.map((result) => result.paymentListItemId));
+      if (evaluatedItems.size !== list.itemCount || currentRun.results.some((result) => result.status === "ambiguous_match" || result.status === "unmatched_weeklog" || (result.status !== "exact_match" && result.decision === "none"))) {
+        throw new ConflictError("LIST_CONFRONTATION_REQUIRED");
+      }
+      if (currentRun.results.some((result) => result.decision === "contest" || result.decision === "request_rectification")) {
         throw new ConflictError("UNRESOLVED_DISPUTES_BLOCK_PENDING");
       }
       await tx.paymentListEntryClaim.updateMany({ where: { paymentListId: list.id, workspaceId, status: "reserved" }, data: { status: "consumed", consumedAt: new Date() } });
