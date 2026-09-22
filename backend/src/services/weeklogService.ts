@@ -1509,7 +1509,8 @@ export async function rectifyWeeklogEntry(
   ctx: RequestContext,
   weeklogId: string,
   entryId: string,
-  payload: RectifyWeeklogEntryPayload
+  payload: RectifyWeeklogEntryPayload,
+  txOverride?: Prisma.TransactionClient
 ): Promise<RectifyWeeklogEntryResult> {
   if (!ctx.activeWorkspaceId) {
     throw new ForbiddenError("Workspace ativo não definido.");
@@ -1543,9 +1544,10 @@ export async function rectifyWeeklogEntry(
     assignedTech = await validateTechnicianAssignment(ctx, payload.assignedTechnicianUserId);
   }
 
-  // 4. Execução atômica sob locks pessimistas ordenados
-  return await prisma.$transaction(
-    async (tx) => {
+  // 4. Execução atômica sob locks pessimistas ordenados. T08 may provide the
+  // caller's transaction so the commercial decision and operational rework
+  // have one commit boundary.
+  const execute = async (tx: Prisma.TransactionClient): Promise<RectifyWeeklogEntryResult> => {
       // Step 4.1: Lock order determinística: Weeklog -> WeeklogEntry -> ProductionOrder
       const [lockedWl] = await tx.$queryRaw<Array<{ id: string; workspaceId: string }>>`
         SELECT id, workspace_id as "workspaceId"
@@ -1773,11 +1775,20 @@ export async function rectifyWeeklogEntry(
         weeklogEntry: updatedEntry,
         idempotent: false,
       };
-    },
-    {
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-    }
-  );
+  };
+  return txOverride
+    ? execute(txOverride)
+    : prisma.$transaction(execute, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
+export function rectifyWeeklogEntryInTransaction(
+  tx: Prisma.TransactionClient,
+  ctx: RequestContext,
+  weeklogId: string,
+  entryId: string,
+  payload: RectifyWeeklogEntryPayload,
+) {
+  return rectifyWeeklogEntry(ctx, weeklogId, entryId, payload, tx);
 }
 
 

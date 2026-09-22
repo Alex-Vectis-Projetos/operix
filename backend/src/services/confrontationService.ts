@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { ConflictError, ForbiddenError, NotFoundError, UnprocessableEntityError } from "../lib/objectAuth.js";
 import type { RequestContext } from "../middleware/requestContext.js";
+import { rectifyWeeklogEntryInTransaction } from "./weeklogService.js";
 
 const modeSchema = z.enum(["current", "new_round"]);
 const decisionSchema = z.object({
@@ -282,7 +283,17 @@ export async function decideConfrontationResult(ctx: RequestContext, listId: str
     const latest = await tx.paymentListConfrontationRun.findFirst({ where: { paymentListId: listId, workspaceId: workspace }, orderBy: { sequence: "desc" } });
     if (!latest || latest.id !== result.runId) throw new ConflictError("CONFRONTATION_RUN_NOT_CURRENT");
     if (result.decision !== "none") {
-      if (result.decision === input.decision && result.notes === input.notes) return { result: presentResult(result), idempotent: true };
+      if (result.decision === input.decision && result.notes === input.notes) {
+        if (input.decision === "request_rectification" && (!result.reopenedProductionOrderId || !result.targetExecutionSequence)) {
+          const entry = result.weeklogEntryId ? await tx.weeklogEntry.findFirst({ where: { id: result.weeklogEntryId, workspaceId: workspace }, select: { id: true, weeklogId: true, sourceType: true, productionOrderId: true } }) : null;
+          if (!entry) throw new ConflictError("RECTIFICATION_LINEAGE_CONFLICT");
+          if (entry.sourceType === "external_import" || !entry.productionOrderId) throw new UnprocessableEntityError("EXTERNAL_ENTRY_CANNOT_RECTIFY_PO");
+          const rectification = await rectifyWeeklogEntryInTransaction(tx, ctx, entry.weeklogId, entry.id, { reason: input.notes });
+          const recovered = await tx.paymentListConfrontationResult.update({ where: { id: result.id }, data: { reopenedProductionOrderId: rectification.productionOrder.id, targetExecutionSequence: rectification.productionOrder.executionSequence } });
+          return { result: presentResult(recovered), idempotent: true };
+        }
+        return { result: presentResult(result), idempotent: true };
+      }
       throw new ConflictError("CONFRONTATION_DECISION_ALREADY_RECORDED");
     }
     if (result.status === "exact_match") throw new UnprocessableEntityError("CONFRONTATION_DECISION_NOT_ALLOWED");
@@ -292,7 +303,15 @@ export async function decideConfrontationResult(ctx: RequestContext, listId: str
     if (!result.paymentListItemId && input.decision !== "request_rectification") throw new UnprocessableEntityError("CONFRONTATION_DECISION_NOT_ALLOWED");
     if (input.decision === "reject_item" && !result.paymentListItemId) throw new UnprocessableEntityError("CONFRONTATION_DECISION_NOT_ALLOWED");
     if (input.decision === "request_rectification" && !result.weeklogEntryId) throw new UnprocessableEntityError("CONFRONTATION_DECISION_NOT_ALLOWED");
-    const updated = await tx.paymentListConfrontationResult.update({ where: { id: result.id }, data: { decision: input.decision as ConfrontationDecision, notes: input.notes, decidedBy: ctx.actorUserId, decidedAt: new Date() } });
+    let lineage: { reopenedProductionOrderId?: string; targetExecutionSequence?: number } = {};
+    if (input.decision === "request_rectification") {
+      const entry = await tx.weeklogEntry.findFirst({ where: { id: result.weeklogEntryId!, workspaceId: workspace }, select: { id: true, weeklogId: true, sourceType: true, productionOrderId: true } });
+      if (!entry) throw new NotFoundError("WEEKLOG_ENTRY_NOT_FOUND");
+      if (entry.sourceType === "external_import" || !entry.productionOrderId) throw new UnprocessableEntityError("EXTERNAL_ENTRY_CANNOT_RECTIFY_PO");
+      const rectification = await rectifyWeeklogEntryInTransaction(tx, ctx, entry.weeklogId, entry.id, { reason: input.notes });
+      lineage = { reopenedProductionOrderId: rectification.productionOrder.id, targetExecutionSequence: rectification.productionOrder.executionSequence };
+    }
+    const updated = await tx.paymentListConfrontationResult.update({ where: { id: result.id }, data: { decision: input.decision as ConfrontationDecision, notes: input.notes, decidedBy: ctx.actorUserId, decidedAt: new Date(), ...lineage } });
     if (input.decision === "reject_item" && result.weeklogEntryId) {
       await tx.paymentListEntryClaim.updateMany({ where: { workspaceId: workspace, paymentListId: listId, weeklogEntryId: result.weeklogEntryId, status: "reserved" }, data: { status: "released", releasedAt: new Date(), releasedReason: "rejected_in_confrontation" } });
     }
