@@ -252,6 +252,10 @@ financeRouter.post("/reconciliations/manual-merge", requireAuth, async (req: Aut
 
 /* ═══════════════════ Motor de reconciliação (port da edge function run-reconciliation) ═══════════════════ */
 
+financeRouter.post("/reconciliations/run", requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
+  return res.status(410).json({ code: "LEGACY_RECONCILIATION_ENGINE_DEPRECATED", message: "A reconciliação comercial é operada por /api/payment-lists." });
+});
+
 function normalizePlate(s?: string | null): string {
   return (s ?? "").trim().toUpperCase().replace(/[\s\-.]/g, "");
 }
