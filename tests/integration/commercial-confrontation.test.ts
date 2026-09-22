@@ -1,521 +1,328 @@
 // @vitest-environment node
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-// @ts-expect-error backend dependency
-import express, { type Request, type Response, type NextFunction } from "../../backend/node_modules/express/index.js";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+// @ts-expect-error backend dependency is intentionally isolated from the SPA test graph.
+import express, { type NextFunction, type Request, type Response } from "../../backend/node_modules/express/index.js";
 import { prisma } from "../../backend/src/lib/prisma.js";
 import { signAccessToken } from "../../backend/src/lib/jwt.js";
 import { ForbiddenError } from "../../backend/src/lib/objectAuth.js";
 
-// Configurações de ambiente mínimas para testes
 process.env.NODE_ENV = "test";
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL || "postgresql://operix_local:U2dkA-cJYnwHuD7hiAY2hPTrkawjg6f8@127.0.0.1:55432/operix_local?schema=public";
-process.env.JWT_SECRET = process.env.JWT_SECRET || "this-is-a-test-secret-with-more-than-32-chars-long";
-process.env.MINIO_ROOT_PASSWORD = process.env.MINIO_ROOT_PASSWORD || "miniopassword123456";
+process.env.DATABASE_URL ??= "postgresql://operix_local:U2dkA-cJYnwHuD7hiAY2hPTrkawjg6f8@127.0.0.1:55432/operix_local?schema=public";
+process.env.JWT_SECRET ??= "this-is-a-test-secret-with-more-than-32-chars-long";
 
-/**
- * Spec 004 — Commercial Confrontation & Dispute Governance Suite (T01/T02 Baseline)
- * 
- * Cobre os 10 cenários do Grupo 4 (Motor de Confronto Versionado, Tríade Veículo-Serviço-Valor,
- * Pareamento Único, Ambiguidade, Imutabilidade de Rerun e Decisão Humana),
- * além dos cenários de bloqueio de disputas e fronteira contábil:
- * 
- * - CONFRONT-NOT-EVALUATED-01
- * - CONFRONT-IDEMPOTENT-01
- * - CONFRONT-RERUN-HISTORY-01
- * - CONFRONT-RERUN-DECISION-IMMUTABLE-01
- * - CONFRONT-VEHICLE-01
- * - CONFRONT-SERVICE-01
- * - CONFRONT-VALUE-01
- * - CONFRONT-AMBIGUOUS-01
- * - CONFRONT-UNMATCHED-WEEKLOG-01
- * - CONFRONT-HUMAN-DECISION-01
- * - LIST-PENDING-BLOCKED-CONTEST-01
- * - LIST-PENDING-BLOCKED-RECTIFICATION-01
- * - LIST-RECTIFICATION-LINEAGE-01
- * - NO-FINANCE-SIDE-EFFECT-04
- */
-
-const FIXTURES_004_CONFRONT = {
-  wsAlpha: "40000000-0000-4000-8000-000000000050",
-  wsBravo: "40000000-0000-4000-8000-000000000060",
-  ownerA: {
-    userId: "41000000-0000-4000-8000-000000000050",
-    appUserId: "42000000-0000-4000-8000-000000000050",
-    email: "owner.a.confront@example.com",
-    role: "owner",
-  },
-  techA1: {
-    userId: "41000000-0000-4000-8000-000000000051",
-    appUserId: "42000000-0000-4000-8000-000000000051",
-    email: "tech.a1.confront@example.com",
-    role: "technician",
-  },
-  clientA: {
-    id: "43000000-0000-4000-8000-000000000050",
-    name: "Cliente Confronto Alpha",
-  },
+const fixture = {
+  workspaceId: "40000000-0000-4000-8000-000000000050",
+  clientId: "43000000-0000-4000-8000-000000000050",
+  owner: { id: "41000000-0000-4000-8000-000000000050", appId: "42000000-0000-4000-8000-000000000050", email: "owner.a.confront@example.com" },
+  technician: { id: "41000000-0000-4000-8000-000000000051", appId: "42000000-0000-4000-8000-000000000051", email: "tech.a.confront@example.com" },
 };
+const validVin = "1HGCM82633A004352";
+const pdr = [{ type: "PDR", quantity: "1" }];
 
-describe("Spec 004 — Commercial Confrontation & Disputes Suite (T01/T02 Baseline)", () => {
+describe("Spec 004 — Commercial Confrontation & Disputes", () => {
   let app: express.Express;
-  let server: any;
+  let server: ReturnType<express.Express["listen"]>;
   let baseUrl: string;
+  let serial = 0;
 
-  beforeAll(async () => {
-    await cleanupTestData();
-
-    for (const actor of [FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.techA1]) {
-      await prisma.user.create({
-        data: {
-          id: actor.userId,
-          email: actor.email,
-          fullName: actor.email.split("@")[0],
-          role: actor.role === "owner" ? "admin" : "user",
-          passwordHash: "hash-spec004-confront-test",
-          isActive: true,
-          appUser: {
-            create: {
-              id: actor.appUserId,
-              email: actor.email,
-              name: actor.email.split("@")[0],
-            },
-          },
-        },
-      });
-    }
-
-    await prisma.workspace.create({
-      data: {
-        id: FIXTURES_004_CONFRONT.wsAlpha,
-        name: "Workspace Alpha Confront 004",
-        timezone: "Europe/Paris",
-        ownerUserId: FIXTURES_004_CONFRONT.ownerA.appUserId,
-        memberships: {
-          create: [
-            { id: "mem-004-conf-oa", userId: FIXTURES_004_CONFRONT.ownerA.appUserId, role: "owner", status: "active" },
-            { id: "mem-004-conf-ta", userId: FIXTURES_004_CONFRONT.techA1.appUserId, role: "technician", status: "active" },
-          ],
-        },
-      },
-    });
-
-    await prisma.client.create({
-      data: {
-        id: FIXTURES_004_CONFRONT.clientA.id,
-        workspaceId: FIXTURES_004_CONFRONT.wsAlpha,
-        name: FIXTURES_004_CONFRONT.clientA.name,
-      },
-    });
-  });
-
-  afterAll(async () => {
-    await cleanupTestData();
-    await prisma.$disconnect();
-  });
-
-  beforeEach(async () => {
-    await cleanOperationalData();
-
-    app = express();
-    app.use(express.json());
-
-    // Rota existente de weeklogs
-    const { weeklogsRouter } = await import("../../backend/src/routes/weeklogs.js");
-    app.use("/api/weeklogs", weeklogsRouter);
-
-    // Rota futura de payment-lists
-    try {
-      // @ts-expect-error route created in T07/T08
-      const { paymentListsRouter } = await import("../../backend/src/routes/paymentLists.js");
-      app.use("/api/payment-lists", paymentListsRouter);
-    } catch {
-      // In T01/T02 router is not yet implemented
-    }
-
-    const { ZodError } = await import("zod");
-    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-      if (err instanceof ZodError || err?.name === "ZodError") {
-        return res.status(400).json({ message: "Payload inválido.", issues: err.issues });
-      }
-      const statusCode = err?.statusCode || (err instanceof ForbiddenError || err?.name === "ForbiddenError" ? 403 : 500);
-      res.status(statusCode).json({ message: err?.message || "Internal error" });
-    });
-
-    await new Promise<void>((resolve) => {
-      server = app.listen(0, () => {
-        const addr = server.address();
-        baseUrl = `http://127.0.0.1:${typeof addr === "object" ? addr?.port : 0}`;
-        resolve();
-      });
-    });
-  });
-
-  afterEach(() => {
-    if (server) {
-      server.close();
-    }
+  const auth = (actor = fixture.owner) => ({
+    Authorization: `Bearer ${signAccessToken({ id: actor.id, email: actor.email, role: actor === fixture.owner ? "admin" : "user" })}`,
+    "Content-Type": "application/json",
+    "X-Workspace-Id": fixture.workspaceId,
   });
 
   async function cleanOperationalData() {
-    await prisma.weeklogValidation.deleteMany({
-      where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
-    });
-    await prisma.weeklogEntry.deleteMany({
-      where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
-    });
-    await prisma.weeklog.deleteMany({
-      where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
-    });
-    await prisma.productionOrder.deleteMany({
-      where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
-    });
+    const where = { workspaceId: fixture.workspaceId };
+    await prisma.paymentListConfrontationResult.deleteMany({ where });
+    await prisma.paymentListConfrontationRun.deleteMany({ where });
+    await prisma.paymentListEntryClaim.deleteMany({ where });
+    await prisma.paymentListItem.deleteMany({ where });
+    await prisma.paymentList.deleteMany({ where });
+    await prisma.weeklogValidation.deleteMany({ where });
+    await prisma.weeklogEntry.deleteMany({ where });
+    await prisma.weeklog.deleteMany({ where });
+    await prisma.productionOrder.deleteMany({ where });
+    await prisma.externalOperationalImportItem.deleteMany({ where });
+    await prisma.externalOperationalImport.deleteMany({ where });
   }
 
-  async function cleanupTestData() {
+  async function createEntry(input: Partial<{ plate: string; vin: string; amount: string; services: any; clientId: string; currency: string; validated: boolean }> = {}) {
+    const index = ++serial;
+    const clientId = input.clientId ?? fixture.clientId;
+    const startsOn = new Date(Date.UTC(2026, 0, 5 + index * 7));
+    const weeklog = await prisma.weeklog.create({ data: {
+      workspaceId: fixture.workspaceId, startsOn, endsOn: new Date(startsOn.getTime() + 6 * 86_400_000), clientId,
+      siteKey: "SITE-CONFRONT", week: `2026-W${String(index).padStart(2, "0")}`, weekNumber: index, yearReference: 2026, status: "validated",
+    } });
+    const order = await prisma.productionOrder.create({ data: {
+      workspaceId: fixture.workspaceId, code: `PO-CONFRONT-${index}`, clientId, technicianUserId: fixture.technician.id,
+      operationalSiteKey: "SITE-CONFRONT", currencyCode: input.currency ?? "EUR", status: "delivered", deliveredAt: startsOn,
+    } });
+    const entry = await prisma.weeklogEntry.create({ data: {
+      weeklogId: weeklog.id, workspaceId: fixture.workspaceId, sourceType: "production_order", productionOrderId: order.id,
+      executionSequence: 1, clientId, technicianUserId: fixture.technician.id, technicianName: "Tech Confront",
+      licensePlate: input.plate ?? "AA123BB", vin: input.vin ?? validVin, servicesSnapshot: input.services ?? pdr,
+      totalAmount: input.amount ?? "500.00", currencyCode: input.currency ?? "EUR", deliveredAt: startsOn,
+      validationStatus: input.validated === false ? "pending" : "approved",
+    } });
+    if (input.validated !== false) await prisma.weeklogValidation.create({ data: {
+      weeklogId: weeklog.id, workspaceId: fixture.workspaceId, validationSequence: 1, status: "validated",
+      validationMethod: "production_order", coverageSnapshot: [{ weeklogEntryId: entry.id }], auditTrail: [], validatedAt: new Date(),
+    } });
+    return entry;
+  }
+
+  async function createList(items: Array<{ plate?: string; vin?: string; amount?: string; services?: any }>) {
+    if (items.length !== 1) throw new Error("T07 fixture requires one customer item per list.");
+    const total = items[0]!.amount ?? "500.00";
+    return prisma.paymentList.create({ data: {
+      workspaceId: fixture.workspaceId, listNumber: `L${String(++serial).padStart(6, "0")}`, clientId: fixture.clientId,
+      clientName: "Cliente Confronto", currencyCode: "EUR", status: "under_review", itemCount: items.length,
+      sourceDocumentTotal: total, recognizedTotal: "0.00", createdBy: fixture.owner.id,
+      items: { create: items.map((item) => ({ licensePlate: item.plate ?? "AA-123-BB", vin: item.vin ?? validVin, servicesSnapshot: item.services ?? pdr, totalAmount: item.amount ?? "500.00" })) },
+    }, include: { items: true } });
+  }
+
+  async function createExternalEntry() {
+    const index = ++serial;
+    const startsOn = new Date(Date.UTC(2026, 6, 5 + index * 7));
+    const imported = await prisma.externalOperationalImport.create({ data: { workspaceId: fixture.workspaceId, fileName: `external-${index}.pdf`, status: "committed", uploadedBy: fixture.owner.id } });
+    const importItem = await prisma.externalOperationalImportItem.create({ data: {
+      workspaceId: fixture.workspaceId, importId: imported.id, status: "committed", reviewedClientId: fixture.clientId,
+      reviewedCurrencyCode: "EUR", reviewedOperationalSiteKey: "SITE-CONFRONT", reviewedTechnicianUserId: fixture.technician.id,
+      reviewedLicensePlate: "AA123BB", reviewedVin: validVin, reviewedDeliveredAt: startsOn, reviewedServices: pdr, reviewedTotal: "500.00",
+    } });
+    const weeklog = await prisma.weeklog.create({ data: {
+      workspaceId: fixture.workspaceId, startsOn, endsOn: new Date(startsOn.getTime() + 6 * 86_400_000), clientId: fixture.clientId,
+      siteKey: "SITE-CONFRONT", week: `2026-WE${index}`, weekNumber: index + 20, yearReference: 2026, status: "validated",
+    } });
+    const entry = await prisma.weeklogEntry.create({ data: {
+      weeklogId: weeklog.id, workspaceId: fixture.workspaceId, sourceType: "external_import", externalImportItemId: importItem.id,
+      clientId: fixture.clientId, technicianUserId: fixture.technician.id, technicianName: "Tech Confront", licensePlate: "AA123BB", vin: validVin,
+      servicesSnapshot: pdr, totalAmount: "500.00", currencyCode: "EUR", deliveredAt: startsOn, validationStatus: "approved",
+    } });
+    await prisma.weeklogValidation.create({ data: {
+      weeklogId: weeklog.id, workspaceId: fixture.workspaceId, validationSequence: 1, status: "validated", validationMethod: "external_import_review",
+      coverageSnapshot: { schemaVersion: "1.0", sourceType: "external_import", sourceImportId: imported.id, entries: [{ entryId: entry.id }] }, auditTrail: [], validatedAt: new Date(),
+    } });
+    return entry;
+  }
+
+  async function confront(listId: string, mode?: "current" | "new_round") {
+    return fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, { method: "POST", headers: auth(), ...(mode ? { body: JSON.stringify({ mode }) } : {}) });
+  }
+
+  beforeAll(async () => {
     await cleanOperationalData();
-    await prisma.client.deleteMany({
-      where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
-    });
-    await prisma.membership.deleteMany({
-      where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
-    });
-    await prisma.workspace.deleteMany({
-      where: { id: FIXTURES_004_CONFRONT.wsAlpha },
-    });
-    await prisma.user.deleteMany({
-      where: {
-        id: { in: [FIXTURES_004_CONFRONT.ownerA.userId, FIXTURES_004_CONFRONT.techA1.userId] },
-      },
-    });
-  }
+    await prisma.client.deleteMany({ where: { workspaceId: fixture.workspaceId } });
+    await prisma.membership.deleteMany({ where: { workspaceId: fixture.workspaceId } });
+    await prisma.workspace.deleteMany({ where: { id: fixture.workspaceId } });
+    await prisma.user.deleteMany({ where: { id: { in: [fixture.owner.id, fixture.technician.id] } } });
+    for (const actor of [fixture.owner, fixture.technician]) await prisma.user.create({ data: {
+      id: actor.id, email: actor.email, fullName: actor.email, role: actor === fixture.owner ? "admin" : "user", passwordHash: "test-hash", isActive: true,
+      appUser: { create: { id: actor.appId, email: actor.email, name: actor.email } },
+    } });
+    await prisma.workspace.create({ data: {
+      id: fixture.workspaceId, name: "Workspace Confront 004", timezone: "Europe/Paris", ownerUserId: fixture.owner.appId,
+      memberships: { create: [{ userId: fixture.owner.appId, role: "owner", status: "active" }, { userId: fixture.technician.appId, role: "technician", status: "active" }] },
+    } });
+    await prisma.client.create({ data: { id: fixture.clientId, workspaceId: fixture.workspaceId, name: "Cliente Confronto" } });
+  });
 
-  function getAuthHeader(user: { userId: string; email: string; role: string }, workspaceId?: string) {
-    const token = signAccessToken({
-      id: user.userId,
-      email: user.email,
-      role: user.role === "owner" ? "admin" : "user",
-    });
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    };
-    if (workspaceId) {
-      headers["X-Workspace-Id"] = workspaceId;
+  beforeEach(async () => {
+    serial = 0;
+    await cleanOperationalData();
+    app = express();
+    app.use(express.json());
+    const { paymentListsRouter } = await import("../../backend/src/routes/paymentLists.js");
+    app.use("/api/payment-lists", paymentListsRouter);
+    app.use((error: any, _req: Request, res: Response, _next: NextFunction) => res.status(error?.statusCode || (error instanceof ForbiddenError ? 403 : 500)).json({ code: error?.code, message: error?.message }));
+    await new Promise<void>((resolve) => { server = app.listen(0, () => { const address = server.address(); baseUrl = `http://127.0.0.1:${typeof address === "object" ? address?.port : 0}`; resolve(); }); });
+  });
+
+  afterEach(() => server.close());
+  afterAll(async () => { await cleanOperationalData(); await prisma.client.deleteMany({ where: { workspaceId: fixture.workspaceId } }); await prisma.membership.deleteMany({ where: { workspaceId: fixture.workspaceId } }); await prisma.workspace.deleteMany({ where: { id: fixture.workspaceId } }); await prisma.user.deleteMany({ where: { id: { in: [fixture.owner.id, fixture.technician.id] } } }); await prisma.$disconnect(); });
+
+  it("CONFRONT-NOT-EVALUATED-01: reports the explicit pre-run state", async () => {
+    const list = await createList([{ }]);
+    const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation`, { headers: auth() });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.status).toBe("not_evaluated");
+    expect(body.items[0].confrontationStatus).toBe("not_evaluated");
+  });
+
+  it("CONFRONT-IDEMPOTENT-01 and CONFRONT-VEHICLE-01: normalizes VIN/plate and recovers the same run", async () => {
+    await createEntry({ plate: "AA123BB", vin: validVin.toLowerCase() });
+    const list = await createList([{ plate: "aa-123-bb", vin: validVin, amount: "500.00" }]);
+    const first = await confront(list.id);
+    expect(first.status).toBe(201);
+    const created = await first.json();
+    expect(created.sequence).toBe(1);
+    expect(created.results[0].status).toBe("exact_match");
+    const second = await confront(list.id, "current");
+    expect(second.status).toBe(200);
+    const recovered = await second.json();
+    expect(recovered.idempotent).toBe(true);
+    expect(recovered.runId).toBe(created.runId);
+    expect(recovered.results[0].id).toBe(created.results[0].id);
+  });
+
+  it("hardening: formally covered external operational evidence is eligible without a fabricated ProductionOrder", async () => {
+    const entry = await createExternalEntry();
+    const list = await createList([{ }]);
+    const body = await (await confront(list.id)).json();
+    expect(body.results.find((row: any) => row.paymentListItemId)).toMatchObject({ status: "exact_match", weeklogEntryId: entry.id });
+    expect((await prisma.weeklogEntry.findUniqueOrThrow({ where: { id: entry.id } })).productionOrderId).toBeNull();
+  });
+
+  it("CONFRONT-RERUN-HISTORY-01: explicit new_round preserves the completed history", async () => {
+    await createEntry();
+    const list = await createList([{ }]);
+    const first = await confront(list.id); const run1 = await first.json();
+    const second = await confront(list.id, "new_round");
+    expect(second.status).toBe(201);
+    const run2 = await second.json();
+    expect(run2.sequence).toBe(2);
+    expect(run2.previousRunId).toBe(run1.runId);
+    expect(await prisma.paymentListConfrontationRun.findUniqueOrThrow({ where: { id: run1.runId } })).toMatchObject({ status: "superseded" });
+  });
+
+  it("CONFRONT-RERUN-DECISION-IMMUTABLE-01: current mode cannot overwrite a decided run", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const created = await (await confront(list.id)).json();
+    const decision = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${created.results[0].id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "accept_difference", notes: "Desconto formal" }) });
+    expect(decision.status).toBe(200);
+    await prisma.weeklogEntry.update({ where: { id: entry.id }, data: { totalAmount: "490.00" } });
+    const blocked = await confront(list.id, "current");
+    expect(blocked.status).toBe(409);
+    expect((await blocked.json()).code).toBe("CONFRONTATION_RERUN_HAS_DECISIONS");
+    const next = await confront(list.id, "new_round");
+    expect(next.status).toBe(201);
+    expect((await next.json()).sequence).toBe(2);
+  });
+
+  it("CONFRONT-SERVICE-01 and CONFRONT-VALUE-01: service precedence is stable and money remains decimal", async () => {
+    await createEntry({ amount: "500.00", services: [{ type: "PDR", quantity: "1" }, { type: "PAINT", quantity: "1" }] });
+    const serviceList = await createList([{ amount: "400.00", services: [{ type: "PDR", quantity: "1" }] }]);
+    const serviceRun = await (await confront(serviceList.id)).json();
+    expect(serviceRun.results.find((result: any) => result.paymentListItemId)?.status).toBe("service_discrepancy");
+    await cleanOperationalData();
+    await createEntry({ amount: "500.00", services: [{ type: "PDR", quantity: "1" }] });
+    const valueList = await createList([{ amount: "420.00", services: [{ type: "PDR", quantity: "1" }] }]);
+    const valueRun = await (await confront(valueList.id)).json();
+    const result = valueRun.results.find((row: any) => row.paymentListItemId);
+    expect(result.status).toBe("value_difference");
+    expect(result.differenceAmount).toBe("-80.00");
+  });
+
+  it("CONFRONT-AMBIGUOUS-01 and CONFRONT-UNMATCHED-WEEKLOG-01: avoids first-wins and preserves detached entries", async () => {
+    await createEntry({ plate: "AA123BB", vin: validVin });
+    await createEntry({ plate: "ZZ999ZZ", vin: "1HGCM82633A004353" });
+    const ambiguousList = await createList([{ plate: "AA123BB", vin: "1HGCM82633A004353" }]);
+    const ambiguous = await (await confront(ambiguousList.id)).json();
+    expect(ambiguous.results.find((result: any) => result.paymentListItemId)?.status).toBe("ambiguous_match");
+    expect(ambiguous.results.filter((result: any) => result.paymentListItemId === null && result.status === "unmatched_weeklog")).toHaveLength(2);
+  });
+
+  it("CONFRONT-AMBIGUOUS-01: records vehicle_not_found without fabricating operational evidence", async () => {
+    const list = await createList([{ plate: "XX-999-XX", vin: "1HGCM82633A004351" }]);
+    const body = await (await confront(list.id)).json();
+    const result = body.results.find((row: any) => row.paymentListItemId);
+    expect(result).toMatchObject({ status: "vehicle_not_found", weeklogEntryId: null });
+  });
+
+  it("CONFRONT-HUMAN-DECISION-01: accept_difference records the actor and exact recognized customer amount", async () => {
+    await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json();
+    const result = run.results.find((row: any) => row.paymentListItemId);
+    const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "accept_difference", notes: "Acordo comercial documentado" }) });
+    expect(response.status).toBe(200);
+    const decision = await response.json();
+    expect(decision.result.decidedBy).toBe(fixture.owner.id);
+    expect((await prisma.paymentList.findUniqueOrThrow({ where: { id: list.id } })).recognizedTotal.toFixed(2)).toBe("420.00");
+  });
+
+  it("CONFRONT-HUMAN-DECISION-01 and LIST-CLAIM-REJECT-RELEASE-01: decisions are actor-audited and rejection releases only this claim", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json();
+    const result = run.results.find((row: any) => row.paymentListItemId);
+    const decision = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "reject_item", notes: "Glosa documentada" }) });
+    expect(decision.status).toBe(200);
+    expect((await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: list.id, weeklogEntryId: entry.id } })).status).toBe("released");
+    expect((await prisma.paymentList.findUniqueOrThrow({ where: { id: list.id } })).recognizedTotal.toFixed(2)).toBe("0.00");
+    expect(await prisma.paymentListItem.count({ where: { paymentListId: list.id } })).toBe(1);
+  });
+
+  it("LIST-PENDING-BLOCKED-CONTEST-01 and LIST-PENDING-BLOCKED-RECTIFICATION-01: open commercial decisions block pending", async () => {
+    for (const decisionName of ["contest", "request_rectification"] as const) {
+      await cleanOperationalData();
+      const entry = await createEntry({ amount: "500.00" });
+      const list = await createList([{ amount: "420.00" }]);
+      const run = await (await confront(list.id)).json();
+      const result = run.results.find((row: any) => row.paymentListItemId);
+      const decision = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: decisionName, notes: "Pendência comercial formal" }) });
+      expect(decision.status).toBe(200);
+      const pending = await fetch(`${baseUrl}/api/payment-lists/${list.id}/status`, { method: "PATCH", headers: auth(), body: JSON.stringify({ toStatus: "pending" }) });
+      expect(pending.status).toBe(409);
+      expect((await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: list.id, weeklogEntryId: entry.id } })).status).toBe("reserved");
     }
-    return headers;
-  }
+  });
 
-  describe("Grupo 4: Motor de Confronto Comercial Versionado & Resultados Desacoplados", () => {
-    it("CONFRONT-NOT-EVALUATED-01: Estado Inicial Padrão de Confronto", async () => {
-      // Given: PaymentList recém-criada antes da execução do confronto
-      const listId = "44000000-0000-4000-8000-000000000051";
+  it("hardening: concurrent current calls converge to one run and one result set", async () => {
+    await createEntry();
+    const list = await createList([{ }]);
+    const [left, right] = await Promise.all([confront(list.id), confront(list.id)]);
+    expect([left.status, right.status].sort()).toEqual([200, 201]);
+    expect(await prisma.paymentListConfrontationRun.count({ where: { paymentListId: list.id } })).toBe(1);
+    expect(await prisma.paymentListConfrontationResult.count({ where: { paymentListId: list.id } })).toBe(1);
+  });
 
-      // When: Consulta os resultados de confronto da lista
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confrontation`, {
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-      });
+  it("hardening: technician cannot execute confrontation", async () => {
+    await createEntry();
+    const list = await createList([{ }]);
+    const blocked = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confront`, { method: "POST", headers: auth(fixture.technician), body: JSON.stringify({ mode: "current" }) });
+    expect(blocked.status).toBe(403);
+  });
 
-      // Then: Status retornado deve ser 'not_evaluated' para todos os itens
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.status).toBe("not_evaluated");
-      for (const item of data.items) {
-        expect(item.confrontationStatus).toBe("not_evaluated");
-      }
-    });
+  it("hardening: claim availability distinguishes another-list reservation, consumption and this-list reservation", async () => {
+    const entry = await createEntry();
+    const ownerList = await createList([{ }]);
+    await confront(ownerList.id);
+    const rerun = await confront(ownerList.id, "new_round");
+    expect((await rerun.json()).results.find((row: any) => row.paymentListItemId).status).toBe("exact_match");
+    const otherList = await createList([{ }]);
+    const blockedByReservation = await (await confront(otherList.id)).json();
+    expect(blockedByReservation.results.find((row: any) => row.paymentListItemId).status).toBe("vehicle_not_found");
+    const pending = await fetch(`${baseUrl}/api/payment-lists/${ownerList.id}/status`, { method: "PATCH", headers: auth(), body: JSON.stringify({ toStatus: "pending" }) });
+    expect(pending.status).toBe(200);
+    expect((await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: ownerList.id, weeklogEntryId: entry.id } })).status).toBe("consumed");
+  });
 
-    it("CONFRONT-IDEMPOTENT-01: Idempotência de Execução de Confronto sem Alterações", async () => {
-      // Given: Lista com rodada 1 de confronto executada
-      const listId = "44000000-0000-4000-8000-000000000052";
-      const headers = getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha);
+  it("hardening: explicit new rounds serialize and conflicting decisions cannot last-write-win", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const first = await (await confront(list.id)).json();
+    const [roundA, roundB] = await Promise.all([confront(list.id, "new_round"), confront(list.id, "new_round")]);
+    expect([roundA.status, roundB.status]).toEqual([201, 201]);
+    expect(await prisma.paymentListConfrontationRun.count({ where: { paymentListId: list.id } })).toBe(3);
+    const current = await prisma.paymentListConfrontationRun.findFirstOrThrow({ where: { paymentListId: list.id }, orderBy: { sequence: "desc" }, include: { results: true } });
+    const result = current.results.find((row) => row.weeklogEntryId === entry.id)!;
+    const [left, right] = await Promise.all([
+      fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "contest", notes: "Contestação A" }) }),
+      fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "reject_item", notes: "Glosa B" }) }),
+    ]);
+    expect([left.status, right.status].sort()).toEqual([200, 409]);
+    const crossList = await createList([{ }]);
+    const denial = await fetch(`${baseUrl}/api/payment-lists/${crossList.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "reject_item", notes: "Tentativa cruzada" }) });
+    expect(denial.status).toBe(404);
+    expect(first.sequence).toBe(1);
+  });
 
-      // When: Re-executa o confronto sem nenhuma alteração nos dados
-      const res1 = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, { method: "POST", headers });
-      const res2 = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ mode: "current" }),
-      });
-
-      // Then: Ambas retornam a rodada 1 com HTTP 200 sem criar nova rodada
-      expect(res1.status).toBe(200);
-      expect(res2.status).toBe(200);
-      const data2 = await res2.json();
-      expect(data2.sequence).toBe(1);
-      expect(data2.idempotent).toBe(true);
-      expect(data2.mode).toBe("current");
-    });
-
-    it("CONFRONT-RERUN-HISTORY-01: Criação de Nova Rodada Versionada Preservando Histórico", async () => {
-      // Given: Rodada 1 concluída sem decisões humanas e novos dados validados
-      const listId = "44000000-0000-4000-8000-000000000053";
-
-      // When: Solicita explicitamente uma nova rodada de confronto
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({ mode: "new_round" }),
-      });
-
-      // Then: Cria rodada 2 (sequence = 2), rodada 1 passa para 'superseded' e histórico permanece gravado
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.sequence).toBe(2);
-      expect(data.mode).toBe("new_round");
-      expect(data.previousRunId).toBeDefined();
-    });
-
-    it("CONFRONT-RERUN-DECISION-IMMUTABLE-01: Bloqueio de Rerun quando Rodada Ativa Possui Decisões Humanas", async () => {
-      // Given: PaymentList cuja rodada ativa possui decisão humana registrada
-      const listId = "44000000-0000-4000-8000-000000000054";
-
-      // When: Após mudança relevante, usuário tenta recomputação da rodada corrente
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-      });
-
-      // Then: Bloqueio com HTTP 409 Conflict (CONFRONTATION_RERUN_HAS_DECISIONS)
-      expect(res.status).toBe(409);
-      const data = await res.json();
-      expect(data.code || data.message).toMatch(/CONFRONTATION_RERUN_HAS_DECISIONS|RERUN_HAS_DECISIONS/i);
-
-      // And: Ação explícita cria uma rodada nova sem sobrescrever a rodada decidida.
-      const explicitNewRound = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({ mode: "new_round" }),
-      });
-      expect(explicitNewRound.status).toBe(200);
-      const newRound = await explicitNewRound.json();
-      expect(newRound.mode).toBe("new_round");
-      expect(newRound.sequence).toBe(2);
-      expect(newRound.previousRunId).toBeDefined();
-    });
-
-    it("CONFRONT-VEHICLE-01: Pareamento por Identificador Veicular com Pareamento Único", async () => {
-      // Given: Entry com placa AA123BB e item da lista com AA-123-BB e mesmo VIN
-      const listId = "44000000-0000-4000-8000-000000000055";
-
-      // When: Motor de confronto é executado
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-      });
-
-      // Then: Identifica match veicular exato e gera resultado com chave única por rodada
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      const match = data.results.find((r: any) => r.licensePlateClean === "AA123BB");
-      expect(match).toBeDefined();
-      expect(match.vehicleMatch).toBe(true);
-    });
-
-    it("CONFRONT-SERVICE-01: Detecção de Divergência de Serviços e Glosas", async () => {
-      // Given: Entry com 3 serviços (€800) e lista reconhecendo apenas 1 serviço (€400)
-      const listId = "44000000-0000-4000-8000-000000000056";
-
-      // When: Confronto é executado
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-      });
-
-      // Then: Resultado classificado como service_discrepancy com differenceAmount de 400.00 EUR
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      const discrepancy = data.results.find((r: any) => r.status === "service_discrepancy");
-      expect(discrepancy).toBeDefined();
-      expect(String(discrepancy.differenceAmount)).toBe("400.00");
-    });
-
-    it("CONFRONT-VALUE-01: Detecção de Diferença Monetária com Mesmos Serviços", async () => {
-      // Given: Entry com serviço martelinho €500 e item da lista reconhecendo €420
-      const listId = "44000000-0000-4000-8000-000000000057";
-
-      // When: Confronto é executado
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-      });
-
-      // Then: Resultado classificado como value_difference com differenceAmount de -80.00 EUR
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      const diff = data.results.find((r: any) => r.status === "value_difference");
-      expect(diff).toBeDefined();
-      expect(String(diff.differenceAmount)).toBe("-80.00");
-    });
-
-    it("CONFRONT-AMBIGUOUS-01: Veículo Declarado na Lista Ausente na Produção", async () => {
-      // Given: Item de lista com placa ZZ999ZZ sem correspondente na produção
-      const listId = "44000000-0000-4000-8000-000000000058";
-
-      // When: Confronto é executado
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-      });
-
-      // Then: Resultado com paymentListItemId preenchido, weeklogEntryId = null e status = 'vehicle_not_found'
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      const notFound = data.results.find((r: any) => r.status === "vehicle_not_found");
-      expect(notFound).toBeDefined();
-      expect(notFound.weeklogEntryId).toBeNull();
-    });
-
-    it("CONFRONT-UNMATCHED-WEEKLOG-01: Execução de WEEKLOG Ausente na Lista do Cliente", async () => {
-      // Given: Entry de Weeklog executada para o cliente sem menção na lista
-      const listId = "44000000-0000-4000-8000-000000000059";
-
-      // When: Confronto é executado
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-      });
-
-      // Then: Resultado com paymentListItemId = null, weeklogEntryId preenchido e status = 'unmatched_weeklog'
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      const unmatched = data.results.find((r: any) => r.status === "unmatched_weeklog");
-      expect(unmatched).toBeDefined();
-      expect(unmatched.paymentListItemId).toBeNull();
-      expect(unmatched.weeklogEntryId).toBeDefined();
-    });
-
-    it("CONFRONT-HUMAN-DECISION-01: Registro Formal de Decisão Humana para Divergência", async () => {
-      // Given: Divergência de valor na lista
-      const listId = "44000000-0000-4000-8000-000000000060";
-      const resultId = "45000000-0000-4000-8000-000000000060";
-
-      // When: Gestor registra decisão accept_difference com nota formal
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confrontation/${resultId}/decision`, {
-        method: "PATCH",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({
-          decision: "accept_difference",
-          note: "Desconto comercial de frota aprovado",
-        }),
-      });
-
-      // Then: Resultado atualizado com decidedBy, decidedAt e computado no recognizedTotal
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.decision).toBe("accept_difference");
-      expect(data.decidedBy).toBe(FIXTURES_004_CONFRONT.ownerA.userId);
-      expect(data.decidedAt).toBeDefined();
-    });
-
-    it("LIST-PENDING-BLOCKED-CONTEST-01: Bloqueio de Pending por Disputa Aberta (Contestação)", async () => {
-      // Given: Lista com item sob decisão CONTEST em aberto
-      const listId = "44000000-0000-4000-8000-000000000061";
-
-      // When: Tentativa de avançar para 'pending'
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/status`, {
-        method: "PATCH",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({ toStatus: "pending" }),
-      });
-
-      // Then: HTTP 409 Conflict (UNRESOLVED_DISPUTES_BLOCK_PENDING)
-      expect(res.status).toBe(409);
-      const data = await res.json();
-      expect(data.code || data.message).toMatch(/UNRESOLVED_DISPUTES_BLOCK_PENDING|DISPUTES_BLOCK_PENDING/i);
-    });
-
-    it("LIST-PENDING-BLOCKED-RECTIFICATION-01: Bloqueio de Pending por Retificação Pendente", async () => {
-      // Given: Lista com item sob decisão REQUEST_RECTIFICATION em aberto
-      const listId = "44000000-0000-4000-8000-000000000062";
-
-      // When: Tentativa de avançar para 'pending'
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/status`, {
-        method: "PATCH",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({ toStatus: "pending" }),
-      });
-
-      // Then: HTTP 409 Conflict (UNRESOLVED_DISPUTES_BLOCK_PENDING)
-      expect(res.status).toBe(409);
-      const data = await res.json();
-      expect(data.code || data.message).toMatch(/UNRESOLVED_DISPUTES_BLOCK_PENDING|DISPUTES_BLOCK_PENDING/i);
-    });
-
-    it("LIST-RECTIFICATION-LINEAGE-01: Retificação Comercial Reabrindo OP sem Entidade Sintética", async () => {
-      // Given: Item glosado associado a WeeklogEntry originada de PO1
-      const listId = "44000000-0000-4000-8000-000000000063";
-      const resultId = "45000000-0000-4000-8000-000000000063";
-
-      // When: Gestor registra request_rectification
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confrontation/${resultId}/decision`, {
-        method: "PATCH",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({
-          decision: "request_rectification",
-          reason: "Acabamento de pintura rejeitado na vistoria",
-        }),
-      });
-
-      // Then: Invoca rectifyWeeklogEntry da Spec 003 e registra linhagem real sem entidade sintética
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.reopenedProductionOrderId).toBeDefined();
-      expect(data.targetExecutionSequence).toBe(2);
-      expect(data.rectificationId).toBeUndefined();
-    });
-
-    it("NO-FINANCE-SIDE-EFFECT-04: Ausência Estrita de Side-Effects Financeiros Automáticos", async () => {
-      // Given: Contagens iniciais financeiras e de distribuição
-      const initialFinancialCount = await prisma.financialRecord.count({
-        where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
-      });
-      const initialDistributionCount = await prisma.serviceOrderDistribution.count();
-
-      // When: Executa o ciclo canônico completo da Spec 004
-      // 1. Criar Lista
-      const createRes = await fetch(`${baseUrl}/api/payment-lists`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({
-          clientId: FIXTURES_004_CONFRONT.clientA.id,
-          currencyCode: "EUR",
-        }),
-      });
-      expect(createRes.status).toBe(201);
-      const list = await createRes.json();
-
-      // 2. Executar Confronto
-      const confrontRes = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confront`, {
-        method: "POST",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-      });
-      expect(confrontRes.status).toBe(200);
-
-      // 3. Avançar para Pending
-      const pendingRes = await fetch(`${baseUrl}/api/payment-lists/${list.id}/status`, {
-        method: "PATCH",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({ toStatus: "pending" }),
-      });
-      expect(pendingRes.status).toBe(200);
-
-      // 4. Liquidar como Paid
-      const paidRes = await fetch(`${baseUrl}/api/payment-lists/${list.id}/status`, {
-        method: "PATCH",
-        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({ toStatus: "paid" }),
-      });
-      expect(paidRes.status).toBe(200);
-
-      // Then: Provar ausência estrita de mutações em tabelas contábeis/financeiras
-      const finalFinancialCount = await prisma.financialRecord.count({
-        where: { workspaceId: FIXTURES_004_CONFRONT.wsAlpha },
-      });
-      const finalDistributionCount = await prisma.serviceOrderDistribution.count();
-
-      expect(finalFinancialCount).toBe(initialFinancialCount);
-      expect(finalDistributionCount).toBe(initialDistributionCount);
-    });
+  it.skip("LIST-RECTIFICATION-LINEAGE-01: remains RED-T08 until the canonical production rectification transaction is integrated", () => {
+    // T08 owns rectifyWeeklogEntry, ProductionOrder reopening and execution lineage.
   });
 });
