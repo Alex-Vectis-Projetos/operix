@@ -5,6 +5,7 @@ import express, { type NextFunction, type Request, type Response } from "../../b
 import { prisma } from "../../backend/src/lib/prisma.js";
 import { signAccessToken } from "../../backend/src/lib/jwt.js";
 import { ForbiddenError } from "../../backend/src/lib/objectAuth.js";
+import { setAfterRectificationTestHook } from "../../backend/src/services/confrontationService.js";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL ??= "postgresql://operix_local:U2dkA-cJYnwHuD7hiAY2hPTrkawjg6f8@127.0.0.1:55432/operix_local?schema=public";
@@ -15,6 +16,7 @@ const fixture = {
   clientId: "43000000-0000-4000-8000-000000000050",
   owner: { id: "41000000-0000-4000-8000-000000000050", appId: "42000000-0000-4000-8000-000000000050", email: "owner.a.confront@example.com" },
   technician: { id: "41000000-0000-4000-8000-000000000051", appId: "42000000-0000-4000-8000-000000000051", email: "tech.a.confront@example.com" },
+  foreign: { workspaceId: "40000000-0000-4000-8000-000000000060", owner: { id: "41000000-0000-4000-8000-000000000060", appId: "42000000-0000-4000-8000-000000000060", email: "owner.b.confront@example.com" } },
 };
 const validVin = "1HGCM82633A004352";
 const pdr = [{ type: "PDR", quantity: "1" }];
@@ -25,10 +27,10 @@ describe("Spec 004 — Commercial Confrontation & Disputes", () => {
   let baseUrl: string;
   let serial = 0;
 
-  const auth = (actor = fixture.owner) => ({
-    Authorization: `Bearer ${signAccessToken({ id: actor.id, email: actor.email, role: actor === fixture.owner ? "admin" : "user" })}`,
+  const auth = (actor = fixture.owner, activeWorkspaceId = fixture.workspaceId) => ({
+    Authorization: `Bearer ${signAccessToken({ id: actor.id, email: actor.email, role: actor === fixture.technician ? "user" : "admin" })}`,
     "Content-Type": "application/json",
-    "X-Workspace-Id": fixture.workspaceId,
+    "X-Workspace-Id": activeWorkspaceId,
   });
 
   async function cleanOperationalData() {
@@ -115,6 +117,9 @@ describe("Spec 004 — Commercial Confrontation & Disputes", () => {
 
   beforeAll(async () => {
     await cleanOperationalData();
+    await prisma.membership.deleteMany({ where: { workspaceId: fixture.foreign.workspaceId } });
+    await prisma.workspace.deleteMany({ where: { id: fixture.foreign.workspaceId } });
+    await prisma.user.deleteMany({ where: { id: fixture.foreign.owner.id } });
     await prisma.client.deleteMany({ where: { workspaceId: fixture.workspaceId } });
     await prisma.membership.deleteMany({ where: { workspaceId: fixture.workspaceId } });
     await prisma.workspace.deleteMany({ where: { id: fixture.workspaceId } });
@@ -128,6 +133,14 @@ describe("Spec 004 — Commercial Confrontation & Disputes", () => {
       memberships: { create: [{ userId: fixture.owner.appId, role: "owner", status: "active" }, { userId: fixture.technician.appId, role: "technician", status: "active" }] },
     } });
     await prisma.client.create({ data: { id: fixture.clientId, workspaceId: fixture.workspaceId, name: "Cliente Confronto" } });
+    await prisma.user.create({ data: {
+      id: fixture.foreign.owner.id, email: fixture.foreign.owner.email, fullName: fixture.foreign.owner.email, role: "admin", passwordHash: "test-hash", isActive: true,
+      appUser: { create: { id: fixture.foreign.owner.appId, email: fixture.foreign.owner.email, name: fixture.foreign.owner.email } },
+    } });
+    await prisma.workspace.create({ data: {
+      id: fixture.foreign.workspaceId, name: "Workspace Foreign Confront 004", timezone: "Europe/Paris", ownerUserId: fixture.foreign.owner.appId,
+      memberships: { create: { userId: fixture.foreign.owner.appId, role: "owner", status: "active" } },
+    } });
   });
 
   beforeEach(async () => {
@@ -142,7 +155,7 @@ describe("Spec 004 — Commercial Confrontation & Disputes", () => {
   });
 
   afterEach(() => server.close());
-  afterAll(async () => { await cleanOperationalData(); await prisma.client.deleteMany({ where: { workspaceId: fixture.workspaceId } }); await prisma.membership.deleteMany({ where: { workspaceId: fixture.workspaceId } }); await prisma.workspace.deleteMany({ where: { id: fixture.workspaceId } }); await prisma.user.deleteMany({ where: { id: { in: [fixture.owner.id, fixture.technician.id] } } }); await prisma.$disconnect(); });
+  afterAll(async () => { await cleanOperationalData(); await prisma.client.deleteMany({ where: { workspaceId: fixture.workspaceId } }); await prisma.membership.deleteMany({ where: { workspaceId: fixture.workspaceId } }); await prisma.workspace.deleteMany({ where: { id: fixture.workspaceId } }); await prisma.membership.deleteMany({ where: { workspaceId: fixture.foreign.workspaceId } }); await prisma.workspace.deleteMany({ where: { id: fixture.foreign.workspaceId } }); await prisma.user.deleteMany({ where: { id: { in: [fixture.owner.id, fixture.technician.id, fixture.foreign.owner.id] } } }); await prisma.$disconnect(); });
 
   it("CONFRONT-NOT-EVALUATED-01: reports the explicit pre-run state", async () => {
     const list = await createList([{ }]);
@@ -367,5 +380,94 @@ describe("Spec 004 — Commercial Confrontation & Disputes", () => {
     expect(await prisma.productionOrder.count({ where: { workspaceId: fixture.workspaceId } })).toBe(before);
     expect(await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id } })).toMatchObject({ decision: "none", reopenedProductionOrderId: null });
     expect(entry.productionOrderId).toBeNull();
+  });
+
+  it("RECT-LIST-ROLLBACK-01: failure after canonical rework rolls back both domains", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json();
+    const result = run.results.find((row: any) => row.paymentListItemId);
+    const before = await prisma.productionOrder.findUniqueOrThrow({ where: { id: entry.productionOrderId! } });
+    setAfterRectificationTestHook(() => { throw new Error("TEST_RECTIFICATION_ROLLBACK"); });
+    try {
+      const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "request_rectification", notes: "Falha injetada" }) });
+      expect(response.status).toBe(500);
+    } finally { setAfterRectificationTestHook(undefined); }
+    expect(await prisma.productionOrder.findUniqueOrThrow({ where: { id: before.id } })).toMatchObject({ status: before.status, executionSequence: before.executionSequence, rectificationOriginId: before.rectificationOriginId });
+    expect(await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id } })).toMatchObject({ decision: "none", reopenedProductionOrderId: null, targetExecutionSequence: null });
+  });
+
+  it("RECT-LIST-STALE-ENTRY-01: delegates stale execution rejection without partial commercial mutation", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json(); const result = run.results.find((row: any) => row.paymentListItemId);
+    await prisma.productionOrder.update({ where: { id: entry.productionOrderId! }, data: { executionSequence: 2 } });
+    const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "request_rectification", notes: "Entrada histórica" }) });
+    expect(response.status).toBe(409);
+    expect((await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id } })).decision).toBe("none");
+  });
+
+  it("RECT-LIST-CROSS-TENANT-01: denies a foreign workspace actor without mutating commercial or operational state", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json(); const result = run.results.find((row: any) => row.paymentListItemId);
+    const beforeOrder = await prisma.productionOrder.findUniqueOrThrow({ where: { id: entry.productionOrderId! }, select: { status: true, executionSequence: true, rectificationOriginId: true } });
+    const beforeResult = await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id }, select: { decision: true, decidedBy: true, decidedAt: true, reopenedProductionOrderId: true, targetExecutionSequence: true } });
+    const claim = await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { workspaceId: fixture.workspaceId, paymentListId: list.id, weeklogEntryId: entry.id }, select: { status: true, releasedAt: true, releasedReason: true } });
+    const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(fixture.foreign.owner, fixture.foreign.workspaceId), body: JSON.stringify({ decision: "request_rectification", notes: "Acesso entre tenants" }) });
+    expect(response.status).toBe(404);
+    await expect(prisma.productionOrder.findUniqueOrThrow({ where: { id: entry.productionOrderId! }, select: { status: true, executionSequence: true, rectificationOriginId: true } })).resolves.toEqual(beforeOrder);
+    await expect(prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id }, select: { decision: true, decidedBy: true, decidedAt: true, reopenedProductionOrderId: true, targetExecutionSequence: true } })).resolves.toEqual(beforeResult);
+    await expect(prisma.paymentListEntryClaim.findFirstOrThrow({ where: { workspaceId: fixture.workspaceId, paymentListId: list.id, weeklogEntryId: entry.id }, select: { status: true, releasedAt: true, releasedReason: true } })).resolves.toEqual(claim);
+  });
+
+  it("RECT-LIST-LINEAGE-RECOVERY-01: completes a T07 decision missing its T08 lineage exactly once", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json(); const result = run.results.find((row: any) => row.paymentListItemId);
+    await prisma.paymentListConfrontationResult.update({ where: { id: result.id }, data: { decision: "request_rectification", notes: "Recuperar linhagem", decidedBy: fixture.owner.id, decidedAt: new Date() } });
+    const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "request_rectification", notes: "Recuperar linhagem" }) });
+    expect(response.status).toBe(200);
+    const order = await prisma.productionOrder.findUniqueOrThrow({ where: { id: entry.productionOrderId! } });
+    expect(order.executionSequence).toBe(2);
+    expect(await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id } })).toMatchObject({ reopenedProductionOrderId: order.id, targetExecutionSequence: 2 });
+  });
+
+  it("RECT-LIST-LINEAGE-RECOVERY-01 / CASE B: recovers an already canonical rectification without another execution", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json(); const result = run.results.find((row: any) => row.paymentListItemId);
+    const payload = { decision: "request_rectification", notes: "Recuperar linhagem materializada" };
+    expect((await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify(payload) })).status).toBe(200);
+    const beforeRetry = await prisma.productionOrder.findUniqueOrThrow({ where: { id: entry.productionOrderId! } });
+    expect(beforeRetry).toMatchObject({ status: "in_production", executionSequence: 2, rectificationOriginId: entry.id });
+    await prisma.paymentListConfrontationResult.update({ where: { id: result.id }, data: { reopenedProductionOrderId: null, targetExecutionSequence: null } });
+    const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify(payload) });
+    expect(response.status).toBe(200);
+    const afterRetry = await prisma.productionOrder.findUniqueOrThrow({ where: { id: entry.productionOrderId! } });
+    expect(afterRetry.executionSequence).toBe(2);
+    expect(await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id } })).toMatchObject({ reopenedProductionOrderId: afterRetry.id, targetExecutionSequence: 2 });
+    expect(await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { workspaceId: fixture.workspaceId, paymentListId: list.id, weeklogEntryId: entry.id } })).toMatchObject({ status: "reserved" });
+    expect((await prisma.paymentList.findUniqueOrThrow({ where: { id: list.id } })).status).toBe("confronted");
+  });
+
+  it("RECT-LIST-LINEAGE-RECOVERY-01 / CASE C: rejects a foreign rectification origin without repairing it", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json(); const result = run.results.find((row: any) => row.paymentListItemId && row.weeklogEntryId);
+    expect(result).toBeDefined();
+    const conflictingEntry = await createEntry({ amount: "700.00" });
+    const sourceEntry = await prisma.weeklogEntry.findUniqueOrThrow({ where: { id: result.weeklogEntryId } });
+    const foreignOrigin = sourceEntry.id === entry.id ? conflictingEntry : entry;
+    await prisma.paymentListConfrontationResult.update({ where: { id: result.id }, data: { decision: "request_rectification", notes: "Conflito de linhagem", decidedBy: fixture.owner.id, decidedAt: new Date() } });
+    await prisma.productionOrder.update({ where: { id: sourceEntry.productionOrderId! }, data: { status: "in_production", executionSequence: 2, rectificationOriginId: foreignOrigin.id } });
+    const beforeOrder = await prisma.productionOrder.findUniqueOrThrow({ where: { id: sourceEntry.productionOrderId! }, select: { executionSequence: true, rectificationOriginId: true } });
+    const beforeClaim = await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { workspaceId: fixture.workspaceId, paymentListId: list.id, weeklogEntryId: sourceEntry.id }, select: { status: true, releasedAt: true, releasedReason: true } });
+    const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "request_rectification", notes: "Conflito de linhagem" }) });
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("RECTIFICATION_LINEAGE_CONFLICT");
+    await expect(prisma.productionOrder.findUniqueOrThrow({ where: { id: sourceEntry.productionOrderId! }, select: { executionSequence: true, rectificationOriginId: true } })).resolves.toEqual(beforeOrder);
+    expect(await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id } })).toMatchObject({ reopenedProductionOrderId: null, targetExecutionSequence: null });
+    await expect(prisma.paymentListEntryClaim.findFirstOrThrow({ where: { workspaceId: fixture.workspaceId, paymentListId: list.id, weeklogEntryId: sourceEntry.id }, select: { status: true, releasedAt: true, releasedReason: true } })).resolves.toEqual(beforeClaim);
   });
 });
