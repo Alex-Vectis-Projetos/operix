@@ -123,10 +123,11 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Concluído em transação única com o comando canônico da Spec003; entradas externas são rejeitadas sem fabricar OP e retries recuperam a mesma linhagem.
 
 ### Fase 7: Downstream Legacy Adapter & Transição de Call Sites Legados
-- [ ] **T09**: Implementar `backend/src/services/downstreamPaymentOrderAdapter.ts`:
+- [x] **T09**: Implementar `backend/src/services/downstreamPaymentOrderAdapter.ts`:
   - Espelhamento estritamente unidirecional de `PaymentListItem` na tabela legada `payment_orders`.
   - Sanitização de `backend/src/routes/paymentOrders.ts`: aplicar `RequestContext`, converter mutações legadas para HTTP 410 Gone / 409 Conflict e tornar rotas de leitura seguras.
   - Desativação do endpoint destrutivo `/finance/reconciliations/run`.
+  - Concluído com projeção transacional por item canônico, lock pessimista e ponteiro `legacyPaymentOrderId`; retries e concorrência convergem para uma única linha, sem efeitos financeiros. Leituras legadas usam workspace ativo e escopo próprio de técnico; POST/PATCH/DELETE retornam `410 LEGACY_PAYMENT_ORDER_WRITE_DEPRECATED`, e o motor legado retorna `410 LEGACY_RECONCILIATION_ENGINE_DEPRECATED`.
 
 ### Fase 8: Frontend Client & Eliminação do Supabase Client
 - [ ] **T10**: Implementar cliente de API e hooks TanStack Query:
