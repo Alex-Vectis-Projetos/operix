@@ -11,6 +11,11 @@ const decisionSchema = z.object({
   notes: z.string().trim().min(1, "CONFRONTATION_DECISION_NOTES_REQUIRED").max(2_000, "CONFRONTATION_DECISION_NOTES_REQUIRED"),
 }).strict();
 
+let afterRectificationTestHook: (() => void | Promise<void>) | undefined;
+export function setAfterRectificationTestHook(hook: (() => void | Promise<void>) | undefined) {
+  afterRectificationTestHook = hook;
+}
+
 type ConfrontMode = z.infer<typeof modeSchema>;
 type PlanResult = {
   paymentListItemId: string | null;
@@ -288,6 +293,13 @@ export async function decideConfrontationResult(ctx: RequestContext, listId: str
           const entry = result.weeklogEntryId ? await tx.weeklogEntry.findFirst({ where: { id: result.weeklogEntryId, workspaceId: workspace }, select: { id: true, weeklogId: true, sourceType: true, productionOrderId: true } }) : null;
           if (!entry) throw new ConflictError("RECTIFICATION_LINEAGE_CONFLICT");
           if (entry.sourceType === "external_import" || !entry.productionOrderId) throw new UnprocessableEntityError("EXTERNAL_ENTRY_CANNOT_RECTIFY_PO");
+          const productionOrder = await tx.productionOrder.findFirst({
+            where: { id: entry.productionOrderId, workspaceId: workspace },
+            select: { rectificationOriginId: true },
+          });
+          if (!productionOrder || (productionOrder.rectificationOriginId && productionOrder.rectificationOriginId !== entry.id)) {
+            throw new ConflictError("RECTIFICATION_LINEAGE_CONFLICT");
+          }
           const rectification = await rectifyWeeklogEntryInTransaction(tx, ctx, entry.weeklogId, entry.id, { reason: input.notes });
           const recovered = await tx.paymentListConfrontationResult.update({ where: { id: result.id }, data: { reopenedProductionOrderId: rectification.productionOrder.id, targetExecutionSequence: rectification.productionOrder.executionSequence } });
           return { result: presentResult(recovered), idempotent: true };
@@ -310,6 +322,7 @@ export async function decideConfrontationResult(ctx: RequestContext, listId: str
       if (entry.sourceType === "external_import" || !entry.productionOrderId) throw new UnprocessableEntityError("EXTERNAL_ENTRY_CANNOT_RECTIFY_PO");
       const rectification = await rectifyWeeklogEntryInTransaction(tx, ctx, entry.weeklogId, entry.id, { reason: input.notes });
       lineage = { reopenedProductionOrderId: rectification.productionOrder.id, targetExecutionSequence: rectification.productionOrder.executionSequence };
+      await afterRectificationTestHook?.();
     }
     const updated = await tx.paymentListConfrontationResult.update({ where: { id: result.id }, data: { decision: input.decision as ConfrontationDecision, notes: input.notes, decidedBy: ctx.actorUserId, decidedAt: new Date(), ...lineage } });
     if (input.decision === "reject_item" && result.weeklogEntryId) {
