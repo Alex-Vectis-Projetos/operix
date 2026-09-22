@@ -137,10 +137,11 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - O OCR efêmero permanece explicitamente depreciado e sem consumidor ativo; o fluxo governado de upload/revisão fica preparado para a UI canônica do T11.
 
 ### Fase 9: Interface de Revisão e Confronto Comercial em Operações
-- [ ] **T11**: Adaptar interface em `src/pages/PaymentOrdersPage.tsx`:
+- [x] **T11**: Adaptar interface em `src/pages/PaymentOrdersPage.tsx`:
   - Tela de conferência lado a lado: visualizador de documento (zoom/rotação) + tabela editável de staging relacional.
   - Integração dos componentes de confronto ([FusaoManualTab.tsx](file:///c:/Users/Gustavo%20Fugulin/Downloads/operix/src/components/confronto/FusaoManualTab.tsx), [PendentesTab.tsx](file:///c:/Users/Gustavo%20Fugulin/Downloads/operix/src/components/confronto/PendentesTab.tsx), [HistoricoTab.tsx](file:///c:/Users/Gustavo%20Fugulin/Downloads/operix/src/components/confronto/HistoricoTab.tsx)) dentro da visualização da Lista em Operações.
   - Aplicação estrita da visão do técnico (`scope: own`): ocultação de faturamento global e margens.
+  - Concluído com `PaymentListWorkspace` na rota estável `/payment-orders`, índice/detalhe canônicos, staging governado e visualização desktop lado a lado (mobile por abas). O preview usa somente `POST /storage/presigned-download` com caminho de proveniência retornado pelo servidor; fechamento não descarta staging sem confirmação explícita. Decisões apontam para `resultId` canônico e seguem a matriz autorizada pelo backend. O endpoint atual fornece apenas a rodada mais recente: a tela expõe essa lacuna sem simular histórico. Testes T11 cobrem preview, separação upload/commit, descarte explícito, decisão, sanitização de totais e ausência de caminhos legados.
 
 ### Fase 10: Quality Gates, Verificação e Handoff
 - [ ] **T12**: Executar suíte completa de validação:
