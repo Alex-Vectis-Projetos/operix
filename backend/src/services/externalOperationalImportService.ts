@@ -14,6 +14,7 @@ import {
   validateImportFile,
 } from "./externalImportAdapters.js";
 import { ImportPipelineError, parseReviewedDecimal } from "./externalListImportService.js";
+import { operationalWeekOf } from "../lib/weekUtils.js";
 
 type ServiceDependencies = { storage?: ImportDocumentStorage; extraction?: ImportExtractionProvider };
 
@@ -241,4 +242,321 @@ export async function discardExternalOperationalImport(ctx: RequestContext, impo
   assertImportManager(ctx);
   const result = await prisma.externalOperationalImport.updateMany({ where: { id: importId, workspaceId: workspaceId(ctx), status: { notIn: ["committed", "discarded"] } }, data: { status: "discarded" } });
   if (!result.count) throw new NotFoundError("EXTERNAL_OPERATIONAL_IMPORT_NOT_FOUND_OR_FINALIZED");
+}
+
+type ReviewedOperationalRow = {
+  id: string;
+  reviewedLicensePlate: string | null;
+  reviewedVin: string | null;
+  reviewedCarName: string | null;
+  reviewedClientId: string | null;
+  reviewedCurrencyCode: string | null;
+  reviewedOperationalSiteKey: string | null;
+  reviewedTechnicianUserId: string | null;
+  reviewedDeliveredAt: Date | null;
+  reviewedServices: Prisma.JsonValue | null;
+  reviewedTotal: Prisma.Decimal | null;
+};
+
+type ExternalMaterialization = {
+  importId: string;
+  status: "committed";
+  idempotent: boolean;
+  materializationId: string;
+  weeklogId: string | null;
+  weeklogs: Array<{ id: string; startsOn: Date; endsOn: Date; clientId: string; siteKey: string; status: string }>;
+  entries: Array<{
+    id: string;
+    weeklogId: string;
+    sourceType: string;
+    productionOrderId: string | null;
+    externalImportItemId: string | null;
+    executionSequence: number;
+    validationStatus: string;
+  }>;
+  validation: { id: string; weeklogId: string; validationSequence: number; validationMethod: string | null; coverageSnapshot: Prisma.JsonValue } | null;
+  validations: Array<{ id: string; weeklogId: string; validationSequence: number; validationMethod: string | null; coverageSnapshot: Prisma.JsonValue }>;
+};
+
+function isReviewedServices(value: Prisma.JsonValue | null): value is Prisma.JsonArray {
+  return Array.isArray(value) && value.length > 0 && value.every((service) =>
+    service !== null && typeof service === "object" && !Array.isArray(service) &&
+    (typeof (service as Record<string, unknown>).code === "string" || typeof (service as Record<string, unknown>).description === "string"),
+  );
+}
+
+function externalEntryDto(entry: {
+  id: string; weeklogId: string; sourceType: string; productionOrderId: string | null;
+  externalImportItemId: string | null; executionSequence: number; validationStatus: string;
+}) {
+  return {
+    id: entry.id,
+    weeklogId: entry.weeklogId,
+    sourceType: entry.sourceType,
+    productionOrderId: entry.productionOrderId,
+    externalImportItemId: entry.externalImportItemId,
+    executionSequence: entry.executionSequence,
+    validationStatus: entry.validationStatus,
+  };
+}
+
+function externalValidationDto(validation: {
+  id: string; weeklogId: string; validationSequence: number; validationMethod: string | null; coverageSnapshot: Prisma.JsonValue;
+}) {
+  return {
+    id: validation.id,
+    weeklogId: validation.weeklogId,
+    validationSequence: validation.validationSequence,
+    validationMethod: validation.validationMethod,
+    coverageSnapshot: validation.coverageSnapshot,
+  };
+}
+
+async function readCommittedExternalMaterialization(
+  tx: Prisma.TransactionClient,
+  ws: string,
+  importId: string,
+): Promise<ExternalMaterialization> {
+  const imported = await tx.externalOperationalImport.findFirst({
+    where: { id: importId, workspaceId: ws, status: "committed" },
+    include: { items: { select: { id: true } } },
+  });
+  if (!imported) throw new ConflictError("IMPORT_MATERIALIZATION_NOT_COMMITTED");
+
+  const entries = await tx.weeklogEntry.findMany({
+    where: { workspaceId: ws, externalImportItemId: { in: imported.items.map((item) => item.id) } },
+    include: { weeklog: { select: { id: true, startsOn: true, endsOn: true, clientId: true, siteKey: true, status: true } } },
+    orderBy: [{ deliveredAt: "asc" }, { id: "asc" }],
+  });
+  if (entries.length !== imported.items.length) throw new ConflictError("IMPORT_COMMITTED_MATERIALIZATION_INCOMPLETE");
+
+  const weeklogs = [...new Map(entries.map((entry) => [entry.weeklog.id, entry.weeklog])).values()]
+    .sort((left, right) => left.startsOn.getTime() - right.startsOn.getTime() || left.id.localeCompare(right.id));
+  const candidateValidations = await tx.weeklogValidation.findMany({
+    where: { workspaceId: ws, weeklogId: { in: weeklogs.map((weeklog) => weeklog.id) }, validationMethod: "external_import_review" },
+    orderBy: [{ weeklogId: "asc" }, { validationSequence: "asc" }],
+  });
+  const validations = candidateValidations
+    .filter((validation) => {
+      const snapshot = validation.coverageSnapshot as Record<string, unknown> | null;
+      return snapshot?.sourceType === "external_import" && snapshot.sourceImportId === importId;
+    })
+    .map(externalValidationDto);
+  if (validations.length !== weeklogs.length) throw new ConflictError("IMPORT_COMMITTED_VALIDATION_INCOMPLETE");
+
+  return {
+    importId,
+    status: "committed",
+    idempotent: true,
+    materializationId: importId,
+    weeklogId: weeklogs[0]?.id ?? null,
+    weeklogs,
+    entries: entries.map(externalEntryDto),
+    validation: validations[0] ?? null,
+    validations,
+  };
+}
+
+async function validateReviewedOperationalRows(
+  tx: Prisma.TransactionClient,
+  ws: string,
+  rows: ReviewedOperationalRow[],
+) {
+  if (!rows.length || !rows.every(completeOperationalRow)) {
+    throw new UnprocessableEntityError("IMPORT_REVIEW_INCOMPLETE");
+  }
+
+  const workspace = await tx.workspace.findUnique({ where: { id: ws }, select: { timezone: true } });
+  if (!workspace) throw new NotFoundError("WORKSPACE_NOT_FOUND");
+  const resolved: Array<ReviewedOperationalRow & { clientName: string; technicianName: string; weekInfo: ReturnType<typeof operationalWeekOf> }> = [];
+
+  for (const row of rows) {
+    if (!row.reviewedClientId || !row.reviewedTechnicianUserId || !row.reviewedDeliveredAt || !row.reviewedCurrencyCode ||
+      !row.reviewedOperationalSiteKey || !row.reviewedTotal || !isReviewedServices(row.reviewedServices)) {
+      throw new UnprocessableEntityError("IMPORT_REVIEW_INCOMPLETE");
+    }
+    if (!/^[A-Z]{3}$/.test(row.reviewedCurrencyCode) || !row.reviewedTotal.isPositive()) {
+      throw new UnprocessableEntityError("IMPORT_REVIEWED_VALUES_INVALID");
+    }
+    // Recheck vehicle identity as it is a security-sensitive reviewed value.
+    normalizePlate(row.reviewedLicensePlate);
+    normalizeVin(row.reviewedVin);
+    if (!row.reviewedLicensePlate && !row.reviewedVin) throw new UnprocessableEntityError("REVIEWED_VEHICLE_IDENTIFIER_REQUIRED");
+
+    const [client, technician] = await Promise.all([
+      tx.client.findFirst({ where: { id: row.reviewedClientId, workspaceId: ws, deletedAt: null }, select: { id: true, name: true } }),
+      tx.appUser.findFirst({
+        where: { authUserId: row.reviewedTechnicianUserId },
+        include: { user: { select: { fullName: true, isActive: true } }, memberships: { where: { workspaceId: ws, status: "active" }, select: { id: true } } },
+      }),
+    ]);
+    if (!client) throw new UnprocessableEntityError("REVIEWED_CLIENT_NOT_IN_WORKSPACE");
+    if (!technician?.user.isActive) throw new ForbiddenError("REVIEWED_TECHNICIAN_NOT_ACTIVE");
+    const isWorkspaceOwner = await tx.workspace.findFirst({ where: { id: ws, ownerUserId: technician.id }, select: { id: true } });
+    if (!technician.memberships.length && !isWorkspaceOwner) throw new ForbiddenError("REVIEWED_TECHNICIAN_NOT_IN_WORKSPACE");
+
+    resolved.push({
+      ...row,
+      clientName: client.name,
+      technicianName: technician.name || technician.user.fullName || "",
+      weekInfo: operationalWeekOf(row.reviewedDeliveredAt, workspace.timezone || "UTC"),
+    });
+  }
+  return resolved;
+}
+
+/**
+ * The only authority that may approve external-import entries.  It locks the
+ * import and materializes reviewed rows atomically; no production order,
+ * service order, payment list, claim, or financial projection is created.
+ */
+export async function commitReviewedExternalOperationalImport(ctx: RequestContext, importId: string): Promise<ExternalMaterialization> {
+  assertImportManager(ctx);
+  const ws = workspaceId(ctx);
+
+  return prisma.$transaction(async (tx) => {
+    const lockedImports: Array<{ id: string }> = await tx.$queryRaw`
+      SELECT id FROM external_operational_imports
+      WHERE id = ${importId} AND workspace_id = ${ws}
+      FOR UPDATE
+    `;
+    if (!lockedImports.length) {
+      const foreignImport = await tx.externalOperationalImport.findUnique({ where: { id: importId }, select: { workspaceId: true } });
+      if (foreignImport) throw new ForbiddenError("EXTERNAL_OPERATIONAL_IMPORT_CROSS_TENANT_FORBIDDEN");
+      throw new NotFoundError("EXTERNAL_OPERATIONAL_IMPORT_NOT_FOUND");
+    }
+
+    const imported = await tx.externalOperationalImport.findFirstOrThrow({
+      where: { id: importId, workspaceId: ws },
+      include: { items: { orderBy: { id: "asc" } } },
+    });
+    if (imported.status === "committed") return readCommittedExternalMaterialization(tx, ws, importId);
+    if (imported.status !== "reviewed") throw new ConflictError("IMPORT_NOT_REVIEWED");
+    if (!imported.fileSha256) throw new UnprocessableEntityError("IMPORT_PROVENANCE_SHA256_REQUIRED");
+
+    const reviewedRows = await validateReviewedOperationalRows(tx, ws, imported.items);
+    const grouped = new Map<string, typeof reviewedRows>();
+    for (const row of reviewedRows) {
+      const key = [row.weekInfo.startsOn.toISOString(), row.reviewedClientId, row.reviewedOperationalSiteKey].join("|");
+      const rows = grouped.get(key) ?? [];
+      rows.push(row);
+      grouped.set(key, rows);
+    }
+
+    const materializedWeeklogs: ExternalMaterialization["weeklogs"] = [];
+    const materializedEntries: ExternalMaterialization["entries"] = [];
+    const materializedValidations: NonNullable<ExternalMaterialization["validation"]>[] = [];
+    const now = new Date();
+
+    for (const [, rows] of [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+      const first = rows[0]!;
+      const weeklog = await tx.weeklog.upsert({
+        where: { workspaceId_startsOn_clientId_siteKey: { workspaceId: ws, startsOn: first.weekInfo.startsOn, clientId: first.reviewedClientId!, siteKey: first.reviewedOperationalSiteKey! } },
+        create: {
+          workspaceId: ws,
+          startsOn: first.weekInfo.startsOn,
+          endsOn: first.weekInfo.endsOn,
+          clientId: first.reviewedClientId!,
+          siteKey: first.reviewedOperationalSiteKey!,
+          timezone: first.weekInfo.timezone,
+          week: first.weekInfo.week,
+          weekNumber: first.weekInfo.weekNumber,
+          yearReference: first.weekInfo.yearReference,
+          status: "open",
+        },
+        update: {},
+      });
+      const lockedWeeklogs: Array<{ id: string; status: string }> = await tx.$queryRaw`
+        SELECT id, status FROM weeklogs WHERE id = ${weeklog.id} AND workspace_id = ${ws} FOR UPDATE
+      `;
+      if (!lockedWeeklogs.length) throw new NotFoundError("WEEKLOG_NOT_FOUND");
+      if (lockedWeeklogs[0]!.status === "pending_validation") throw new ConflictError("EXTERNAL_IMPORT_WEEKLOG_PENDING_VALIDATION");
+
+      const createdEntries = [] as Array<{ id: string; weeklogId: string; sourceType: string; productionOrderId: string | null; externalImportItemId: string | null; executionSequence: number; validationStatus: string; deliveredAt: Date }>;
+      for (const row of rows.sort((left, right) => left.reviewedDeliveredAt!.getTime() - right.reviewedDeliveredAt!.getTime() || left.id.localeCompare(right.id))) {
+        const entry = await tx.weeklogEntry.create({
+          data: {
+            weeklogId: weeklog.id,
+            workspaceId: ws,
+            sourceType: "external_import",
+            productionOrderId: null,
+            externalImportItemId: row.id,
+            executionSequence: 1,
+            budgetId: null,
+            budgetRevisionId: null,
+            legacyServiceOrderId: null,
+            technicianUserId: row.reviewedTechnicianUserId!,
+            technicianName: row.technicianName,
+            clientId: row.reviewedClientId!,
+            clientName: row.clientName,
+            brand: null,
+            model: row.reviewedCarName,
+            color: null,
+            licensePlate: row.reviewedLicensePlate,
+            vin: row.reviewedVin,
+            servicesSnapshot: row.reviewedServices as Prisma.InputJsonValue,
+            totalAmount: row.reviewedTotal!,
+            currencyCode: row.reviewedCurrencyCode!,
+            deliveredAt: row.reviewedDeliveredAt!,
+            validationStatus: "pending",
+          },
+        });
+        createdEntries.push(entry);
+      }
+
+      const latestValidation = await tx.weeklogValidation.findFirst({
+        where: { workspaceId: ws, weeklogId: weeklog.id },
+        orderBy: { validationSequence: "desc" },
+        select: { validationSequence: true },
+      });
+      const coverageSnapshot = {
+        schemaVersion: "1.0",
+        sourceType: "external_import",
+        sourceImportId: imported.id,
+        sha256: imported.fileSha256,
+        entries: createdEntries
+          .sort((left, right) => left.deliveredAt.getTime() - right.deliveredAt.getTime() || left.id.localeCompare(right.id))
+          .map((entry) => ({ entryId: entry.id, externalImportItemId: entry.externalImportItemId, executionSequence: 1, sourceType: "external_import" })),
+      };
+      const validation = await tx.weeklogValidation.create({
+        data: {
+          weeklogId: weeklog.id,
+          workspaceId: ws,
+          validationSequence: (latestValidation?.validationSequence ?? 0) + 1,
+          status: "validated",
+          submittedAt: now,
+          submittedBy: ctx.actorUserId,
+          validatorUserId: ctx.actorUserId,
+          validationMethod: "external_import_review",
+          coverageSnapshot,
+          auditTrail: [{ action: "external_import_review_committed", actorUserId: ctx.actorUserId, sourceImportId: imported.id, timestamp: now.toISOString() }],
+          validatedAt: now,
+        },
+      });
+      await tx.weeklogEntry.updateMany({
+        where: { id: { in: createdEntries.map((entry) => entry.id) }, workspaceId: ws, validationStatus: "pending" },
+        data: { validationStatus: "approved", reviewedAt: now, reviewerUserId: ctx.actorUserId },
+      });
+      const finalizedWeeklog = await tx.weeklog.update({ where: { id: weeklog.id }, data: { status: "validated" }, select: { id: true, startsOn: true, endsOn: true, clientId: true, siteKey: true, status: true } });
+      materializedWeeklogs.push(finalizedWeeklog);
+      materializedEntries.push(...createdEntries.map((entry) => externalEntryDto({ ...entry, validationStatus: "approved" })));
+      materializedValidations.push(externalValidationDto(validation));
+    }
+
+    await tx.externalOperationalImport.update({ where: { id: imported.id }, data: { status: "committed" } });
+    materializedWeeklogs.sort((left, right) => left.startsOn.getTime() - right.startsOn.getTime() || left.id.localeCompare(right.id));
+    materializedEntries.sort((left, right) => left.weeklogId.localeCompare(right.weeklogId) || left.id.localeCompare(right.id));
+    materializedValidations.sort((left, right) => left.weeklogId.localeCompare(right.weeklogId) || left.validationSequence - right.validationSequence);
+    return {
+      importId: imported.id,
+      status: "committed",
+      idempotent: false,
+      materializationId: imported.id,
+      weeklogId: materializedWeeklogs[0]?.id ?? null,
+      weeklogs: materializedWeeklogs,
+      entries: materializedEntries,
+      validation: materializedValidations[0] ?? null,
+      validations: materializedValidations,
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }

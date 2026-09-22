@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { resolveRequestContext } from "../middleware/requestContext.js";
 import {
   createExternalOperationalImport,
+  commitReviewedExternalOperationalImport,
   discardExternalOperationalImport,
   getExternalOperationalImport,
   retryExternalOperationalExtraction,
@@ -86,11 +87,10 @@ externalOperationalImportsRouter.delete("/:importId", async (req: Request, res: 
   }
 });
 
-// T05 intentionally does not materialize Weeklog/WeeklogEntry.
 externalOperationalImportsRouter.post("/:importId/commit", async (req: Request, res: Response) => {
   try {
-    await getExternalOperationalImport(req.ctx!, routeParam(req, "importId"));
-    return res.status(409).json({ code: "IMPORT_MATERIALIZATION_DEFERRED", message: "EXTERNAL_WEEKLOG_MATERIALIZATION_DEFERRED" });
+    const materialized = await commitReviewedExternalOperationalImport(req.ctx!, routeParam(req, "importId"));
+    return res.status(materialized.idempotent ? 200 : 201).json(materialized);
   } catch (error) {
     return sendError(res, error);
   }

@@ -19,6 +19,12 @@ export const weeklogsRouter = Router();
 weeklogsRouter.use(requireAuth);
 weeklogsRouter.use(resolveRequestContext);
 
+// Weeklog entries are created only by the bounded operational materializers.
+// In particular, callers cannot forge an already-approved external entry.
+weeklogsRouter.post("/:id/entries", async (_req: Request, res: Response) => {
+  return res.status(422).json({ code: "WEEKLOG_ENTRY_DIRECT_CREATION_FORBIDDEN" });
+});
+
 // GET /api/weeklogs
 weeklogsRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
