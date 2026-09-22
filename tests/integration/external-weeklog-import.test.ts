@@ -395,6 +395,15 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
     it("IMPORT-WEEKLOG-NO-FAKE-PO-01: Materialização Canônica sem Fabricação de OPs Fictícias", async () => {
       // Given: Lote de WEEKLOG externo revisado pelo gestor
       const { importId } = await createReviewedOperationalImport();
+      const forbiddenSideEffectsBefore = await Promise.all([
+        prisma.productionOrder.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.budget.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentList.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentListItem.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentListEntryClaim.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.financialRecord.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+      ]);
 
       // When: Gestor efetiva o lote
       const res = await fetch(`${baseUrl}/api/external-operational-imports/${importId}/commit`, {
@@ -413,11 +422,16 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
         expect(entry.externalImportItemId).toBeDefined();
       }
 
-      // Zero OPs fictícias criadas
-      const poCount = await prisma.productionOrder.count({
-        where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha },
-      });
-      expect(poCount).toBe(0);
+      // Zero efeitos em projeções produtivas, comerciais, legadas ou financeiras.
+      expect(await Promise.all([
+        prisma.productionOrder.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.budget.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentList.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentListItem.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentListEntryClaim.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.financialRecord.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+      ])).toEqual(forbiddenSideEffectsBefore);
     });
 
     it("IMPORT-WEEKLOG-COMMIT-IDEMPOTENT-01: Idempotência de Retry no Commit de Importação Operacional Externa", async () => {
