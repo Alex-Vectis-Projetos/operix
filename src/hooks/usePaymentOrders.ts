@@ -5,7 +5,6 @@ import { uploadFile } from "@/lib/storage";
 import { useAuth } from "./useAuth";
 import { useCan } from "./usePermission";
 import { useWorkspace } from "./useWorkspace";
-import { getCurrentUserId } from "@/lib/authUser";
 import { toast } from "sonner";
 
 export type PaymentOrder = {
@@ -36,11 +35,6 @@ export type PaymentOrder = {
   updated_at: string;
 };
 
-export type PaymentOrderInsert = Partial<PaymentOrder> & {
-  user_id: string;
-  assigned_user_id: string;
-};
-
 export type FieldConfidence = "high" | "medium" | "low";
 
 export interface ExtractedPaymentOrder {
@@ -63,13 +57,13 @@ export interface PaymentExtractionResult {
   notes?: string;
 }
 
+/** Legacy projection read only. Canonical PaymentList mutations live in usePaymentLists. */
 export function usePaymentOrders(filters?: {
   client_id?: string;
   platform?: string;
   assigned_user_id?: string;
   list_name?: string;
 }) {
-  const queryClient = useQueryClient();
   const { user } = useAuth();
   const { can, isLoading: permsLoading } = useCan();
   const { workspaceId } = useWorkspace();
@@ -98,74 +92,15 @@ export function usePaymentOrders(filters?: {
     },
   });
 
-  const saveMutation = useMutation({
-    mutationFn: async (orders: PaymentOrderInsert[]) => {
-      await getCurrentUserId();
-
-      const payload = orders.map(({ technician_id: _ignored, created_by: _cb, ...rest }) => ({
-        ...rest,
-        status: rest.status || "pending",
-      }));
-
-      return apiRequest<PaymentOrder[]>("/payment-orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["payment_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
-      toast.success("Payment orders saved successfully");
-    },
-    onError: (err) => {
-      toast.error("Failed to save: " + (err as Error).message);
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<PaymentOrder> & { id: string }) => {
-      if (!id) throw new Error("Payment order id is required for update.");
-
-      const { clients: _c, technicians: _t, created_by: _cb, technician_id: _ti, ...rest } = updates as any;
-      const payload = { ...rest, updated_at: new Date().toISOString() };
-
-      return apiRequest<PaymentOrder>(`/payment-orders/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["payment_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
-      toast.success("Payment order updated");
-    },
-    onError: (err) => {
-      toast.error("Failed to update: " + (err as Error).message);
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return apiRequest(`/payment-orders/${id}`, { method: "DELETE" });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["payment_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
-      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
-      toast.success("Payment order deleted");
-    },
-    onError: (err) => toast.error((err as Error).message),
-  });
-
-  return { ...query, saveMutation, updateMutation, deleteMutation };
+  return query;
 }
 
 const VALID_EXTRACT_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"];
 
+/**
+ * @deprecated The ephemeral extractor is retained only for isolated legacy display work.
+ * New PaymentList flows must use the governed ExternalListImport client instead.
+ */
 export function useExtractPaymentOrder() {
   const [isExtracting, setIsExtracting] = useState(false);
 
