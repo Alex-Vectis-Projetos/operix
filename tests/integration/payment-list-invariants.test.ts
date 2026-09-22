@@ -893,6 +893,7 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
         id: listId, workspaceId: FIXTURES_004.wsAlpha, listNumber: "L900006", clientId: FIXTURES_004.clientA.id,
         clientName: FIXTURES_004.clientA.name, currencyCode: "EUR", status: "pending", createdBy: FIXTURES_004.ownerA.userId,
       } });
+      const financialCountBefore = await prisma.financialRecord.count({ where: { workspaceId: FIXTURES_004.wsAlpha } });
 
       // When: Duas chamadas consecutivas de liquidação (toStatus: 'paid')
       const headers = getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha);
@@ -913,6 +914,7 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       const data2 = await res2.json();
       expect(data2.status).toBe("paid");
       expect(data2.paidAt).toBeDefined();
+      expect(await prisma.financialRecord.count({ where: { workspaceId: FIXTURES_004.wsAlpha } })).toBe(financialCountBefore);
     });
 
     it("LIST-PAID-FORBIDDEN-01: Bloqueio de Liquidação por Usuário sem Papel de Gestão", async () => {
