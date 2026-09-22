@@ -141,6 +141,7 @@ O plano divide a entrega em **fatias verticais progressivas e auditáveis**:
     - `pending` $\rightarrow$ `paid`: restrito a `owner`/`admin`. Idempotente. Grava `paidAt` e `paidBy`. Zero mutações em `financial_records`.
     - `*` $\rightarrow$ `cancelled`: atualiza todas as claims `reserved` para `status = 'released'`, liberando as entries.
 - `confrontationService.ts`:
+  - `runConfrontation(ctx, listId, { mode })`: recebe somente `mode: "current" | "new_round"`, com default `"current"`; recupera a rodada corrente idempotentemente ou abre uma nova rodada explícita e autorizada sem sobrescrever história. `new_round` é permitido apenas em `under_review`/`confronted` e mantém decisões anteriores imutáveis.
   - `executeConfrontation(ctx, listId)`:
     - Verifica se a rodada atual possui decisões humanas registradas (`decision != 'none'`). Se houver, bloqueia com HTTP 409 `CONFRONTATION_RERUN_HAS_DECISIONS`.
     - Cria nova `PaymentListConfrontationRun` com `sequence` incrementada.

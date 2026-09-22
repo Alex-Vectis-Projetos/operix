@@ -232,38 +232,45 @@ describe("Spec 004 — Commercial Confrontation & Disputes Suite (T01/T02 Baseli
 
       // When: Re-executa o confronto sem nenhuma alteração nos dados
       const res1 = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, { method: "POST", headers });
-      const res2 = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, { method: "POST", headers });
+      const res2 = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ mode: "current" }),
+      });
 
       // Then: Ambas retornam a rodada 1 com HTTP 200 sem criar nova rodada
       expect(res1.status).toBe(200);
       expect(res2.status).toBe(200);
       const data2 = await res2.json();
-      expect(data2.runSequence).toBe(1);
+      expect(data2.sequence).toBe(1);
+      expect(data2.idempotent).toBe(true);
+      expect(data2.mode).toBe("current");
     });
 
     it("CONFRONT-RERUN-HISTORY-01: Criação de Nova Rodada Versionada Preservando Histórico", async () => {
       // Given: Rodada 1 concluída sem decisões humanas e novos dados validados
       const listId = "44000000-0000-4000-8000-000000000053";
 
-      // When: Solicita re-execução do confronto
+      // When: Solicita explicitamente uma nova rodada de confronto
       const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
         method: "POST",
         headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
-        body: JSON.stringify({ forceNewRun: true }),
+        body: JSON.stringify({ mode: "new_round" }),
       });
 
       // Then: Cria rodada 2 (sequence = 2), rodada 1 passa para 'superseded' e histórico permanece gravado
       expect(res.status).toBe(200);
       const data = await res.json();
-      expect(data.runSequence).toBe(2);
-      expect(data.previousRunStatus).toBe("superseded");
+      expect(data.sequence).toBe(2);
+      expect(data.mode).toBe("new_round");
+      expect(data.previousRunId).toBeDefined();
     });
 
     it("CONFRONT-RERUN-DECISION-IMMUTABLE-01: Bloqueio de Rerun quando Rodada Ativa Possui Decisões Humanas", async () => {
       // Given: PaymentList cuja rodada ativa possui decisão humana registrada
       const listId = "44000000-0000-4000-8000-000000000054";
 
-      // When: Usuário tenta disparar rerun automático
+      // When: Após mudança relevante, usuário tenta recomputação da rodada corrente
       const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
         method: "POST",
         headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
@@ -273,6 +280,18 @@ describe("Spec 004 — Commercial Confrontation & Disputes Suite (T01/T02 Baseli
       expect(res.status).toBe(409);
       const data = await res.json();
       expect(data.code || data.message).toMatch(/CONFRONTATION_RERUN_HAS_DECISIONS|RERUN_HAS_DECISIONS/i);
+
+      // And: Ação explícita cria uma rodada nova sem sobrescrever a rodada decidida.
+      const explicitNewRound = await fetch(`${baseUrl}/api/payment-lists/${listId}/confront`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_CONFRONT.ownerA, FIXTURES_004_CONFRONT.wsAlpha),
+        body: JSON.stringify({ mode: "new_round" }),
+      });
+      expect(explicitNewRound.status).toBe(200);
+      const newRound = await explicitNewRound.json();
+      expect(newRound.mode).toBe("new_round");
+      expect(newRound.sequence).toBe(2);
+      expect(newRound.previousRunId).toBeDefined();
     });
 
     it("CONFRONT-VEHICLE-01: Pareamento por Identificador Veicular com Pareamento Único", async () => {

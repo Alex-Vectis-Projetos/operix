@@ -100,7 +100,8 @@ $$\text{draft} \longrightarrow \text{under\_review} \longrightarrow \text{confro
     - `(weeklogEntryId, workspaceId) REFERENCES weeklog_entries(id, workspaceId)`.
   - Unicidade por rodada: `UNIQUE(run_id, payment_list_item_id)` e `UNIQUE(run_id, weeklog_entry_id)`.
   - Status inicial default: `not_evaluated`.
-- **Idempotência e Bloqueio de Rerun**: Reruns com decisões humanas na rodada ativa são bloqueados com HTTP 409 `CONFRONTATION_RERUN_HAS_DECISIONS`.
+- **Comando e Idempotência**: `POST /api/payment-lists/:id/confront` aceita `{ mode?: "current" | "new_round" }`, com default `current`. O modo corrente recupera a mesma rodada sem mudança; se os insumos mudaram e há decisões humanas, retorna HTTP 409 `CONFRONTATION_RERUN_HAS_DECISIONS`. `new_round` é ação explícita de `owner`/`admin`, permitida apenas em `under_review`/`confronted`, cria a sequência seguinte e mantém rodadas e decisões anteriores imutáveis. `pending`, `paid` e `cancelled` retornam `CONFRONTATION_LIST_STATE_LOCKED`.
+- **Endpoint de Decisão**: `PATCH /api/payment-lists/:id/confrontation/:resultId/decision` endereça o resultado diretamente, inclusive o caso desacoplado `unmatched_weeklog` sem `PaymentListItem`.
 
 ### 2.8. Linhagem da Retificação Comercial sem Entidade Sintética
 - Quando o gestor aciona `REQUEST_RECTIFICATION`, o sistema invoca a transação canônica `rectifyWeeklogEntry` da Spec 003.

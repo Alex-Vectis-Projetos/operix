@@ -278,3 +278,15 @@ As decisões respeitam rigorosamente:
   3. **READ-ONLY LEGACY**: Consultas de leitura a `/payment-orders` em `useAgingAlerts.ts:35`, `useOperationalSignals.ts:86`, `usePaymentOrdersForBilling.ts:36` continuam sendo atendidas com segurança via leitura projetada até a Spec 005.
   4. **SPEC005 FUTURE**: Rotas bancárias em `BillingPage.tsx:371` e `ImportInvoiceDialog.tsx:629` serão tratadas na vertical de conciliação bancária da Spec 005.
 - **Justificativa**: Transição previsível, sem telas quebradas e sem manutenção de código inseguro.
+
+---
+
+### DEC-017: Comando Explícito de Nova Rodada de Confronto
+- **Problema**: O versionamento exige uma ação auditável para abrir uma nova rodada, mas o contrato anterior não distinguia recuperação idempotente da rodada corrente de uma nova auditoria deliberada.
+- **Decisão**:
+  1. `POST /api/payment-lists/:id/confront` aceita exclusivamente `{ mode?: "current" | "new_round" }`; a ausência de `mode` equivale a `"current"`. Parâmetros públicos como `forceNewRun`, `force`, `rerun`, `overwrite` e `replaceResults` não fazem parte do contrato.
+  2. `mode: "current"` recupera a rodada corrente sem alterações quando os insumos relevantes não mudaram, inclusive se existirem decisões humanas. Se os insumos mudaram e a rodada possui decisão diferente de `none`, falha com `CONFRONTATION_RERUN_HAS_DECISIONS` sem alterar histórico.
+  3. `mode: "new_round"` é ação explícita de `owner`/`admin`, permitida apenas em listas `under_review` ou `confronted`. Cria `sequence + 1`, preserva integralmente rodadas e decisões anteriores e não copia decisões para os novos resultados. Listas `pending`, `paid` e `cancelled` retornam `CONFRONTATION_LIST_STATE_LOCKED`.
+  4. A primeira execução com `mode: "new_round"` normaliza para sequência 1; nunca cria sequência 2 artificial. A exclusividade de `(paymentListId, sequence)` continua a guarda estrutural para chamadas concorrentes.
+  5. A decisão humana é sempre endereçada pelo resultado: `PATCH /api/payment-lists/:id/confrontation/:resultId/decision`. Isso preserva `unmatched_weeklog`, que não possui `PaymentListItem`.
+- **Justificativa**: Mantém idempotência segura, separa explicitamente uma nova auditoria de um retry e preserva evidência humana imutável sem criar endpoints ou parâmetros ad hoc.

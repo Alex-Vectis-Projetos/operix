@@ -329,9 +329,10 @@ Os cenários de aceite são formalizados no formato comportamental estruturado (
 - **Given**:
   - Uma `PaymentList` que já executou o confronto gerando a rodada 1 (`sequence = 1`).
 - **When**:
-  - O gestor dispara novamente `POST /api/payment-lists/:id/confront` sem que nenhuma produção ou item tenha sido alterado.
+  - O gestor dispara novamente `POST /api/payment-lists/:id/confront` sem corpo ou com `{ "mode": "current" }`, sem que nenhuma produção ou item tenha sido alterado.
 - **Then**:
   - A API retorna os resultados existentes da rodada 1 com HTTP 200.
+  - A resposta informa `idempotent = true` e `mode = "current"`.
   - Nenhuma rodada espúria é criada no banco.
 
 #### `CONFRONT-RERUN-HISTORY-01`: Criação de Nova Rodada Versionada Preservando Histórico
@@ -339,20 +340,22 @@ Os cenários de aceite são formalizados no formato comportamental estruturado (
   - Uma `PaymentList` com rodada 1 concluída onde não há nenhuma decisão humana registrada.
   - Novos WEEKLOGs foram validados na oficina para o mesmo cliente.
 - **When**:
-  - O gestor solicita a re-execução do confronto.
+  - O gestor autorizado solicita `POST /api/payment-lists/:id/confront` com `{ "mode": "new_round" }`.
 - **Then**:
   - É criada a rodada 2 (`sequence = 2`) em `payment_list_confrontation_runs`.
   - A rodada 1 passa para `status = 'superseded'`.
   - Os resultados da rodada 1 permanecem gravados no banco para auditoria histórica imutável.
+  - Decisões da rodada 1 não são copiadas para a rodada 2.
 
 #### `CONFRONT-RERUN-DECISION-IMMUTABLE-01`: Bloqueio de Rerun quando Rodada Ativa Possui Decisões Humanas
 - **Given**:
   - Uma `PaymentList` cuja rodada ativa possui pelo menos uma divergência com decisão humana registrada (`decision = 'accept_difference'`).
 - **When**:
-  - O usuário tenta disparar um rerun do confronto via `POST /api/payment-lists/:id/confront`.
+  - Após uma alteração relevante nos insumos, o usuário tenta a recomputação normal via `POST /api/payment-lists/:id/confront` com `mode` ausente ou `"current"`.
 - **Then**:
   - O backend bloqueia a operação com HTTP 409 Conflict (`CODE: CONFRONTATION_RERUN_HAS_DECISIONS`).
   - As decisões humanas e os resultados da rodada ativa são integralmente preservados.
+  - Uma chamada posterior e autorizada com `{ "mode": "new_round" }` cria a sequência seguinte sem modificar a rodada decidida.
 
 #### `CONFRONT-VEHICLE-01`: Pareamento por Identificador Veicular com Pareamento Único
 - **Given**:

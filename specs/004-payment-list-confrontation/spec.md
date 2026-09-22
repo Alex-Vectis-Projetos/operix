@@ -477,10 +477,10 @@ Todos os endpoints operam sob o prefixo `/api/payment-lists`.
   - `draft` / `under_review` $\rightarrow$ `cancelled`: reverte claims reservadas para `status = 'released'`.
 
 ### 6.3. Confronto Comercial Versionado
-- `POST /api/payment-lists/:id/confront`: Executa o matching determinístico da lista contra as `WeeklogEntry` validadas do cliente.
-  - Idempotência: Se já existir rodada sem alterações, retorna os resultados existentes.
-  - Bloqueio de Rerun: Se a rodada ativa possuir decisões humanas registradas (`decision != 'none'`), retorna HTTP 409 `CONFRONTATION_RERUN_HAS_DECISIONS`.
-  - Cria nova rodada em `PaymentListConfrontationRun` (`sequence = max + 1`).
+- `POST /api/payment-lists/:id/confront`: Executa ou recupera o matching determinístico da lista contra as `WeeklogEntry` validadas do cliente. O corpo aceita somente `{ "mode": "current" | "new_round" }`; `mode` é opcional e seu default é `"current"`.
+  - `mode: "current"`: cria a sequência 1 quando não houver rodada; sem mudança relevante, retorna a rodada corrente e os mesmos resultados com HTTP 200 e `idempotent: true`, inclusive quando houver decisões humanas. Se houver mudança relevante e a rodada corrente possuir decisão humana (`decision != 'none'`), retorna HTTP 409 `CONFRONTATION_RERUN_HAS_DECISIONS`, sem mutação.
+  - `mode: "new_round"`: é uma ação explícita, autorizada a `owner`/`admin`, para criar a sequência seguinte a partir dos insumos canônicos atuais. A rodada anterior e seus resultados permanecem imutáveis, decisões não são copiadas e a nova rodada inicia sem decisões. É permitido apenas em `under_review` ou `confronted`; `pending`, `paid` e `cancelled` retornam HTTP 409 `CONFRONTATION_LIST_STATE_LOCKED`. Sem rodada prévia, normaliza para a sequência 1, sem histórico artificial.
+  - A resposta identifica `runId`, `sequence`, `status`, `results`, `idempotent` e `mode`; pode incluir `previousRunId` para `new_round`.
   - Cria resultados em `PaymentListConfrontationResult` com status inicial `not_evaluated`.
 - `PATCH /api/payment-lists/:id/confrontation/:resultId/decision`: Registra a decisão humana para uma divergência:
   - `decision`: `"accept_difference" | "contest" | "request_rectification" | "reject_item"`.

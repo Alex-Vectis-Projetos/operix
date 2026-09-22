@@ -106,10 +106,11 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
 ### Fase 5: Motor de Confronto Comercial Versionado
 - [ ] **T07**: Implementar serviço de confronto `backend/src/services/confrontationService.ts`:
   - Criação de rodadas versionadas `PaymentListConfrontationRun`.
-  - Verificação de idempotência e bloqueio de rerun caso existam decisões humanas ativas (`decision != 'none'`).
+  - `POST /api/payment-lists/:id/confront` aceita somente `mode: "current" | "new_round"` (default `current`); retries correntes são idempotentes e uma nova rodada é ação explícita de `owner`/`admin`, sem copiar ou sobrescrever decisões históricas.
+  - Verificação de idempotência e bloqueio de recomputação corrente caso existam decisões humanas ativas (`decision != 'none'`); `new_round` é permitido somente em `under_review`/`confronted`.
   - Algoritmo de normalização e pareamento único por Veículo (VIN / Placa), Serviços e Valor.
   - Persistência em `PaymentListConfrontationResult` com status default `not_evaluated`.
-  - Endpoint de execução: `POST /api/payment-lists/:id/confront`.
+  - Endpoint de execução: `POST /api/payment-lists/:id/confront` com o contrato de modo explícito congelado em DEC-017.
   - Endpoint de decisão humana: `PATCH /api/payment-lists/:id/confrontation/:resultId/decision`. Se `reject_item`, libera a claim para `released`.
   - Validação de invariante: bloqueio de transição para `pending` caso existam disputas em aberto (`CONTEST` ou `REQUEST_RECTIFICATION`).
 
