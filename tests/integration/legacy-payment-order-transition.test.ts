@@ -97,4 +97,10 @@ describe("Spec 004 — T09 Legacy PaymentOrder Transition", () => {
     expect(response.status).toBe(410); expect((await response.json()).code).toBe("LEGACY_RECONCILIATION_ENGINE_DEPRECATED");
     expect({ orders: await prisma.paymentOrder.count(), reconciliations: await prisma.reconciliation.count(), finance: await prisma.financialRecord.count() }).toEqual(before);
   });
+
+  it("LEGACY-RECONCILIATION-READ-DISABLED-01: unsafe global reconciliation reads are not exposed", async () => {
+    const response = await fetch(`${baseUrl}/api/finance/reconciliations`, { headers: headers() });
+    expect(response.status).toBe(410);
+    expect((await response.json()).code).toBe("LEGACY_RECONCILIATION_READ_DEPRECATED");
+  });
 });
