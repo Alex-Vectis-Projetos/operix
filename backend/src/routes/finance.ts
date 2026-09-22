@@ -158,6 +158,13 @@ async function loadReconciliationsWithOrders(where: Record<string, unknown> = {}
 
 /* ═══════════════════ Reconciliations (aba Confronto / useReconciliation) ═══════════════════ */
 
+// Reconciliation has no tenant key or trustworthy tenant relationship. Do not
+// infer ownership through legacy joins; the canonical commercial read is the
+// tenant-scoped PaymentList confrontation API.
+financeRouter.get("/reconciliations", requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
+  return res.status(410).json({ code: "LEGACY_RECONCILIATION_READ_DEPRECATED", message: "A consulta comercial é operada por /api/payment-lists." });
+});
+
 // GET /finance/reconciliations
 financeRouter.get("/reconciliations", requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
   return res.json(await loadReconciliationsWithOrders());
