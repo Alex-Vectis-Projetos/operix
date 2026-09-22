@@ -39,6 +39,7 @@ describe("Spec 004 — Commercial Confrontation & Disputes", () => {
     await prisma.paymentListItem.deleteMany({ where });
     await prisma.paymentList.deleteMany({ where });
     await prisma.weeklogValidation.deleteMany({ where });
+    await prisma.productionOrder.updateMany({ where, data: { rectificationOriginId: null } });
     await prisma.weeklogEntry.deleteMany({ where });
     await prisma.weeklog.deleteMany({ where });
     await prisma.productionOrder.deleteMany({ where });
@@ -322,7 +323,21 @@ describe("Spec 004 — Commercial Confrontation & Disputes", () => {
     expect(first.sequence).toBe(1);
   });
 
-  it.skip("LIST-RECTIFICATION-LINEAGE-01: remains RED-T08 until the canonical production rectification transaction is integrated", () => {
-    // T08 owns rectifyWeeklogEntry, ProductionOrder reopening and execution lineage.
+  it("LIST-RECTIFICATION-LINEAGE-01: reuses canonical rectification and records its real lineage", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json();
+    const result = run.results.find((row: any) => row.paymentListItemId);
+    const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "request_rectification", notes: "Falha técnica confirmada" }) });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const original = await prisma.weeklogEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    const order = await prisma.productionOrder.findUniqueOrThrow({ where: { id: original.productionOrderId! } });
+    expect(order).toMatchObject({ status: "in_production", executionSequence: 2, rectificationOriginId: entry.id });
+    expect(body.result).toMatchObject({ decision: "request_rectification", reopenedProductionOrderId: order.id, targetExecutionSequence: 2 });
+    expect(original.validationStatus).toBe("rectification_requested");
+    const retry = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "request_rectification", notes: "Falha técnica confirmada" }) });
+    expect(retry.status).toBe(200);
+    expect((await prisma.productionOrder.findUniqueOrThrow({ where: { id: order.id } })).executionSequence).toBe(2);
   });
 });

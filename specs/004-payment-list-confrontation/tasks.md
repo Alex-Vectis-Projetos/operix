@@ -116,10 +116,11 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Concluído com matching determinístico VIN/placa/serviços/Decimal, resultados desacoplados (`unmatched_weeklog`), decisão serializada por `resultId`, totais reconhecidos e concorrência PostgreSQL. T08 permanece responsável exclusivamente por retificação operacional e linhagem de OP.
 
 ### Fase 6: Integração de Retificação da Lista com a Spec 003
-- [ ] **T08**: Implementar integração da ação `REQUEST_RECTIFICATION` no `confrontationService.ts`:
+- [x] **T08**: Implementar integração da ação `REQUEST_RECTIFICATION` no `confrontationService.ts`:
   - Resolução da `WeeklogEntry` original. Se `sourceType == 'external_import'`, recusar com HTTP 422.
   - Invocação transacional de `rectifyWeeklogEntry` da Spec 003.
   - Registro de `reopenedProductionOrderId` e `targetExecutionSequence` em `PaymentListConfrontationResult`.
+  - Concluído em transação única com o comando canônico da Spec003; entradas externas são rejeitadas sem fabricar OP e retries recuperam a mesma linhagem.
 
 ### Fase 7: Downstream Legacy Adapter & Transição de Call Sites Legados
 - [ ] **T09**: Implementar `backend/src/services/downstreamPaymentOrderAdapter.ts`:
