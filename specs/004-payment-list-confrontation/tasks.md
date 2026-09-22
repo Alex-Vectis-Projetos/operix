@@ -104,7 +104,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Endpoints REST: `GET /api/payment-lists`, `GET /api/payment-lists/:id`, `POST /api/payment-lists`, `PATCH /api/payment-lists/:id/status`.
 
 ### Fase 5: Motor de Confronto Comercial Versionado
-- [ ] **T07**: Implementar serviço de confronto `backend/src/services/confrontationService.ts`:
+- [x] **T07**: Implementar serviço de confronto `backend/src/services/confrontationService.ts`:
   - Criação de rodadas versionadas `PaymentListConfrontationRun`.
   - `POST /api/payment-lists/:id/confront` aceita somente `mode: "current" | "new_round"` (default `current`); retries correntes são idempotentes e uma nova rodada é ação explícita de `owner`/`admin`, sem copiar ou sobrescrever decisões históricas.
   - Verificação de idempotência e bloqueio de recomputação corrente caso existam decisões humanas ativas (`decision != 'none'`); `new_round` é permitido somente em `under_review`/`confronted`.
@@ -113,6 +113,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Endpoint de execução: `POST /api/payment-lists/:id/confront` com o contrato de modo explícito congelado em DEC-017.
   - Endpoint de decisão humana: `PATCH /api/payment-lists/:id/confrontation/:resultId/decision`. Se `reject_item`, libera a claim para `released`.
   - Validação de invariante: bloqueio de transição para `pending` caso existam disputas em aberto (`CONTEST` ou `REQUEST_RECTIFICATION`).
+  - Concluído com matching determinístico VIN/placa/serviços/Decimal, resultados desacoplados (`unmatched_weeklog`), decisão serializada por `resultId`, totais reconhecidos e concorrência PostgreSQL. T08 permanece responsável exclusivamente por retificação operacional e linhagem de OP.
 
 ### Fase 6: Integração de Retificação da Lista com a Spec 003
 - [ ] **T08**: Implementar integração da ação `REQUEST_RECTIFICATION` no `confrontationService.ts`:
