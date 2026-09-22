@@ -5,6 +5,8 @@
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-18 (Hardening Final Pré-Test-First)  
 
+**Implementation status (T12, 2026-09-22)**: T01–T12 completed. The canonical PaymentList, governed staging, confrontation, downstream read-only projection and frontend workspace are implemented and verified. This plan remains the original architectural record; `handoff.md` records the final validation evidence and remaining homologation inputs.
+
 ---
 
 ## 1. Abordagem de Engenharia e Fatias Verticais
@@ -169,9 +171,9 @@ O plano divide a entrega em **fatias verticais progressivas e auditáveis**:
 ### 4.1. Inventário de Transição de Endpoints Legados
 | Call Site no Frontend | Endpoint Atual | Classificação | Destino na Spec 004 |
 | :--- | :--- | :--- | :--- |
-| `apiFinance.ts:93`, `useReconciliation.ts:138` | `POST /finance/reconciliations/run` | **REMOVE IN T10/T11** | Endpoint destrutivo descontinuado sumariamente. |
-| `ReconciliationScreen.tsx`, `FinancialPage.tsx:13-31` | `GET/PATCH /finance/reconciliations` | **REPLACE WITH CANONICAL (T11/T12)** | Substituído por `/api/payment-lists/:id/confrontation` em Operações. |
-| `usePaymentOrders.ts:110-153`, `PaymentOrdersPage.tsx:218` | `POST/PATCH/DELETE /payment-orders` | **REPLACE WITH CANONICAL (T11)** | Mutações redirecionadas para `/api/payment-lists`. |
+| `apiFinance.ts:93`, `useReconciliation.ts:138` | `POST /finance/reconciliations/run` | **RETIRED IN T09** | O endpoint devolve a política de depreciação; não é autoridade da jornada canônica. |
+| `ReconciliationScreen.tsx`, `FinancialPage.tsx:13-31` | `GET/PATCH /finance/reconciliations` | **LEGACY OUTSIDE SPEC004** | A jornada comercial canônica está em `/api/payment-lists/:id/confrontation`; a UI Financeira legada permanece fora do escopo até Spec005. |
+| `usePaymentOrders.ts:110-153`, `PaymentOrdersPage.tsx:218` | `POST/PATCH/DELETE /payment-orders` | **REPLACED IN T09/T11** | A rota estável `/payment-orders` agora renderiza a workspace canônica; mutações legadas são deprecadas. |
 | `useAgingAlerts.ts:35`, `useOperationalSignals.ts:86` | `GET /payment-orders` | **READ-ONLY LEGACY** | Mantido como somente-leitura alimentado pelo Downstream Adapter até Spec 005. |
 | `BillingPage.tsx:371`, `ImportInvoiceDialog.tsx:629` | Reconciliação de faturas | **SPEC005 FUTURE** | Fronteira preservada para o módulo financeiro e fiscal. |
 

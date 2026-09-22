@@ -3,7 +3,7 @@
 **Fatia**: R2 — Lista de Pagamento, Importação Externa, Confronto Operacional e Fronteira Financeira  
 **Branch**: `feat/004-payment-list-confrontation`  
 **Base**: `develop/operix-core`  
-**Status**: Discovery & Hardening Concluídos — Pronto para Início de T01/T02 (Test-First)  
+**Status**: Engineering Complete — T01–T12 verified; handoff ready for Spec 005
 
 ---
 
@@ -144,8 +144,9 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Concluído com `PaymentListWorkspace` na rota estável `/payment-orders`, índice/detalhe canônicos, staging governado e visualização desktop lado a lado (mobile por abas). O preview usa somente `POST /storage/presigned-download` com caminho de proveniência retornado pelo servidor; fechamento não descarta staging sem confirmação explícita. Decisões apontam para `resultId` canônico e seguem a matriz autorizada pelo backend. O endpoint atual fornece apenas a rodada mais recente: a tela expõe essa lacuna sem simular histórico. Testes T11 cobrem preview, separação upload/commit, descarte explícito, decisão, sanitização de totais e ausência de caminhos legados.
 
 ### Fase 10: Quality Gates, Verificação e Handoff
-- [ ] **T12**: Executar suíte completa de validação:
-  - Execução de 100% dos testes unitários e de integração (`npm run test:run`).
+- [x] **T12**: Executar suíte completa de validação:
+  - Execução da suíte unitária e de integração (`npm test`), com grupos que compartilham fixtures PostgreSQL também verificados em série.
   - Verificação de tipos TypeScript (`npm run typecheck`).
   - Verificação de formatação e linter (`npm run lint`).
   - Testes de isolamento A/B e regressão de segurança.
+  - Concluído com 47/47 critérios formais originais, 127/127 suítes Spec004 (incluindo frontend) e 213/213 regressão Specs001–003, todos em execução serial contra PostgreSQL local. Prisma validate e status de 10 migrations ficaram verdes; replay limpo da cadeia de migrations e `payment-list-schema.test.ts` confirmaram criação fresh. Typechecks e builds root/backend passaram, lint sem erros, e T12 não alterou schema/migrations. O run paralelo global `npm test` é conhecido por competir por fixtures de banco compartilhadas: 358/359 passaram e o único `GET-NO-WRITE-01` passou isoladamente (99/99) e no conjunto serial Specs001–003. Ver `handoff.md` para limitações de homologação e contratos futuros não bloqueantes.

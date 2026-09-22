@@ -5,6 +5,8 @@
 **Base**: `develop/operix-core` (com Specs 001, 002 e 003 concluídas)  
 **Data**: 2026-09-18 (Remediação de Revisão Humana)  
 
+> **T12 implementation disposition (2026-09-22):** this document preserves the pre-remediation audit evidence. The Spec004 findings about PaymentOrder authority, destructive reconciliation, direct Supabase writes, missing PaymentList aggregation, non-governed import, technician redaction, claims and confrontation versioning are remediated by the canonical implementation and covered by the completed integration/frontend suites. Legacy finance and unrelated Supabase consumers remain outside this historical finding set and are not Spec004 authority.
+
 ---
 
 ## 1. Classificação dos Findings
@@ -201,4 +203,3 @@ Cada achado técnico é classificado conforme a metodologia de evidência:
   O validador da Spec 003 aceita estritamente `"authenticated_confirmation" | "drawn_signature"`. Ao adicionar `"external_import_review"` para folhas físicas de WEEKLOG, os consumidores existentes não devem sofrer quebras de contrato de tipagem nem bypass de regras para ordens de produção normais.
 - **Risco**: Baixo-Médio de Regressão.
 - **Reuso / Ação**: Expandir a união de tipos preservando compatibilidade retroativa. A esteira móvel padrão (`sourceType = 'production_order'`) continua exigindo os métodos da Spec 003, enquanto `external_import_review` é exclusivo para materialização de `sourceType = 'external_import'`.
-

@@ -1,6 +1,6 @@
 # Spec 004 — Payment List, External Imports & Commercial Confrontation (Hardening Final Pré-Test-First)
 
-**Status**: Architecture Frozen — Ready for Test-First (T01/T02)  
+**Status**: Engineering Complete — Handoff Ready for Spec 005
 **Prioridade**: P1 (Core Comercial e Operacional)  
 **Fase de Engenharia**: R2 — Lista, Confronto e Financeiro Essencial  
 **Data**: 2026-09-18 (Hardening Final Pré-Test-First)  

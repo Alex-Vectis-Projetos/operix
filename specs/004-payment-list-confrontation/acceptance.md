@@ -5,6 +5,8 @@
 **Base**: `develop/operix-core`  
 **Data**: 2026-09-18 (Hardening Final Pré-Test-First)  
 
+**T12 verification (2026-09-22)**: the 47 formal acceptance criteria execute through the current integration suites, with 47/47 green, zero skipped and zero todo. Additional hardening and frontend suites are recorded in `handoff.md`.
+
 ---
 
 ## 1. Convenções e Metodologia
