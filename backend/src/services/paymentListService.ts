@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { ConflictError, ForbiddenError, NotFoundError, UnprocessableEntityError } from "../lib/objectAuth.js";
 import type { RequestContext } from "../middleware/requestContext.js";
+import { projectPaymentListItemInTransaction } from "./downstreamPaymentOrderAdapter.js";
 
 const currencySchema = z.string({ required_error: "LIST_CURRENCY_REQUIRED" }).regex(/^[A-Z]{3}$/, "LIST_CURRENCY_REQUIRED");
 const createSchema = z.object({
@@ -94,6 +95,8 @@ export async function createPaymentList(ctx: RequestContext, raw: unknown) {
         })) });
         await tx.paymentListEntryClaim.createMany({ data: entries.map((entry) => ({ workspaceId, paymentListId: list.id, weeklogEntryId: entry.id, status: "reserved" })) });
       }
+      const createdItems = await tx.paymentListItem.findMany({ where: { paymentListId: list.id, workspaceId }, select: { id: true } });
+      for (const item of createdItems) await projectPaymentListItemInTransaction(tx, workspaceId, item.id);
       return presentList(await tx.paymentList.findUniqueOrThrow({ where: { id: list.id }, include: { items: true, claims: true } }));
     });
   } catch (error: any) {
@@ -142,6 +145,8 @@ export async function commitReviewedImport(ctx: RequestContext, importId: string
       items: { create: imported.items.map((item) => ({ carName: item.reviewedCarName, licensePlate: item.reviewedLicensePlate, vin: item.reviewedVin, technicianUserId: item.reviewedTechnicianUserId, servicesSnapshot: item.reviewedServices as Prisma.InputJsonValue, totalAmount: item.reviewedTotal! })) },
     } });
     await tx.externalListImport.update({ where: { id: imported.id }, data: { paymentListId: list.id, status: "committed" } });
+    const createdItems = await tx.paymentListItem.findMany({ where: { paymentListId: list.id, workspaceId }, select: { id: true } });
+    for (const item of createdItems) await projectPaymentListItemInTransaction(tx, workspaceId, item.id);
     return presentList(await tx.paymentList.findUniqueOrThrow({ where: { id: list.id }, include: { items: true } }));
   });
 }
@@ -184,6 +189,9 @@ export async function transitionPaymentList(ctx: RequestContext, id: string, tar
       await tx.paymentListEntryClaim.updateMany({ where: { paymentListId: list.id, workspaceId, status: "reserved" }, data: { status: "consumed", consumedAt: new Date() } });
     }
     if (toStatus === "cancelled") await tx.paymentListEntryClaim.updateMany({ where: { paymentListId: list.id, workspaceId, status: "reserved" }, data: { status: "released", releasedAt: new Date(), releasedReason: "LIST_CANCELLED" } });
-    return presentList(await tx.paymentList.update({ where: { id: list.id }, data: toStatus === "paid" ? { status: toStatus, paidAt: new Date(), paidBy: ctx.actorUserId } : { status: toStatus }, include: { items: true, claims: true } }));
+    await tx.paymentList.update({ where: { id: list.id }, data: toStatus === "paid" ? { status: toStatus, paidAt: new Date(), paidBy: ctx.actorUserId } : { status: toStatus } });
+    const items = await tx.paymentListItem.findMany({ where: { paymentListId: list.id, workspaceId }, select: { id: true } });
+    for (const item of items) await projectPaymentListItemInTransaction(tx, workspaceId, item.id);
+    return presentList(await tx.paymentList.findUniqueOrThrow({ where: { id: list.id }, include: { items: true, claims: true } }));
   });
 }
