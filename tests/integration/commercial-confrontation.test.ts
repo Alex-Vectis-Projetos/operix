@@ -340,4 +340,32 @@ describe("Spec 004 — Commercial Confrontation & Disputes", () => {
     expect(retry.status).toBe(200);
     expect((await prisma.productionOrder.findUniqueOrThrow({ where: { id: order.id } })).executionSequence).toBe(2);
   });
+
+  it("RECT-LIST-CONCURRENT-01: concurrent rectification requests converge to one canonical rework", async () => {
+    const entry = await createEntry({ amount: "500.00" });
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json();
+    const result = run.results.find((row: any) => row.paymentListItemId);
+    const request = () => fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "request_rectification", notes: "Retrabalho concorrente" }) });
+    const [left, right] = await Promise.all([request(), request()]);
+    expect([left.status, right.status].sort()).toEqual([200, 200]);
+    const order = await prisma.productionOrder.findUniqueOrThrow({ where: { id: entry.productionOrderId! } });
+    expect(order).toMatchObject({ status: "in_production", executionSequence: 2, rectificationOriginId: entry.id });
+    const stored = await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id } });
+    expect(stored).toMatchObject({ decision: "request_rectification", reopenedProductionOrderId: order.id, targetExecutionSequence: 2 });
+  });
+
+  it("RECT-LIST-EXTERNAL-SOURCE-01: external operational evidence cannot fabricate a ProductionOrder", async () => {
+    const entry = await createExternalEntry();
+    const list = await createList([{ amount: "420.00" }]);
+    const run = await (await confront(list.id)).json();
+    const result = run.results.find((row: any) => row.paymentListItemId);
+    const before = await prisma.productionOrder.count({ where: { workspaceId: fixture.workspaceId } });
+    const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: auth(), body: JSON.stringify({ decision: "request_rectification", notes: "Sem OP de origem" }) });
+    expect(response.status).toBe(422);
+    expect((await response.json()).code).toBe("EXTERNAL_ENTRY_CANNOT_RECTIFY_PO");
+    expect(await prisma.productionOrder.count({ where: { workspaceId: fixture.workspaceId } })).toBe(before);
+    expect(await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id } })).toMatchObject({ decision: "none", reopenedProductionOrderId: null });
+    expect(entry.productionOrderId).toBeNull();
+  });
 });
