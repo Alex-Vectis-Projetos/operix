@@ -422,6 +422,22 @@ describe("Spec 004 — Payment List External Import Suite (T01/T02 Baseline)", (
       expect(rejected.status).toBe(422);
     });
 
+    it("IMPORT-LIST-HUMAN-REVIEW-01: header e linha revisados usam Decimal e auditoria do servidor", async () => {
+      const headers = getAuthHeader(FIXTURES_004_IMPORT.ownerA, FIXTURES_004_IMPORT.wsAlpha);
+      const create = await fetch(`${baseUrl}/api/payment-lists/imports`, { method: "POST", headers, body: JSON.stringify({ fileName: "human-review.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nhuman review").toString("base64") }) });
+      const imported = await create.json();
+      const review = await fetch(`${baseUrl}/api/payment-lists/imports/${imported.importId}/rows`, {
+        method: "PATCH", headers,
+        body: JSON.stringify({ header: { reviewedClientId: FIXTURES_004_IMPORT.clientA.id, reviewedCurrencyCode: "EUR" }, rows: [{ id: imported.items[0].id, patch: { reviewedLicensePlate: "AA-11-BB", reviewedVin: "WVWZZZ1JZXW000001", reviewedServices: [{ code: "PDR", amount: "1250.50" }], reviewedTotal: "€ 1.250,50" } }] }),
+      });
+      expect(review.status).toBe(200);
+      const body = await review.json();
+      expect(body.status).toBe("reviewed");
+      expect(body.items[0].reviewedTotal).toBe("1250.5");
+      expect(body.items[0].reviewedBy).toBe(FIXTURES_004_IMPORT.ownerA.userId);
+      expect(body.items[0].reviewedAt).toBeTruthy();
+    });
+
     it("IMPORT-EXTRACTION-FAILURE-01: falha de provider preserva proveniência, sem staging authority", async () => {
       vi.spyOn(aiImportExtractionProvider, "extractListDocument").mockRejectedValueOnce(new Error("synthetic provider timeout"));
       const res = await fetch(`${baseUrl}/api/payment-lists/imports`, {
