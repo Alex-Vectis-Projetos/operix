@@ -193,6 +193,11 @@ export interface ExternalListImportResponse {
   sha256?: string | null;
 }
 
+export interface PaymentListImportPreview {
+  url: string;
+  expiresInSeconds: number;
+}
+
 export interface ExternalListImportHeaderReview {
   reviewedClientId?: string | null;
   reviewedCurrencyCode?: string | null;
@@ -252,6 +257,18 @@ export function createPaymentListImport(file: File): Promise<ExternalListImportR
 
 export function getPaymentListImport(importId: string): Promise<ExternalListImportResponse> {
   return apiRequest<ExternalListImportResponse>(`/payment-lists/imports/${importId}`);
+}
+
+/**
+ * The import storage path is server-provided provenance. The authenticated storage
+ * endpoint enforces the active tenant prefix before returning a short-lived URL.
+ */
+export function getPaymentListImportPreview(storagePath: string): Promise<PaymentListImportPreview> {
+  return apiRequest<PaymentListImportPreview>("/storage/presigned-download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bucket: "uploads", path: storagePath }),
+  });
 }
 
 export function retryPaymentListImportExtraction(importId: string): Promise<ExternalListImportResponse> {
