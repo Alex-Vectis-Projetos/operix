@@ -6,6 +6,7 @@ import { prisma } from "../../backend/src/lib/prisma.js";
 import { signAccessToken } from "../../backend/src/lib/jwt.js";
 import { ForbiddenError } from "../../backend/src/lib/objectAuth.js";
 import { aiImportExtractionProvider, minioImportDocumentStorage } from "../../backend/src/services/externalImportAdapters.js";
+import { operationalWeekOf } from "../../backend/src/lib/weekUtils.js";
 
 // Configurações de ambiente mínimas para testes
 process.env.NODE_ENV = "test";
@@ -248,6 +249,55 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
     return headers;
   }
 
+  async function createReviewedOperationalImport(rowCount = 1) {
+    vi.spyOn(aiImportExtractionProvider, "extractOperationalDocument").mockResolvedValue({
+      raw: { provider: "synthetic-materialization-test" },
+      rows: Array.from({ length: rowCount }, (_, index) => ({
+        rawLicensePlate: `AA-11-B${index}`,
+        rawVin: `WVWZZZ1JZXW0000${String(index + 1).padStart(2, "0")}`,
+        rawCarName: "Golf",
+        rawClientName: "Parceiro OCR",
+        rawCurrencyCode: "EUR",
+        rawOperationalSiteKey: "SITE-PDR-01",
+        rawTechnician: "Técnico OCR",
+        rawDeliveredAtText: `2026-09-${String(21 + index).padStart(2, "0")}T12:00:00Z`,
+        rawServices: [{ code: "PDR" }],
+        rawTotalText: "€ 125,50",
+      })),
+    });
+    const headers = getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha);
+    const created = await fetch(`${baseUrl}/api/external-operational-imports`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ fileName: "reviewed-operational-import.pdf", mimeType: "application/pdf", contentBase64: Buffer.from("%PDF-1.7\nreviewed operational").toString("base64") }),
+    });
+    expect(created.status).toBe(201);
+    const imported = await created.json();
+    const reviewed = await fetch(`${baseUrl}/api/external-operational-imports/${imported.importId}/rows`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({
+        rows: imported.items.map((item: { id: string }, index: number) => ({
+          id: item.id,
+          patch: {
+            reviewedLicensePlate: `AA-11-B${index}`,
+            reviewedVin: `WVWZZZ1JZXW0000${String(index + 1).padStart(2, "0")}`,
+            reviewedCarName: "Golf",
+            reviewedClientId: FIXTURES_004_WEEKLOG.clientA.id,
+            reviewedCurrencyCode: "EUR",
+            reviewedOperationalSiteKey: "SITE-PDR-01",
+            reviewedTechnicianUserId: FIXTURES_004_WEEKLOG.activeTechnician.userId,
+            reviewedDeliveredAt: `2026-09-${String(21 + index).padStart(2, "0")}T12:00:00.000Z`,
+            reviewedServices: [{ code: "PDR", quantity: "1", amount: "125.50" }],
+            reviewedTotal: "125,50",
+          },
+        })),
+      }),
+    });
+    expect(reviewed.status).toBe(200);
+    return { importId: imported.importId as string, headers, items: imported.items as Array<{ id: string }> };
+  }
+
   describe("Grupo 3: Importação Externa de WEEKLOG & Cobertura Congelada", () => {
     it("IMPORT-WEEKLOG-REVIEW-01: Staging e Revisão de WEEKLOG Externo", async () => {
       // Given: Folha escaneada de parceiro externo
@@ -344,7 +394,7 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
 
     it("IMPORT-WEEKLOG-NO-FAKE-PO-01: Materialização Canônica sem Fabricação de OPs Fictícias", async () => {
       // Given: Lote de WEEKLOG externo revisado pelo gestor
-      const importId = "44000000-0000-4000-8000-000000000031";
+      const { importId } = await createReviewedOperationalImport();
 
       // When: Gestor efetiva o lote
       const res = await fetch(`${baseUrl}/api/external-operational-imports/${importId}/commit`, {
@@ -353,8 +403,8 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
         body: JSON.stringify({}),
       });
 
-      // Then: HTTP 200, materializa WeeklogEntry com sourceType = 'external_import' e productionOrderId = null
-      expect(res.status).toBe(200);
+      // Then: HTTP 201, materializa WeeklogEntry com sourceType = 'external_import' e productionOrderId = null
+      expect(res.status).toBe(201);
       const data = await res.json();
       expect(data.entries).toBeDefined();
       for (const entry of data.entries) {
@@ -372,8 +422,7 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
 
     it("IMPORT-WEEKLOG-COMMIT-IDEMPOTENT-01: Idempotência de Retry no Commit de Importação Operacional Externa", async () => {
       // Given: Lote de importação operacional externa em staging
-      const importId = "44000000-0000-4000-8000-000000000032";
-      const headers = getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha);
+      const { importId, headers } = await createReviewedOperationalImport();
 
       // When: Primeiro commit
       const res1 = await fetch(`${baseUrl}/api/external-operational-imports/${importId}/commit`, {
@@ -399,8 +448,7 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
 
     it("IMPORT-WEEKLOG-CONCURRENT-COMMIT-01: Prevenção de Materialização Concorrente Duplicada", async () => {
       // Given: Duas requisições paralelas concorrentes tentando comitar o mesmo lote
-      const importId = "44000000-0000-4000-8000-000000000033";
-      const headers = getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha);
+      const { importId, headers } = await createReviewedOperationalImport();
 
       // When: Concorrência real via Promise.all
       const [res1, res2] = await Promise.all([
@@ -426,7 +474,7 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
 
     it("IMPORT-WEEKLOG-COVERAGE-01: Validação Formal com Snapshot Congelado de Cobertura", async () => {
       // Given: Commit de WEEKLOG externo com 3 entradas
-      const importId = "44000000-0000-4000-8000-000000000034";
+      const { importId } = await createReviewedOperationalImport(3);
 
       // When: Efetivação do lote
       const res = await fetch(`${baseUrl}/api/external-operational-imports/${importId}/commit`, {
@@ -436,7 +484,7 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
       });
 
       // Then: Cria WeeklogValidation com validationMethod = 'external_import_review' e coverageSnapshot estruturado
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(201);
       const data = await res.json();
       expect(data.validation).toBeDefined();
       expect(data.validation.validationMethod).toBe("external_import_review");
@@ -458,6 +506,9 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
           clientId: FIXTURES_004_WEEKLOG.clientA.id,
           siteKey: "SITE-PDR-01",
           status: "validated",
+          timezone: "Europe/Paris",
+          weekNumber: 33,
+          yearReference: 2026,
         },
       });
 
@@ -478,6 +529,18 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
       });
 
       // When: Nova entrada tardia é adicionada a posteriori no mesmo Weeklog
+      const lateImport = await prisma.externalOperationalImport.create({
+        data: {
+          id: "44000000-0000-4000-8000-000000000035",
+          workspaceId: FIXTURES_004_WEEKLOG.wsAlpha,
+          fileName: "late-entry-source.pdf",
+          fileSha256: "a".repeat(64),
+          status: "reviewed",
+          uploadedBy: FIXTURES_004_WEEKLOG.ownerA.userId,
+          items: { create: { id: "45000000-0000-4000-8000-000000000035", status: "reviewed" } },
+        },
+        include: { items: true },
+      });
       const lateEntry = await prisma.weeklogEntry.create({
         data: {
           id: "entry-004-late-added",
@@ -485,10 +548,15 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
           workspaceId: FIXTURES_004_WEEKLOG.wsAlpha,
           technicianUserId: FIXTURES_004_WEEKLOG.ownerA.userId,
           technicianName: "Owner WL",
+          clientId: FIXTURES_004_WEEKLOG.clientA.id,
+          clientName: FIXTURES_004_WEEKLOG.clientA.name,
           executionSequence: 1,
+          sourceType: "external_import",
+          externalImportItemId: lateImport.items[0]!.id,
           currencyCode: "EUR",
           totalAmount: "250.00",
-          performedServices: [{ description: "Serviço Tardio", amount: "250.00" }],
+          servicesSnapshot: [{ description: "Serviço Tardio", amount: "250.00" }],
+          deliveredAt: new Date("2026-08-12T12:00:00Z"),
           validationStatus: "pending",
         },
       });
@@ -516,6 +584,82 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
 
       // Then: Rejeitada com HTTP 422 Unprocessable Entity
       expect(res.status).toBe(422);
+    });
+
+    it("denies cross-tenant commit and preserves the reviewed staging import", async () => {
+      const { importId } = await createReviewedOperationalImport();
+      const foreignHeaders = getAuthHeader({ ...FIXTURES_004_WEEKLOG.foreignTechnician, role: "owner" }, FIXTURES_004_WEEKLOG.wsBravo);
+
+      const denied = await fetch(`${baseUrl}/api/external-operational-imports/${importId}/commit`, {
+        method: "POST", headers: foreignHeaders, body: JSON.stringify({}),
+      });
+
+      expect(denied.status).toBe(403);
+      expect(await prisma.externalOperationalImport.findUniqueOrThrow({ where: { id: importId } })).toMatchObject({ status: "reviewed", workspaceId: FIXTURES_004_WEEKLOG.wsAlpha });
+      expect(await prisma.weeklogEntry.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } })).toBe(0);
+    });
+
+    it("revalidates client authority at commit and rolls back all operational writes", async () => {
+      const { importId } = await createReviewedOperationalImport();
+      await prisma.client.update({ where: { id: FIXTURES_004_WEEKLOG.clientA.id }, data: { deletedAt: new Date(), deletedBy: FIXTURES_004_WEEKLOG.ownerA.userId } });
+
+      const rejected = await fetch(`${baseUrl}/api/external-operational-imports/${importId}/commit`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha),
+        body: JSON.stringify({}),
+      });
+
+      expect(rejected.status).toBe(422);
+      expect(await Promise.all([
+        prisma.weeklog.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.weeklogEntry.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+        prisma.weeklogValidation.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
+      ])).toEqual([0, 0, 0]);
+      await prisma.client.update({ where: { id: FIXTURES_004_WEEKLOG.clientA.id }, data: { deletedAt: null, deletedBy: null } });
+    });
+
+    it("reuses the canonical header and creates a later immutable external validation round", async () => {
+      const deliveredAt = new Date("2026-09-21T12:00:00.000Z");
+      const week = operationalWeekOf(deliveredAt, "Europe/Paris");
+      const existing = await prisma.weeklog.create({
+        data: {
+          workspaceId: FIXTURES_004_WEEKLOG.wsAlpha,
+          startsOn: week.startsOn,
+          endsOn: week.endsOn,
+          clientId: FIXTURES_004_WEEKLOG.clientA.id,
+          siteKey: "SITE-PDR-01",
+          timezone: week.timezone,
+          week: week.week,
+          weekNumber: week.weekNumber,
+          yearReference: week.yearReference,
+          status: "validated",
+        },
+      });
+      await prisma.weeklogValidation.create({
+        data: {
+          weeklogId: existing.id,
+          workspaceId: FIXTURES_004_WEEKLOG.wsAlpha,
+          validationSequence: 1,
+          status: "validated",
+          validationMethod: "external_import_review",
+          coverageSnapshot: { schemaVersion: "1.0", sourceType: "external_import", sourceImportId: "historic-import", sha256: "b".repeat(64), entries: [] },
+        },
+      });
+      const { importId } = await createReviewedOperationalImport();
+
+      const committed = await fetch(`${baseUrl}/api/external-operational-imports/${importId}/commit`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha),
+        body: JSON.stringify({}),
+      });
+      const body = await committed.json();
+      const validations = await prisma.weeklogValidation.findMany({ where: { weeklogId: existing.id }, orderBy: { validationSequence: "asc" } });
+
+      expect(committed.status).toBe(201);
+      expect(body.weeklogId).toBe(existing.id);
+      expect(validations.map((validation) => validation.validationSequence)).toEqual([1, 2]);
+      expect((validations[0]!.coverageSnapshot as any).sourceImportId).toBe("historic-import");
+      expect((validations[1]!.coverageSnapshot as any).sourceImportId).toBe(importId);
     });
   });
 });
