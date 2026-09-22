@@ -11,6 +11,13 @@ import {
   retryExternalListExtraction,
   reviewExternalListImport,
 } from "../services/externalListImportService.js";
+import {
+  commitReviewedImport,
+  createPaymentList,
+  getPaymentList,
+  listPaymentLists,
+  transitionPaymentList,
+} from "../services/paymentListService.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const jsonUploadSchema = z.object({
@@ -39,7 +46,10 @@ function routeParam(req: Request, name: string): string {
 }
 
 function sendError(res: Response, error: unknown): Response {
-  if (error instanceof z.ZodError) return res.status(422).json({ code: "IMPORT_PAYLOAD_INVALID", message: "Payload de importação inválido." });
+  if (error instanceof z.ZodError) {
+    const code = error.issues.some((issue) => issue.message === "LIST_CURRENCY_REQUIRED") ? "LIST_CURRENCY_REQUIRED" : "IMPORT_PAYLOAD_INVALID";
+    return res.status(422).json({ code, message: code === "LIST_CURRENCY_REQUIRED" ? "Moeda obrigatória e inválida." : "Payload de importação inválido." });
+  }
   if (error instanceof ImportPipelineError) return res.status(error.statusCode).json({ code: error.code, importId: error.importId, message: error.message });
   if (error && typeof error === "object" && "statusCode" in error) {
     const typed = error as { statusCode: number; code?: string; message?: string };
@@ -104,12 +114,42 @@ paymentListsRouter.delete("/imports/:importId", async (req: Request, res: Respon
   }
 });
 
-// Materialização em PaymentList pertence estritamente ao T06. A rota existe apenas
-// para devolver uma falha de domínio explícita, sem criar autoridade comercial.
 paymentListsRouter.post("/imports/:importId/commit", async (req: Request, res: Response) => {
   try {
-    await getExternalListImport(req.ctx!, routeParam(req, "importId"));
-    return res.status(422).json({ code: "MISSING_REQUIRED_STAGING_FIELDS", message: "IMPORT_COMMIT_DEFERRED_TO_T06" });
+    const list = await commitReviewedImport(req.ctx!, routeParam(req, "importId"));
+    return res.status(201).json(list);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.get("/", async (req: Request, res: Response) => {
+  try {
+    return res.json(await listPaymentLists(req.ctx!));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.post("/", async (req: Request, res: Response) => {
+  try {
+    return res.status(201).json(await createPaymentList(req.ctx!, req.body));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.get("/:id", async (req: Request, res: Response) => {
+  try {
+    return res.json(await getPaymentList(req.ctx!, routeParam(req, "id")));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.patch("/:id/status", async (req: Request, res: Response) => {
+  try {
+    return res.json(await transitionPaymentList(req.ctx!, routeParam(req, "id"), req.body?.toStatus));
   } catch (error) {
     return sendError(res, error);
   }
