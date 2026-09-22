@@ -130,10 +130,11 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Concluído com projeção transacional por item canônico, lock pessimista e ponteiro `legacyPaymentOrderId`; retries e concorrência convergem para uma única linha, sem efeitos financeiros. Leituras legadas usam workspace ativo e escopo próprio de técnico; POST/PATCH/DELETE retornam `410 LEGACY_PAYMENT_ORDER_WRITE_DEPRECATED`, e o motor legado retorna `410 LEGACY_RECONCILIATION_ENGINE_DEPRECATED`.
 
 ### Fase 8: Frontend Client & Eliminação do Supabase Client
-- [ ] **T10**: Implementar cliente de API e hooks TanStack Query:
-  - Criar `src/hooks/usePaymentLists.ts` e `src/hooks/useConfrontation.ts`.
-  - Erradicar 100% dos imports de `@/integrations/supabase/client` em `PaymentOrdersTable.tsx`.
-  - Adaptar chamadas de mutação para as rotas REST autoritativas Express.
+- [x] **T10**: Cliente canônico de API e hooks TanStack Query concluídos:
+  - Criados `src/lib/apiPaymentLists.ts`, `src/hooks/usePaymentLists.ts` e `src/hooks/useConfrontation.ts`, cobrindo Lista, staging governado e confronto pelas rotas Express vigentes.
+  - Cache keys de Lista, importação e confronto são particionadas pelo workspace ativo; invalidações permanecem restritas à coleção, detalhe e importação do tenant corrente.
+  - `PaymentOrdersTable.tsx` foi reduzida à projeção legada somente leitura, sem import de Supabase ou mutações diretas em `payment_orders`; POST/PATCH/DELETE legados foram removidos de `usePaymentOrders.ts` e `PaymentOrdersPage.tsx`.
+  - O OCR efêmero permanece explicitamente depreciado e sem consumidor ativo; o fluxo governado de upload/revisão fica preparado para a UI canônica do T11.
 
 ### Fase 9: Interface de Revisão e Confronto Comercial em Operações
 - [ ] **T11**: Adaptar interface em `src/pages/PaymentOrdersPage.tsx`:
