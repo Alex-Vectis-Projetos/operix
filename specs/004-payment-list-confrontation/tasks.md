@@ -90,7 +90,7 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Testes de T05 usam adapters sintéticos controlados para storage/extração; a validação de acurácia e cobertura com documentos reais aguarda amostras do cliente.
 
 ### Fase 4: Domínio de Lista de Pagamento, Numeração Atômica & Claims
-- [ ] **T06**: Implementar serviço canônico `backend/src/services/paymentListService.ts` e o seed discovery determinístico `scripts/seed-legacy-counters.ts` (DRY-RUN por default):
+- [x] **T06**: Implementar serviço canônico `backend/src/services/paymentListService.ts` e o seed discovery determinístico `scripts/seed-legacy-counters.ts` (DRY-RUN por default):
   - Alocador atômico sequencial `L0xxxxx` com lock pessimista via `TenantSequenceCounter`.
   - Criação de lista e gestão de claims em `PaymentListEntryClaim` (`reserved` $\rightarrow$ `consumed` OU `reserved` $\rightarrow$ `released`; `consumed` é terminal).
   - Governança estrita da máquina de estados: `draft` $\rightarrow$ `under_review` $\rightarrow$ `confronted` $\rightarrow$ `pending` $\rightarrow$ `paid`.
