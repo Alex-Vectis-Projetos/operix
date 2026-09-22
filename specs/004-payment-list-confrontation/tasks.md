@@ -90,6 +90,10 @@ FASE 10: QUALITY GATES ──────> Verificação Ponta a Ponta, Lint, Ty
   - Testes de T05 usam adapters sintéticos controlados para storage/extração; a validação de acurácia e cobertura com documentos reais aguarda amostras do cliente.
 
 ### Fase 4: Domínio de Lista de Pagamento, Numeração Atômica & Claims
+- [x] **T06.5**: Materializar importação operacional externa revisada sem ampliar o schema:
+  - `POST /api/external-operational-imports/:id/commit` bloqueia o import, revalida authority revisada e cria/reutiliza `Weeklog` por `(workspace, client, site, semana operacional)`.
+  - Cria somente `WeeklogEntry(sourceType='external_import', productionOrderId=null, externalImportItemId)` e rodada `WeeklogValidation(external_import_review)` com cobertura congelada, aprovando exclusivamente as entradas cobertas.
+  - Retry/concurrency retornam a mesma materialização sem duplicar; isolamento cross-tenant, rollback, reuso de cabeçalho e imutabilidade de rodada são cobertos. Fecha os cenários de aceitação 23–29; T07 permanece estritamente fora do escopo.
 - [x] **T06**: Implementar serviço canônico `backend/src/services/paymentListService.ts` e o seed discovery determinístico `scripts/seed-legacy-counters.ts` (DRY-RUN por default):
   - Alocador atômico sequencial `L0xxxxx` com lock pessimista via `TenantSequenceCounter`.
   - Criação de lista e gestão de claims em `PaymentListEntryClaim` (`reserved` $\rightarrow$ `consumed` OU `reserved` $\rightarrow$ `released`; `consumed` é terminal).
