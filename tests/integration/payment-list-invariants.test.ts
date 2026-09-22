@@ -595,25 +595,51 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       expect((await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: fixture.list.id } })).status).toBe("consumed");
     });
 
-    it.skip("LIST-CLAIM-REJECT-RELEASE-01: Liberação de Claim para Released no Desfecho REJECT_ITEM [T07]", async () => {
-      // Given: PaymentList em conferência com resultado divergente
-      const listId = "44000000-0000-4000-8000-000000000003";
-      const resultId = "45000000-0000-4000-8000-000000000001";
+    it("LIST-CLAIM-REJECT-RELEASE-01: Liberação de Claim para Released no Desfecho REJECT_ITEM [T07]", async () => {
+      const first = await createValidWeeklogEntry({ id: "entry-004-reject-release", workspaceId: FIXTURES_004.wsAlpha, clientId: FIXTURES_004.clientA.id, technicianUserId: FIXTURES_004.techA1.userId, currencyCode: "EUR", amount: "450.00" });
+      const second = await createValidWeeklogEntry({ id: "entry-004-reject-untouched", workspaceId: FIXTURES_004.wsAlpha, clientId: FIXTURES_004.clientA.id, technicianUserId: FIXTURES_004.techA2.userId, currencyCode: "EUR", amount: "350.00", week: { code: "2026-W34", number: 34, startsOn: new Date("2026-08-17T00:00:00Z"), endsOn: new Date("2026-08-23T23:59:59Z") } });
+      const list = await prisma.paymentList.create({ data: {
+        id: "44000000-0000-4000-8000-000000000003", workspaceId: FIXTURES_004.wsAlpha, listNumber: "L900003", clientId: FIXTURES_004.clientA.id,
+        clientName: FIXTURES_004.clientA.name, currencyCode: "EUR", status: "confronted", itemCount: 2, sourceDocumentTotal: "800.00", recognizedTotal: "800.00", createdBy: FIXTURES_004.ownerA.userId,
+        items: { create: [
+          { weeklogEntryId: first.id, technicianUserId: first.technicianUserId, technicianName: first.technicianName, servicesSnapshot: first.servicesSnapshot, totalAmount: first.totalAmount },
+          { weeklogEntryId: second.id, technicianUserId: second.technicianUserId, technicianName: second.technicianName, servicesSnapshot: second.servicesSnapshot, totalAmount: second.totalAmount },
+        ] },
+      }, include: { items: true } });
+      await prisma.paymentListEntryClaim.createMany({ data: [
+        { workspaceId: FIXTURES_004.wsAlpha, paymentListId: list.id, weeklogEntryId: first.id, status: "reserved" },
+        { workspaceId: FIXTURES_004.wsAlpha, paymentListId: list.id, weeklogEntryId: second.id, status: "reserved" },
+      ] });
+      const run = await prisma.paymentListConfrontationRun.create({ data: { workspaceId: FIXTURES_004.wsAlpha, paymentListId: list.id, sequence: 1, status: "completed", completedAt: new Date() } });
+      const result = await prisma.paymentListConfrontationResult.create({ data: { workspaceId: FIXTURES_004.wsAlpha, paymentListId: list.id, runId: run.id, paymentListItemId: list.items[0]!.id, weeklogEntryId: first.id, status: "value_difference", differenceAmount: "450.00" } });
+      const before = { orders: await prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_004.wsAlpha } }), financial: await prisma.financialRecord.count(), runs: await prisma.paymentListConfrontationRun.count({ where: { paymentListId: list.id } }) };
 
-      // When: Gestor registra decisão terminal 'reject_item'
-      const res = await fetch(`${baseUrl}/api/payment-lists/${listId}/confrontation/${resultId}/decision`, {
-        method: "PATCH",
-        headers: getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha),
-        body: JSON.stringify({
-          decision: "reject_item",
-          reason: "Serviço não aprovado pelo cliente nesta fatura",
-        }),
+      const response = await fetch(`${baseUrl}/api/payment-lists/${list.id}/confrontation/${result.id}/decision`, {
+        method: "PATCH", headers: getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha), body: JSON.stringify({ decision: "reject_item", notes: "Serviço não aprovado pelo cliente nesta fatura" }),
       });
+      expect(response.status).toBe(200);
+      const stored = await prisma.paymentListConfrontationResult.findUniqueOrThrow({ where: { id: result.id } });
+      expect(stored).toMatchObject({ decision: "reject_item", decidedBy: FIXTURES_004.ownerA.userId });
+      expect(stored.decidedAt).not.toBeNull();
+      expect(await prisma.paymentListItem.findUniqueOrThrow({ where: { id: list.items[0]!.id } })).toBeTruthy();
+      expect(await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: list.id, weeklogEntryId: first.id } })).toMatchObject({ status: "released", releasedReason: "rejected_in_confrontation" });
+      expect((await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: list.id, weeklogEntryId: first.id } })).releasedAt).not.toBeNull();
+      expect(await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: list.id, weeklogEntryId: second.id } })).toMatchObject({ status: "reserved" });
+      expect((await prisma.paymentList.findUniqueOrThrow({ where: { id: list.id } })).recognizedTotal.toFixed(2)).toBe("0.00");
+      expect(await prisma.weeklogEntry.findUniqueOrThrow({ where: { id: first.id } })).toMatchObject({ validationStatus: "approved", productionOrderId: first.productionOrderId });
+      expect({ orders: await prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_004.wsAlpha } }), financial: await prisma.financialRecord.count(), runs: await prisma.paymentListConfrontationRun.count({ where: { paymentListId: list.id } }) }).toEqual(before);
 
-      // Then: Retorna HTTP 200 e claim transiciona para status = 'released'
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.claimStatus).toBe("released");
+      const relist = await fetch(`${baseUrl}/api/payment-lists`, { method: "POST", headers: getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha), body: JSON.stringify({ clientId: FIXTURES_004.clientA.id, currencyCode: "EUR", entryIds: [first.id] }) });
+      expect(relist.status).toBe(201);
+    });
+
+    it("LIST-CLAIM-REJECT-CONSUMED-SAFETY-01: reject_item never releases a consumed claim", async () => {
+      const fixture = await createClaimedList({ id: "44000000-0000-4000-8000-000000000009", listNumber: "L900009", entryId: "entry-004-reject-consumed", status: "pending", claimStatus: "consumed" });
+      const run = await prisma.paymentListConfrontationRun.create({ data: { workspaceId: FIXTURES_004.wsAlpha, paymentListId: fixture.list.id, sequence: 1, status: "completed", completedAt: new Date() } });
+      const result = await prisma.paymentListConfrontationResult.create({ data: { workspaceId: FIXTURES_004.wsAlpha, paymentListId: fixture.list.id, runId: run.id, paymentListItemId: fixture.list.items[0]!.id, weeklogEntryId: fixture.entry.id, status: "value_difference", differenceAmount: "1.00" } });
+      const response = await fetch(`${baseUrl}/api/payment-lists/${fixture.list.id}/confrontation/${result.id}/decision`, { method: "PATCH", headers: getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha), body: JSON.stringify({ decision: "reject_item", notes: "Tentativa após consumo" }) });
+      expect(response.status).toBe(200);
+      expect(await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: fixture.list.id, weeklogEntryId: fixture.entry.id } })).toMatchObject({ status: "consumed", releasedAt: null });
     });
 
     it("LIST-CANCEL-RELIST-01: Liberação de Execução após Cancelamento de Lista", async () => {
