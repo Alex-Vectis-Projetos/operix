@@ -936,37 +936,5 @@ describe("Spec 004 — Payment List Domain & Tenancy Invariants (T01/T02 Baselin
       expect(res.status).toBe(403);
     });
 
-    it.skip("LEGACY-PAYMENTORDER-READONLY-01: Proibição de Mutações em Rotas Legadas [T09]", async () => {
-      // Given: Ordem legada existente e usuário autenticado
-      const po = await createLegacyPaymentOrder({
-        id: "po-legacy-readonly-test",
-        workspaceId: FIXTURES_004.wsAlpha,
-        carName: "Legacy Existing Car",
-      });
-      const headers = getAuthHeader(FIXTURES_004.ownerA, FIXTURES_004.wsAlpha);
-
-      // When: Tentativa de POST /api/payment-orders
-      const resPost = await fetch(`${baseUrl}/api/payment-orders`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          car_name: "Legacy Direct Car",
-          list_name: "L000999",
-        }),
-      });
-
-      // When: Tentativa de PATCH /api/payment-orders/:id
-      const resPatch = await fetch(`${baseUrl}/api/payment-orders/${po.id}`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({
-          amount_paid: 150.0,
-        }),
-      });
-
-      // Then: Rotas devem retornar HTTP 410 Gone ou 409 Conflict (descontinuadas na Spec 004)
-      expect([409, 410]).toContain(resPost.status);
-      expect([409, 410]).toContain(resPatch.status);
-    });
   });
 });
