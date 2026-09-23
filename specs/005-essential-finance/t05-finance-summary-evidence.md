@@ -45,3 +45,47 @@ Personal-workspace determination is separately supported: `allows a technician w
 - Backend typecheck and build: PASS. Prisma validate: PASS. Lint: 0 errors and the known `ProductionBoard.tsx:164` exhaustive-deps warning. Frontend Vite production build completed and produced 132 `dist` files.
 - Final diff from `1df25946` is limited to the T05 service, route, index mount, focused test, this evidence, and task status. No schema, migration, frontend, manifest, T06+, or legacy runtime changes are included.
 - The disposable PostgreSQL container was removed after verification; no database credential is persisted in the repository.
+
+## Normative Acceptance Synchronization
+
+The original T01/T02 baseline mounted only `/api/finance` and therefore returned 404 before it exercised the implemented v2 summary route. It also had no canonical PaymentList/Expense/ObligationPayment Given-state for read scenarios. The synchronized harness mounts the real `/api/finance/v2` router and Payment Lists positive control, while seeding canonical state directly only for the Given portion of a summary read. Future command tests still issue their actual HTTP command and remain RED at that missing command.
+
+Fresh PostgreSQL 16 replayed all 11 migrations. The synchronized run discovered **33** tests, with **13 GREEN / 20 RED / 0 skip / 0 todo / 0 harness defect**.
+
+| ID | Result | Classification | Owning phase | Reason |
+|---|---|---|---|---|
+| FIN-EXPECTED-PENDING-01 | GREEN | GREEN-IMPLEMENTED | T05 | Real summary reads seeded pending EUR `5000.00` into Expected. |
+| FIN-EXPECTED-EXCLUDE-NONPENDING-01 | GREEN | GREEN-IMPLEMENTED | T05 | Draft/paid lists do not change Expected. |
+| FIN-RECEIVED-PAID-01 | GREEN | GREEN-IMPLEMENTED | T05 | Real summary reads paid EUR `5000.00` into Received. |
+| FIN-RECEIVED-EXCLUDE-UNPAID-01 | GREEN | GREEN-IMPLEMENTED | T05 | Pending/draft lists do not change Received. |
+| FIN-NO-DOUBLE-REVENUE-01 | GREEN | GREEN-IMPLEMENTED | T05 | Legacy income `9999` does not change canonical Received. |
+| FIN-AVAILABLE-01 | GREEN | GREEN-IMPLEMENTED | T05 | EUR is exactly `5000 - 3000 - 2000 = 0`. |
+| FIN-AVAILABLE-NEGATIVE-01 | GREEN | GREEN-IMPLEMENTED | T05 | GBP is exactly `1000 - 800 - 500 = -300`. |
+| FIN-CURRENCY-SEPARATION-01 | GREEN | GREEN-IMPLEMENTED | T05 | Ordered EUR/GBP buckets remain separate. |
+| EXPENSE-CREATE-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T06 | First assertion is absent `POST /expenses` (404). |
+| EXPENSE-DECIMAL-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T06 | First assertion is absent `POST /expenses` (404). |
+| EXPENSE-LINKAGE-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T06 | First assertion is absent `POST /expenses` (404). |
+| EXPENSE-AUDIT-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T06 | First assertion is absent reversal command (404). |
+| EXPENSE-TENANT-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T06 | Required own create is absent (404). |
+| EXPENSE-IDOR-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T06 | Required own create is absent (404). |
+| DIST-MANUAL-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T07 | First assertion is absent distribution command (404). |
+| DIST-NO-AUTO-RULE-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T07 | First assertion is absent distribution command (404). |
+| DIST-PARTICIPANT-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T07 | First assertion is absent distribution command (404). |
+| DIST-AUDIT-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T07 | First assertion is absent cancellation command (404). |
+| DIST-TENANT-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T07 | Required own create is absent (404). |
+| OBLIGATION-CREATE-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T08 | First assertion is absent obligation command (404). |
+| OBLIGATION-NO-FIXED-CADENCE-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T08 | First assertion is absent obligation command (404). |
+| OBLIGATION-PAY-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T08 | First assertion is absent settlement command (404). |
+| OBLIGATION-PAY-IDEMPOTENT-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T08 | First assertion is absent settlement command (404). |
+| OBLIGATION-TENANT-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T08 | Required own command is absent (404). |
+| OBLIGATION-AUDIT-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T08 | First assertion is absent reversal command (404). |
+| FIN-TECH-OWN-01 | RED | RED-EXPECTED-PRODUCT-GAP | T07/T08 mixed | Required technician Distribution positive control is absent (404), before summary denial. |
+| FIN-CLIENT-INTERNAL-DENY-01 | GREEN | GREEN-IMPLEMENTED | T05 | Real client Payment Lists read is 200, then real Finance summary is 403. |
+| FIN-OWNER-SUMMARY-01 | GREEN | GREEN-IMPLEMENTED | T05 | Owner receives non-empty real summary (200). |
+| FIN-CROSS-TENANT-01 | RED | RED-EXPECTED-PRODUCT-GAP | T05 | Own summary is 200; unauthorized foreign active-workspace request is 403, while frozen assertion requires 404. |
+| FIN-WORKSPACE-SPOOF-01 | GREEN | GREEN-IMPLEMENTED | T05 | Both query selectors are ignored; non-zero B value `7777.77` is absent. |
+| FIN-NO-FLOAT-01 | GREEN | GREEN-IMPLEMENTED | T03/T04 | Canonical `Expense.amount` is Decimal. |
+| FIN-NO-LEGACY-AUTHORITY-01 | GREEN | GREEN-IMPLEMENTED | T05 | Real summary remains canonical despite legacy fixture. |
+| FIN-NO-SPEC004-MUTATION-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T06 | Required canonical finance mutation is absent (404). |
+
+The 12 T05 summary scenarios that were false RED solely due to legacy-only mounting are now executable. `FIN-TECH-OWN-01` remains mixed-scope because its required positive control is a future Distribution read; it was not relaxed. `FIN-CROSS-TENANT-01` is not a harness defect: it reaches real RequestContext/summary behavior and exposes the remaining frozen-status mismatch (403 received, 404 required). No product code was changed during this synchronization.
