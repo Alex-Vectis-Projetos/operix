@@ -2,7 +2,7 @@
 
 **Data:** 2026-09-22
 **Branch auditada:** `feat/004-payment-list-confrontation`
-**Checkpoint remoto:** `6676671d83fd582dd6df00db9f22ce45e87042d0`
+**Checkpoint remoto revisado:** `b658bc75e34c09746ab976656c42162df86f4a95`
 **Escopo desta rodada:** rastreabilidade e alinhamento; nenhuma alteração de produto, schema, migration ou testes.
 
 ## 1. Executive Summary
@@ -11,9 +11,15 @@ As quatro fatias de engenharia do Core foram concluídas no branch: fundação e
 
 O produto está alinhado, **para as fontes disponíveis**, com o fluxo acordado de técnico/empresa -> orçamento ou OP -> WEEKLOG -> validação -> Lista multissemanal -> confronto -> `pending`/`paid`. O Financeiro Essencial ainda não foi implementado; é o próximo domínio a ser descoberto, não iniciado.
 
-Há uma limitação de rastreabilidade contratual: nem o contrato assinado/Anexo I nem a proposta comercial aceita existem neste checkout. `docs/Relatorio_Plano_de_Ataque_QW_Nexus.pdf` é um plano técnico, não foi usado como substituto comercial; sua extração exigiria enviar documento interno a serviço externo, sem autorização. Portanto esta auditoria não certifica aderência absoluta ao instrumento assinado. Ela confirma aderência às fontes acessíveis: `PROJECT.md`, `DOMAIN.md`, ADRs, Specs001–004 e a formulação final de Alex na segunda reunião.
+Os instrumentos comerciais — contrato Fase 1 assinado, anexos e proposta aceita — não estão versionados neste checkout. Contudo, a gestão os revisou externamente contra este checkpoint técnico e concluiu que as Specs001–004 estão materialmente alinhadas ao escopo contratado da Fase 1. Contrato e anexos continuam sendo a autoridade máxima de negócio caso haja conflito com documentos do repositório. `docs/Relatorio_Plano_de_Ataque_QW_Nexus.pdf` é apenas plano técnico e não foi usado como substituto comercial.
 
-**Parecer:** pronto para revisar este daily e iniciar **discovery** da Spec005 somente após confirmar os documentos comerciais ausentes e as decisões financeiras listadas na seção 11.
+**Parecer:** **OPERIX CONTRACTUALLY ALIGNED — SPEC 005 DISCOVERY READY, WITH FINANCE CLARIFICATIONS & HOMOLOGATION DEPENDENCIES OPEN.** Financeiro Essencial não está implementado; homologação, staging e release continuam pendentes.
+
+### Confirmação contratual externa da gestão
+
+A Fase 1 está organizada em: (1) fundação técnica; (2) operação móvel/Core; (3) Lista, Confronto e Financeiro Essencial; e (4) homologação, documentação e release controlado. A direção contratada é **recuperar, integrar e completar a base existente**, não reescrever o Operix do zero.
+
+O escopo confirmado de operação inclui contexto de usuário/workspace/técnico, veículo por matrícula/placa ou VIN/chassi, fotos, Budget persistente e revisável, ProductionOrder direta ou derivada de Budget, ciclo de Produção, WEEKLOG, validação autorizada de cliente, retificação, importação externa de WEEKLOG, Core responsivo, correção de modo claro e limpeza de marca Operix. Lista/Financeiro inclui Lista distinta de WEEKLOG e multi-semanal, criação/importação/revisão, ciclo `pending`/`paid`, confronto executado versus reconhecido, distribuição manual, Expected de Lista validada pendente, Received de Lista paga, despesas, saldo disponível e obrigações/pagamentos sem periodicidade obrigatória. Não inclui ERP contábil completo, RH completo, plataforma genérica de automação, produto GIS, aplicativo nativo ou plataforma definitiva de billing SaaS.
 
 ## 2. What Changed Since Previous Report
 
@@ -91,7 +97,7 @@ Há uma limitação de rastreabilidade contratual: nem o contrato assinado/Anexo
 | Financeiro Essencial | NEXT | Spec005 ainda não deve ser implementada sem discovery e decisões |
 | Homologação, staging, documentação de operador e release | PENDING HOMOLOGATION | nenhum release de produção autorizado |
 
-O contrato/anexo assinado e a proposta aceita precisam ser fornecidos ou versionados antes de declarar que esta lista é o conjunto completo de obrigações da Fase 1.
+Os instrumentos comerciais permanecem fora do checkout, mas foram revisados externamente pela gestão contra este checkpoint. Contrato e anexos prevalecem sobre esta documentação se houver conflito.
 
 ## 8. Gaps / Risks / Technical Debt
 
@@ -110,7 +116,6 @@ O contrato/anexo assinado e a proposta aceita precisam ser fornecidos ou version
 
 | Entrada | Estado | Quando necessária |
 |---|---|---|
-| Contrato assinado, Anexo I e proposta comercial aceita | not found | antes de aprovar o escopo final da Fase 1/Spec005 |
 | WEEKLOGs e Listas representativos, anonimizados ou autorizados | still required | homologação de import/OCR e confronto |
 | Casos reais de glosa, desconto, contestação e retificação | still required | homologação de decisões e linhagem |
 | Política operacional de despesas e participantes de distribuição | still required | discovery da Spec005 |
@@ -126,15 +131,15 @@ O contrato/anexo assinado e a proposta aceita precisam ser fornecidos ou version
 
 ## 11. Finance Discovery Readiness
 
-O sistema está pronto tecnicamente para **discovery**, mas a Spec005 não está pronta para implementação por inferência. As decisões que alteram arquitetura são:
+O sistema está pronto tecnicamente para **discovery**, mas a Spec005 não está pronta para implementação por inferência. Já estão confirmados: distribuição manual; Expected a partir de Lista validada `pending`; Received a partir de Lista `paid`; Confronto como parte de Operações/Lista; obrigações sem cadência fixa; e disponível negativo representável. As decisões materiais que permanecem são:
 
-1. definir participantes canônicos de distribuição (técnico, empresa, sócio, cliente, parceiro), base de cálculo, autor, aprovação, edição e reversão;
-2. definir despesas: categorias mínimas, vínculo obrigatório com técnico/operação/lista e estados de reconhecimento/pagamento;
-3. definir o ciclo de obrigação e pagamento: criação, pagamento parcial, saldo negativo, confirmação, cancelamento/reversão e trilha de auditoria;
-4. confirmar a política de moeda/FX para um produto internacional, preservando que uma Lista usa uma moeda ISO única;
-5. confirmar quais projeções cada ator vê, sobretudo técnico vinculado versus independente, sem revelar agregado empresarial;
-6. delimitar a relação entre Lista `paid`, documentos fiscais/faturas e qualquer integração bancária, sem introduzir cobrança SaaS ou automação de distribuição;
-7. obter exemplos reais que permitam testar os casos acima sem inventar regras.
+1. se a criação de obrigação já reserva/reduz Disponível ou se somente a liquidação efetiva o reduz;
+2. se o pagamento de distribuição/comissão é também uma Despesa ou uma liquidação distinta, sem dupla subtração;
+3. se Fase 1 requer pagamento parcial de obrigação;
+4. qual semântica de correção/reversão é exigida para Despesa e pagamento registrados incorretamente;
+5. se há múltiplas moedas por visão financeira e, nesse caso, se totais separados sem FX são suficientes;
+6. quais participantes não proprietários podem ver seu próprio saldo/distribuição, sem expor finanças internas;
+7. exemplos reais para homologar essas decisões sem inventar regras.
 
 ## 12. Scope Guard
 
@@ -146,4 +151,4 @@ O repositório contém referência histórica a uma janela de 30–40 dias em `p
 
 ## Recommended Next Step
 
-Revisar este checkpoint com Alex/EverGreen, anexar ou referenciar contrato/Anexo I/proposta, solicitar os insumos da seção 9 e realizar uma sessão curta de decisões financeiras. Após isso, produzir a Spec005 test-first; não iniciar implementação ainda.
+Revisar este checkpoint com Alex/EverGreen, solicitar os insumos da seção 9 e realizar uma sessão curta para as decisões financeiras abertas. Após a revisão de discovery, produzir a Spec005 test-first; não iniciar implementação ainda.
