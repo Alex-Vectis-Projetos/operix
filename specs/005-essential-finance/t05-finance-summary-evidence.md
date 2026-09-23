@@ -50,7 +50,7 @@ Personal-workspace determination is separately supported: `allows a technician w
 
 The original T01/T02 baseline mounted only `/api/finance` and therefore returned 404 before it exercised the implemented v2 summary route. It also had no canonical PaymentList/Expense/ObligationPayment Given-state for read scenarios. The synchronized harness mounts the real `/api/finance/v2` router and Payment Lists positive control, while seeding canonical state directly only for the Given portion of a summary read. Future command tests still issue their actual HTTP command and remain RED at that missing command.
 
-Fresh PostgreSQL 16 replayed all 11 migrations. The synchronized run discovered **33** tests, with **13 GREEN / 20 RED / 0 skip / 0 todo / 0 harness defect**.
+Fresh PostgreSQL 16 replayed all 11 migrations. The finalized synchronized run discovered **33** tests, with **14 GREEN / 19 RED / 0 skip / 0 todo / 0 harness defect**.
 
 | ID | Result | Classification | Owning phase | Reason |
 |---|---|---|---|---|
@@ -82,10 +82,10 @@ Fresh PostgreSQL 16 replayed all 11 migrations. The synchronized run discovered 
 | FIN-TECH-OWN-01 | RED | RED-EXPECTED-PRODUCT-GAP | T07/T08 mixed | Required technician Distribution positive control is absent (404), before summary denial. |
 | FIN-CLIENT-INTERNAL-DENY-01 | GREEN | GREEN-IMPLEMENTED | T05 | Real client Payment Lists read is 200, then real Finance summary is 403. |
 | FIN-OWNER-SUMMARY-01 | GREEN | GREEN-IMPLEMENTED | T05 | Owner receives non-empty real summary (200). |
-| FIN-CROSS-TENANT-01 | RED | RED-EXPECTED-PRODUCT-GAP | T05 | Own summary is 200; unauthorized foreign active-workspace request is 403, while frozen assertion requires 404. |
+| FIN-CROSS-TENANT-01 | GREEN | GREEN-IMPLEMENTED | T05 | Own summary is 200; unauthorized foreign active-workspace resolution returns exact 403 `{ message }` before any Finance data. |
 | FIN-WORKSPACE-SPOOF-01 | GREEN | GREEN-IMPLEMENTED | T05 | Both query selectors are ignored; non-zero B value `7777.77` is absent. |
 | FIN-NO-FLOAT-01 | GREEN | GREEN-IMPLEMENTED | T03/T04 | Canonical `Expense.amount` is Decimal. |
 | FIN-NO-LEGACY-AUTHORITY-01 | GREEN | GREEN-IMPLEMENTED | T05 | Real summary remains canonical despite legacy fixture. |
 | FIN-NO-SPEC004-MUTATION-01 | RED | RED-EXPECTED-FUTURE-MUTATION | T06 | Required canonical finance mutation is absent (404). |
 
-The 12 T05 summary scenarios that were false RED solely due to legacy-only mounting are now executable. `FIN-TECH-OWN-01` remains mixed-scope because its required positive control is a future Distribution read; it was not relaxed. `FIN-CROSS-TENANT-01` is not a harness defect: it reaches real RequestContext/summary behavior and exposes the remaining frozen-status mismatch (403 received, 404 required). No product code was changed during this synchronization.
+The 12 T05 summary scenarios that were false RED solely due to legacy-only mounting are now executable. `FIN-TECH-OWN-01` remains mixed-scope because its required positive control is a future Distribution read; it was not relaxed. The prior 404 expectation in `FIN-CROSS-TENANT-01` was over-specified: a foreign workspace is a RequestContext capability denial, so its frozen response is exact 403 with the normal message envelope and no Finance data. This differs from a concrete foreign-object lookup, where 404 privacy may still be correct. No product code was changed during this synchronization.
