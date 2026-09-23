@@ -2,14 +2,14 @@
 
 | Task | Objective / likely files | Acceptance / gates / done |
 |---|---|---|
-| T01/T02 | RED acceptance and request-context helpers; `tests/**`, finance routes | FIN-*, EXPENSE-TENANT/IDOR, cross-tenant; no implementation until decisions approved |
-| T03/T04 | Decimal models/migration/repository; Prisma schema/migration/services | FIN-NO-FLOAT, currency, audit; forward-only dry-run and tenant-explicit migration |
-| T05 | summary service from PaymentList; routes/hooks | Expected/Received/no-double-revenue; Spec004 regression guard |
-| T06 | expense domain | EXPENSE-CREATE/DECIMAL/LINKAGE/AUDIT; idempotent, scoped, reversal policy approved |
-| T07 | manual distributions | DIST-MANUAL/NO-AUTO-RULE/PARTICIPANT; canonical identity and audit |
-| T08 | obligations/settlements | OBLIGATION-*; state locking/idempotency and OPEN-001/003/004 approved |
-| T09 | legacy retirement/migration | FIN-NO-LEGACY-AUTHORITY; report ambiguous rows, no reverse sync |
-| T10/T11 | typed client/UI | authorization visibility, currency separation; no unsafe legacy API reuse |
-| T12 | regression/security/handoff | all normative scenarios, migration rehearsal, authenticated smoke evidence |
+| T01/T02 | RED acceptance and request-context helpers; `tests/**`, finance routes | FIN-CROSS-TENANT-01, FIN-WORKSPACE-SPOOF-01, EXPENSE-TENANT-01, EXPENSE-IDOR-01, DIST-TENANT-01, OBLIGATION-TENANT-01 |
+| T03/T04 | Decimal models/migration/repository; Prisma schema/migration/services | FIN-NO-FLOAT-01, FIN-CURRENCY-SEPARATION-01, EXPENSE-DECIMAL-01; DEC-009–015; forward-only dry run |
+| T05 | summary service from PaymentList; routes/hooks | FIN-EXPECTED-PENDING-01, FIN-EXPECTED-EXCLUDE-NONPENDING-01, FIN-RECEIVED-PAID-01, FIN-RECEIVED-EXCLUDE-UNPAID-01, FIN-NO-DOUBLE-REVENUE-01, FIN-AVAILABLE-01, FIN-AVAILABLE-NEGATIVE-01 |
+| T06 | expense domain | EXPENSE-CREATE-01, EXPENSE-LINKAGE-01, EXPENSE-AUDIT-01 |
+| T07 | manual distributions | DIST-MANUAL-01, DIST-NO-AUTO-RULE-01, DIST-PARTICIPANT-01, DIST-AUDIT-01 |
+| T08 | full obligations/settlements | OBLIGATION-CREATE-01, OBLIGATION-NO-FIXED-CADENCE-01, OBLIGATION-PAY-01, OBLIGATION-PAY-IDEMPOTENT-01, OBLIGATION-AUDIT-01 |
+| T09 | legacy retirement/migration | FIN-NO-LEGACY-AUTHORITY-01; report ambiguous rows, no reverse sync |
+| T10/T11 | typed client/UI | FIN-TECH-OWN-01, FIN-CLIENT-INTERNAL-DENY-01, FIN-OWNER-SUMMARY-01 |
+| T12 | regression/security/handoff | FIN-NO-SPEC004-MUTATION-01 plus all 33 normative scenarios, migration rehearsal and authenticated smoke evidence |
 
 Each mutation must derive tenant from RequestContext, prevent mass assignment of audit fields, return non-leaking authorization errors, and pass serial and isolation tests.

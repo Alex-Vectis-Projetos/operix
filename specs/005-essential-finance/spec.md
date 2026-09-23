@@ -2,7 +2,7 @@
 
 ## Domain and states
 
-`FinanceSummary(currency)` derives Expected/Received from PaymentList and Available from received minus paid Expenses, subject to OPEN-001. `Expense` is a Decimal cash cost with explicit currency, category (small controlled list or free label to be selected from evidence), effective date, creator and optional justified contextual link (PaymentList, ProductionOrder, technician/person, client, document). `Distribution` records a manual List/work allocation to a canonical participant (person/workspace/client relationship, never free-form recipient) in fixed amount or percentage. `FinancialObligation` records a payable allocation; state is `pending|paid|cancelled|reversed`. Optional immutable `ObligationPayment` is only introduced if settlement history/partials are confirmed.
+`FinanceSummary(currency)` derives Expected/Received from PaymentList and Available as `Received - effective Expenses - effective settled ObligationPayments`. It is current-state only. `Expense` is a Decimal cash/cost outflow with explicit currency, category, effective date, creator and optional justified contextual link. `Distribution` is a manual List/work allocation or entitlement to a canonical participant; it is not an obligation and does not move cash. `FinancialObligation` is an amount payable, with `pending|paid|cancelled|reversed` lifecycle; creation does not affect Available. Immutable `ObligationPayment` preserves one full settlement, retry idempotency and reversal linkage; it is not an installment engine and is not an Expense.
 
 ## Contract traceability
 
@@ -10,9 +10,9 @@
 |---|---|---|---|---|
 | Manual distribution | meeting delta D15, confirmed | DEC-004/Distribution | DIST-* / T07 | frozen |
 | Expected pending / Received paid | meeting delta D16–17, confirmed; ADR-004 | DEC-002/003 summary | FIN-EXPECTED/RECEIVED / T05 | frozen |
-| Expenses, Available, negative | PROJECT/DOMAIN and D18–19, confirmed | Expense + derived summary | FIN-AVAILABLE/EXPENSE-* / T05–06 | Available settlement open |
-| Obligations without cadence | management-frozen fact | FinancialObligation | OBLIGATION-* / T08 | partial/reversal open |
-| Technician own visibility | DOMAIN/D02, confirmed | scoped own projection | FIN-TECH-OWN / T02,T10 | participant details open |
+| Expenses, Available, negative | PROJECT/DOMAIN, D18–19 and DEC-009/010, confirmed | Expense + derived summary | FIN-AVAILABLE/EXPENSE-* / T05–06 | frozen |
+| Obligations without cadence | management fact + DEC-012/013 | FinancialObligation/ObligationPayment | OBLIGATION-* / T08 | frozen |
+| Technician own visibility | DOMAIN/D02 + DEC-015 | scoped own projection | FIN-TECH-OWN / T02,T10 | frozen |
 | Workspace authority | Spec001 foundation | RequestContext | FIN-CROSS-TENANT / T02 | frozen |
 | No accounting ERP | contract management fact | focused domain | scope gates / all | frozen |
 
@@ -22,8 +22,8 @@ Scoped `/finance/v2` commands: summary; expenses create/list/detail/cancel; dist
 
 ## Authorization
 
-Owner/admin: workspace summary and mutations. Linked technician: own production-linked distribution/obligation only when OPEN-006 confirms; never company totals. Independent technician/own workspace owner: own workspace scope. Client/client collaborator: no internal finance through validation grants. Partner/shareholder requires explicit membership/participant grant, not participant name. Every list/detail/mutation uses RequestContext then ownership predicate.
+Owner/admin: workspace summary and authorized mutations. Linked technician: own participant-linked distribution, obligation and payment status only—never company Expected, Received, Expenses, Available, margin or other participants. Independent technician/personal workspace owner acts through actual membership/ownership. Client/client collaborator: no internal finance through validation grants. Partner/shareholder requires explicit authenticated membership/capability plus object authorization; participant name alone is insufficient. Every list/detail/mutation uses RequestContext then ownership predicate.
 
 ## Audit, concurrency and currency
 
-Use append-only audit event/actor/time/reversal linkage; cancellation reverses rather than erases effective money. Idempotency protects expense create, distribution command, payment/settlement and reversal. Later PostgreSQL tests cover duplicate payment, concurrent commands, cross-tenant races and status-transition summary consistency. No FX conversion; report independent totals per ISO currency.
+Before effectiveness, exposed draft data may be corrected. Effective money is never hard-deleted or silently rewritten: cancellation/reversal carries actor, timestamp, reason and original linkage. Idempotency protects expense create, distribution command, payment/settlement and reversal. Later PostgreSQL tests cover duplicate payment, concurrent commands, cross-tenant races and status-transition summary consistency. No FX conversion; report independent totals per ISO currency.

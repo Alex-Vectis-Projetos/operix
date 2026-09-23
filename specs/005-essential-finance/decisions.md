@@ -11,11 +11,12 @@
 * DEC-007 — Expenses, distributions, obligations and payments require immutable audit trail; no hard deletion after effectiveness.
 * DEC-008 — Confrontation stays in Operation/List and Spec004 lifecycle is immutable.
 
-## Open business decisions
+## Human-confirmed final decisions
 
-* OPEN-001 — **BUSINESS DECISION REQUIRED:** AVAILABLE_SETTLEMENT_SEMANTICS. Does obligation creation reserve Available; does paid settlement reduce it; and is it an Expense or distinct cash-out? Blocks formula/schema acceptance.
-* OPEN-002 — **BUSINESS DECISION REQUIRED:** historical current-only versus period/as-of reporting. Blocks projection/timestamp design.
-* OPEN-003 — partial outgoing settlement: no evidence requires it; default target is pending→paid only unless confirmed.
-* OPEN-004 — correction semantics: cancel/reverse versus edit for effective expense/payment.
-* OPEN-005 — whether same workspace financial view mixes currencies and whether per-currency/no-FX is sufficient.
-* OPEN-006 — direct own-balance access for partner/shareholder/client versus owner/admin only.
+* DEC-009 — Available per currency is Received minus effective Expenses minus effective settled ObligationPayments. Pending obligations do not reserve/reduce cash; negative results are valid.
+* DEC-010 — Obligation settlement is a distinct cash-out and must never be automatically inserted as an Expense.
+* DEC-011 — Fase1 FinanceSummary is current-state only. Historical as-of reconstruction/charts are future scope; audit history remains preserved.
+* DEC-012 — Outgoing obligation settlement is full only in Fase1 (`pending → paid`); installments, remaining balances and schedules are out of scope.
+* DEC-013 — Effective financial facts are corrected through actor/time/reason/original-linked cancel or reversal, never destructive rewrite.
+* DEC-014 — Finance aggregates are independent per ISO currency: no default EUR, FX engine or cross-currency total.
+* DEC-015 — Finance visibility requires authenticated workspace capability plus object authorization: linked technician own-only, client denied internal finance, and participant identity alone grants no access.

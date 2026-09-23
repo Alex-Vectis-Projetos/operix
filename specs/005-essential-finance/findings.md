@@ -11,7 +11,7 @@
 | FIN-F07 | P1 | FinancialPage mixes confronto, profit rules, accounting, legacy API and Supabase-era hooks | unsafe UI/API authority | reuse visual shell only; replace data contracts/hook |
 | FIN-F08 | P1 | `useDashboardData` sums service orders directly | dashboard residue conflicts with FinanceSummary | replace when canonical summary ships |
 | FIN-F09 | P1 | PaymentList has explicit ISO currency; legacy money formatting hardcodes `€` | currency mixing/default risk | summaries per currency, no implicit default/FX |
-| FIN-F10 | P1 | no immutable expected-status projection identified | historical Expected cannot be reconstructed after paid transition | OPEN-002 before period reporting |
+| FIN-F10 | P1 | no immutable expected-status projection identified | historical Expected cannot be reconstructed after paid transition | accepted Fase1 current-state limitation; future reporting enhancement |
 
 ### Asset classification
 
