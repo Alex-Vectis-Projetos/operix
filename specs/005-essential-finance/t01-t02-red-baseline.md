@@ -30,7 +30,7 @@ Test file: `tests/integration/essential-finance-red-baseline.test.ts`. Each test
 | OBLIGATION-TENANT-01 | RED-AUTHORIZATION | FAIL: owner positive v2 create absent |
 | OBLIGATION-AUDIT-01 | RED-MISSING-ROUTE | FAIL: settlement reversal absent |
 | FIN-TECH-OWN-01 | RED-AUTHORIZATION | FAIL: positive v2 own-read absent |
-| FIN-CLIENT-INTERNAL-DENY-01 | TEST-HARNESS-DEFECT | FAIL: real auth positive control cannot reach the required local PostgreSQL fixture |
+| FIN-CLIENT-INTERNAL-DENY-01 | RED-AUTHORIZATION | FAIL: real Payment Lists positive control is 200; Finance v2 remains absent (404) |
 | FIN-OWNER-SUMMARY-01 | RED-MISSING-ROUTE | FAIL: summary absent |
 | FIN-CROSS-TENANT-01 | RED-AUTHORIZATION | FAIL: owner v2 positive control absent |
 | FIN-WORKSPACE-SPOOF-01 | RED-AUTHORIZATION | FAIL: v2 mutation absent |
@@ -51,3 +51,12 @@ All source identifiers are separate tests; no reporting ranges are used.
 - The remaining harness defect is isolated to `FIN-CLIENT-INTERNAL-DENY-01`: its required real operational positive control invokes the current `requireAuth` middleware, which queries PostgreSQL. No listener exists on the repository-standard `127.0.0.1:55432` (nor on `5432`), and Docker is unavailable on this host, so the positive control returns `401` after Prisma cannot connect. It is not classified as an authorization/product result and no mock or fake positive control was introduced.
 - False-green audit: no test passes; no status ranges, route simulation, unmounted v2 router, skip/todo, or empty-fixture pass can create a GREEN. Security cases require their positive controls before a GREEN classification.
 - Stop rule: Specs001–004 regressions, full root suite, lint, and frontend/backend builds were not run after the unresolved harness fixture defect. No product, schema, migration, manifest, or runtime configuration was changed.
+
+## Docker fixture verification — 2026-09-23
+
+- Docker Desktop engine verified; an isolated `postgres:16-alpine` container named `operix-spec005-postgres` was bound only to `127.0.0.1:55432`. Its randomly generated credential was never printed, persisted, or committed. The sanitized database identity was `operix_spec005_test@127.0.0.1:55432`.
+- Prisma validation passed. `migrate deploy` applied all 10 repository migrations to the disposable database, and `migrate status` reported the schema current.
+- The targeted suite again discovered **33** tests with **PASS 0 / FAIL 33 / SKIP 0 / TODO 0**. The fixture now seeds real owner/client users, AppUsers, workspace, and active memberships; its mounted current Payment Lists control returns **200** for the client before the canonical Finance v2 request returns **404**. Thus `FIN-CLIENT-INTERNAL-DENY-01` is `RED-AUTHORIZATION`, not a harness defect.
+- Final classification totals: **RED-MISSING-ROUTE 24; RED-AUTHORIZATION 8; RED-MISSING-SCHEMA 1; TEST-HARNESS-DEFECT 0; GREEN-EXISTING 0; BLOCKED-CONTRACT 0.**
+- Serial prior regressions passed: Spec001 **17/17**, Spec002 **59/59**, Spec003 **137/137**, Spec004 **127/127**. No `GET-NO-WRITE-01` race was observed.
+- Quality: root and backend typechecks passed; backend build passed; lint completed with one existing `react-hooks/exhaustive-deps` warning and no errors. The frontend build runner reached Vite transformation but did not return a completion status in this host session; it was not treated as a product regression. The serial full-suite command likewise showed the expected 33 Spec005 RED failures; its runner output did not return a final aggregate summary in this host session.
