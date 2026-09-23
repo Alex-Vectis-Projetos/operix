@@ -108,6 +108,11 @@ model Workspace {
   externalListImports             ExternalListImport[]
   tenantSequenceCounters          TenantSequenceCounter[]
   externalOperationalImports      ExternalOperationalImport[]
+  expenses                        Expense[] @relation("ExpenseWorkspace")
+  distributions                   Distribution[] @relation("DistributionWorkspace")
+  financialObligations            FinancialObligation[] @relation("FinancialObligationWorkspace")
+  obligationPayments              ObligationPayment[] @relation("ObligationPaymentWorkspace")
+  financeIdempotencyRecords       FinanceIdempotency[] @relation("FinanceIdempotencyWorkspace")
 
   @@map("workspaces")
 }
@@ -916,6 +921,7 @@ model Document {
 
   @@index([entityType, module])
   @@index([countryRequirementId])
+  @@unique([id, workspaceId])
   @@map("documents")
 }
 
@@ -1254,6 +1260,7 @@ model Person {
   @@index([workspaceId, type, status])
   @@index([locationId])
   @@index([taxId])
+  @@unique([id, workspaceId])
   @@map("people")
 }
 
@@ -1625,4 +1632,160 @@ model ExternalOperationalImportItem {
   @@unique([id, workspaceId])
   @@index([workspaceId, importId])
   @@map("external_operational_import_items")
+}
+
+// ---------------------------------------------------------------------------
+// Spec 005 — Essential Finance canonical domain
+// ---------------------------------------------------------------------------
+
+enum ExpenseStatus {
+  effective
+  reversed
+}
+enum DistributionStatus {
+  active
+  cancelled
+}
+enum FinancialObligationStatus {
+  pending
+  paid
+  cancelled
+  reversed
+}
+enum ObligationPaymentStatus {
+  effective
+  reversed
+}
+enum DistributionAllocationMode {
+  fixed
+  percentage
+}
+enum FinancialParticipantKind {
+  person
+  workspace
+  client
+}
+enum ExpenseContextKind {
+  payment_list
+  production_order
+  technician_person
+  client
+  document
+}
+
+model Expense {
+  id                 String             @id @default(uuid())
+  workspaceId        String             @map("workspace_id")
+  amount             Decimal            @db.Decimal(12, 2)
+  currencyCode       String             @map("currency_code")
+  category           String
+  occurredOn         DateTime           @map("occurred_on") @db.Date
+  description        String?
+  status             ExpenseStatus      @default(effective)
+  contextKind        ExpenseContextKind? @map("context_kind")
+  paymentListId      String?            @map("payment_list_id")
+  productionOrderId  String?            @map("production_order_id")
+  technicianPersonId String?            @map("technician_person_id")
+  clientId           String?            @map("client_id")
+  documentId         String?            @map("document_id")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  createdByUserId    String             @map("created_by_user_id")
+  reversedAt         DateTime?          @map("reversed_at")
+  reversedByUserId   String?            @map("reversed_by_user_id")
+  reversalReason     String?            @map("reversal_reason")
+
+  workspace Workspace @relation("ExpenseWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, status, occurredOn])
+  @@map("expenses")
+}
+
+model Distribution {
+  id                   String                     @id @default(uuid())
+  workspaceId          String                     @map("workspace_id")
+  paymentListId        String                     @map("payment_list_id")
+  paymentListItemId    String?                    @map("payment_list_item_id")
+  participantKind      FinancialParticipantKind   @map("participant_kind")
+  participantPersonId  String?                    @map("participant_person_id")
+  participantWorkspaceId String?                  @map("participant_workspace_id")
+  participantClientId  String?                    @map("participant_client_id")
+  allocationMode       DistributionAllocationMode @map("allocation_mode")
+  fixedAmount          Decimal?                   @map("fixed_amount") @db.Decimal(12, 2)
+  percentage           Decimal?                   @db.Decimal(5, 2)
+  resolvedAmount       Decimal                    @map("resolved_amount") @db.Decimal(12, 2)
+  currencyCode         String                     @map("currency_code")
+  status               DistributionStatus         @default(active)
+  createdAt            DateTime                   @default(now()) @map("created_at")
+  createdByUserId      String                     @map("created_by_user_id")
+  cancelledAt          DateTime?                  @map("cancelled_at")
+  cancelledByUserId    String?                    @map("cancelled_by_user_id")
+  cancellationReason   String?                    @map("cancellation_reason")
+
+  workspace Workspace @relation("DistributionWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, paymentListId, status])
+  @@map("distributions")
+}
+
+model FinancialObligation {
+  id                String                     @id @default(uuid())
+  workspaceId       String                     @map("workspace_id")
+  distributionId    String                     @unique @map("distribution_id")
+  amount            Decimal                    @db.Decimal(12, 2)
+  currencyCode      String                     @map("currency_code")
+  status            FinancialObligationStatus @default(pending)
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  createdByUserId   String                     @map("created_by_user_id")
+  paidAt            DateTime?                  @map("paid_at")
+  paidByUserId      String?                    @map("paid_by_user_id")
+  cancelledAt       DateTime?                  @map("cancelled_at")
+  cancelledByUserId String?                    @map("cancelled_by_user_id")
+  cancellationReason String?                   @map("cancellation_reason")
+  reversedAt        DateTime?                  @map("reversed_at")
+  reversedByUserId  String?                    @map("reversed_by_user_id")
+  reversalReason    String?                    @map("reversal_reason")
+
+  workspace Workspace @relation("FinancialObligationWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, status])
+  @@unique([id, workspaceId])
+  @@map("financial_obligations")
+}
+
+model ObligationPayment {
+  id                String                  @id @default(uuid())
+  workspaceId       String                  @map("workspace_id")
+  obligationId      String                  @unique @map("obligation_id")
+  amount            Decimal                 @db.Decimal(12, 2)
+  currencyCode      String                  @map("currency_code")
+  status            ObligationPaymentStatus @default(effective)
+  paidAt            DateTime                @map("paid_at")
+  paidByUserId      String                  @map("paid_by_user_id")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  reversedAt        DateTime?               @map("reversed_at")
+  reversedByUserId  String?                 @map("reversed_by_user_id")
+  reversalReason    String?                 @map("reversal_reason")
+
+  workspace Workspace @relation("ObligationPaymentWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, status])
+  @@map("obligation_payments")
+}
+
+model FinanceIdempotency {
+  id              String   @id @default(uuid())
+  workspaceId     String   @map("workspace_id")
+  actorUserId     String   @map("actor_user_id")
+  actionNamespace String   @map("action_namespace")
+  idempotencyKey  String   @map("idempotency_key")
+  requestHash     String   @map("request_hash")
+  resourceType    String   @map("resource_type")
+  resourceId      String   @map("resource_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation("FinanceIdempotencyWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, actorUserId, actionNamespace, idempotencyKey])
+  @@map("finance_idempotency")
 }
