@@ -1,14 +1,20 @@
 // @vitest-environment node
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-// @ts-expect-error backend Express dependency is intentionally isolated from SPA graph.
-import express from "../../backend/node_modules/express/index.js";
-import { financeRouter } from "../../backend/src/routes/finance.js";
-import { paymentListsRouter } from "../../backend/src/routes/paymentLists.js";
-import { signAccessToken } from "../../backend/src/lib/jwt.js";
 import { readFile } from "node:fs/promises";
 
+// Backend configuration is evaluated on import. Keep this fixture self-contained
+// and set its non-production requirements before loading any backend module.
 process.env.NODE_ENV = "test";
+process.env.DATABASE_URL ??= "postgresql://operix_local:U2dkA-cJYnwHuD7hiAY2hPTrkawjg6f8@127.0.0.1:55432/operix_local?schema=public";
 process.env.JWT_SECRET ??= "this-is-a-test-secret-with-more-than-32-chars-long";
+process.env.MINIO_ROOT_PASSWORD ??= "operix-test-minio-password";
+
+// Dynamic imports intentionally follow the environment setup above.
+// @ts-expect-error backend Express dependency is intentionally isolated from SPA graph.
+const express = (await import("../../backend/node_modules/express/index.js")).default;
+const { financeRouter } = await import("../../backend/src/routes/finance.js");
+const { paymentListsRouter } = await import("../../backend/src/routes/paymentLists.js");
+const { signAccessToken } = await import("../../backend/src/lib/jwt.js");
 
 /** Non-zero fixture manifest for the future canonical implementation. v2 is absent today. */
 const fixture = {
@@ -23,7 +29,7 @@ const fixture = {
 };
 
 describe("Spec 005 — T01/T02 normative RED baseline (DEC-016)", () => {
-  let server: ReturnType<express.Express["listen"]>;
+  let server: { close: () => void; address: () => string | { port?: number } | null };
   let baseUrl: string;
   const headers = (actor = fixture.ownerA, workspace = fixture.workspaceA, key = "spec005-red-key") => ({
     Authorization: `Bearer ${signAccessToken({ id: actor, email: `${actor}@spec005.test`, role: "admin" })}`,
