@@ -15,6 +15,7 @@ const express = (await import("../../backend/node_modules/express/index.js")).de
 const { financeRouter } = await import("../../backend/src/routes/finance.js");
 const { paymentListsRouter } = await import("../../backend/src/routes/paymentLists.js");
 const { signAccessToken } = await import("../../backend/src/lib/jwt.js");
+const { prisma } = await import("../../backend/src/lib/prisma.js");
 
 /** Non-zero fixture manifest for the future canonical implementation. v2 is absent today. */
 const fixture = {
@@ -22,10 +23,12 @@ const fixture = {
   workspaceB: "f5000000-0000-4000-8000-000000000002",
   eur: "5000.00", gbp: "700.00", expense: "3000.00", obligation: "2000.00",
   ownerA: "f5100000-0000-4000-8000-000000000001",
+  ownerAApp: "f5200000-0000-4000-8000-000000000001",
   ownerB: "f5100000-0000-4000-8000-000000000002",
   technicianA: "f5100000-0000-4000-8000-000000000003",
   technicianB: "f5100000-0000-4000-8000-000000000004",
   clientA: "f5100000-0000-4000-8000-000000000005",
+  clientAApp: "f5200000-0000-4000-8000-000000000005",
 };
 
 describe("Spec 005 — T01/T02 normative RED baseline (DEC-016)", () => {
@@ -40,14 +43,27 @@ describe("Spec 005 — T01/T02 normative RED baseline (DEC-016)", () => {
   const expense = { amount: fixture.expense, currencyCode: "EUR", category: "fuel", occurredOn: "2026-09-23", context: { kind: "payment_list", id: "payment-list-a" } };
   const distribution = { paymentListId: "payment-list-a", paymentListItemId: null, participant: { kind: "person", personId: fixture.technicianA }, allocation: { mode: "percentage", percentage: "40.00" } };
 
+  async function resetOperationalPositiveControl() {
+    await prisma.workspace.deleteMany({ where: { id: fixture.workspaceA } });
+    await prisma.user.deleteMany({ where: { id: { in: [fixture.ownerA, fixture.clientA] } } });
+    await prisma.user.create({ data: { id: fixture.ownerA, email: `${fixture.ownerA}@spec005.test`, fullName: "Spec 005 owner", role: "admin", passwordHash: "spec005-fixture", isActive: true, appUser: { create: { id: fixture.ownerAApp, email: `${fixture.ownerA}@spec005.test`, name: "Spec 005 owner" } } } });
+    await prisma.user.create({ data: { id: fixture.clientA, email: `${fixture.clientA}@spec005.test`, fullName: "Spec 005 client", role: "user", passwordHash: "spec005-fixture", isActive: true, appUser: { create: { id: fixture.clientAApp, email: `${fixture.clientA}@spec005.test`, name: "Spec 005 client" } } } });
+    await prisma.workspace.create({ data: { id: fixture.workspaceA, name: "Spec 005 fixture workspace", ownerUserId: fixture.ownerAApp, memberships: { create: [{ userId: fixture.ownerAApp, role: "owner", status: "active" }, { userId: fixture.clientAApp, role: "client", status: "active" }] } } });
+  }
+
   beforeAll(async () => {
+    await resetOperationalPositiveControl();
     const app = express(); app.use(express.json());
     // Same production mount prefix (`backend/src/index.ts`); no v2 router is simulated here.
     app.use("/api/finance", financeRouter);
     app.use("/api/payment-lists", paymentListsRouter);
     await new Promise<void>((resolve) => { server = app.listen(0, () => { const a = server.address(); baseUrl = `http://127.0.0.1:${typeof a === "object" ? a?.port : 0}`; resolve(); }); });
   });
-  afterAll(() => server.close());
+  afterAll(async () => {
+    server.close();
+    await prisma.workspace.deleteMany({ where: { id: fixture.workspaceA } });
+    await prisma.user.deleteMany({ where: { id: { in: [fixture.ownerA, fixture.clientA] } } });
+  });
 
   it("FIN-EXPECTED-PENDING-01 derives pending PaymentList recognizedTotal once", async () => expect((await ownerSummary()).status).toBe(200));
   it("FIN-EXPECTED-EXCLUDE-NONPENDING-01 excludes draft and paid Lists", async () => expect((await ownerSummary()).status).toBe(200));
