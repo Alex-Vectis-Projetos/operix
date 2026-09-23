@@ -1,7 +1,7 @@
 # Vertical plan
 
 * T00 — discovery/ADR/traceability; no product diff.
-* T01/T02 — write acceptance RED and RequestContext/object-authorization security baseline.
+* T01/T02 — write acceptance RED and RequestContext/object-authorization security baseline against DEC-016 concrete HTTP contract.
 * T03/T04 — Decimal canonical schema and forward-only migration, after T01/T02 approval and the frozen DEC-009–015 architecture.
 * T05 — PaymentList-derived Expected/Received/FinanceSummary, per currency.
 * T06 — Expenses with audit, linkage and reversal semantics.

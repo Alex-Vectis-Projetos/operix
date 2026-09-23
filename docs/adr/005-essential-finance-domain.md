@@ -18,6 +18,10 @@ Available is derived, never independently mutable, per currency: Received minus 
 
 `FinancialRecord`, `FinancialEvent`, `FinancialIntegrity*`, `ProfitRule`, `ServiceOrderDistribution`, and the active legacy finance routes are archive/deprecate candidates, not canonical inputs. Their nullable workspace ownership, Float money, loose scalar references, global aggregations and destructive mutations prevent adoption. `Reconciliation` stays retired as commercial authority; canonical confrontation is `/payment-lists`. Compatibility, if justified later, is one-way canonical-to-legacy only. Migration is forward-only, Decimal-safe, tenant-explicit, dry-run/idempotent/audited; ambiguous, orphaned or global rows are skipped and reported.
 
+## Concrete HTTP boundary
+
+Canonical finance is `/api/finance/v2`. Commands never accept workspace or audit authority: `RequestContext.activeWorkspaceId` chooses tenant and the authenticated actor supplies creator/payer identity. A FinancialObligation derives participant, amount and currency from Distribution, eliminating client-supplied payable truth. Settlement is an explicit atomic action that creates immutable payment evidence; it is not generic `FinancialRecord` creation and is never an Expense. Reversal is explicit/audited and preserves original evidence. The summary returns deterministic independent currency buckets, never a cross-currency total.
+
 ## Consequences
 
 This minimizes duplicate truth and preserves auditability. Fase1 supplies a current-state summary only; historical/as-of reporting is a future enhancement. PaymentList lifecycle records remain auditable, but no expected-revenue ledger is introduced merely for time-travel reporting. Full settlement only is in scope; partial installments/schedules are not.

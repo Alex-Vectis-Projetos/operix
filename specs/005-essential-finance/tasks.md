@@ -2,7 +2,7 @@
 
 | Task | Objective / likely files | Acceptance / gates / done |
 |---|---|---|
-| T01/T02 | RED acceptance and request-context helpers; `tests/**`, finance routes | FIN-CROSS-TENANT-01, FIN-WORKSPACE-SPOOF-01, EXPENSE-TENANT-01, EXPENSE-IDOR-01, DIST-TENANT-01, OBLIGATION-TENANT-01 |
+| T01/T02 | RED acceptance and request-context helpers; `tests/**`, finance routes | DEC-016; FIN-CROSS-TENANT-01, FIN-WORKSPACE-SPOOF-01, EXPENSE-TENANT-01, EXPENSE-IDOR-01, DIST-TENANT-01, OBLIGATION-TENANT-01 |
 | T03/T04 | Decimal models/migration/repository; Prisma schema/migration/services | FIN-NO-FLOAT-01, FIN-CURRENCY-SEPARATION-01, EXPENSE-DECIMAL-01; DEC-009–015; forward-only dry run |
 | T05 | summary service from PaymentList; routes/hooks | FIN-EXPECTED-PENDING-01, FIN-EXPECTED-EXCLUDE-NONPENDING-01, FIN-RECEIVED-PAID-01, FIN-RECEIVED-EXCLUDE-UNPAID-01, FIN-NO-DOUBLE-REVENUE-01, FIN-AVAILABLE-01, FIN-AVAILABLE-NEGATIVE-01 |
 | T06 | expense domain | EXPENSE-CREATE-01, EXPENSE-LINKAGE-01, EXPENSE-AUDIT-01 |

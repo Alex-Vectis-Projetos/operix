@@ -39,3 +39,41 @@ Each ID is one deterministic Given/When/Then scenario. This is the frozen Fase1 
 ## Non-normative hardening
 
 Later tests cover concurrent duplicate settlement, payment/reversal race, expense retry, distribution concurrency, cross-tenant race, pending-to-paid during summary read, concurrent settlement/summary, currency isolation and reversal exactly once. T00.5 creates no tests.
+
+## DEC-016 HTTP / structural traceability
+
+| ID | Concrete interaction / assertion |
+|---|---|
+| FIN-EXPECTED-PENDING-01 | `GET /summary` → EUR `expected` |
+| FIN-EXPECTED-EXCLUDE-NONPENDING-01 | `GET /summary` → excludes non-pending Lists |
+| FIN-RECEIVED-PAID-01 | `GET /summary` → `received`; paid List has `paidAt` |
+| FIN-RECEIVED-EXCLUDE-UNPAID-01 | `GET /summary` → excludes non-paid Lists |
+| FIN-NO-DOUBLE-REVENUE-01 | `GET /summary` with legacy fixtures → List-only totals |
+| FIN-AVAILABLE-01 | POST expense/distribution/obligation/settle then `GET /summary` |
+| FIN-AVAILABLE-NEGATIVE-01 | `GET /summary` after effective outflows |
+| FIN-CURRENCY-SEPARATION-01 | `GET /summary` → EUR/GBP buckets only |
+| EXPENSE-CREATE-01 | POST `/expenses` → 201 ExpenseDTO |
+| EXPENSE-DECIMAL-01 | POST `/expenses` decimal string → normalized DTO |
+| EXPENSE-LINKAGE-01 | POST `/expenses` context tagged union |
+| EXPENSE-AUDIT-01 | POST `/expenses/:id/reverse` → immutable reversal |
+| EXPENSE-TENANT-01 | POST foreign context / GET foreign Expense → 404/no write |
+| EXPENSE-IDOR-01 | GET/reverse foreign `:expenseId` → 404 |
+| DIST-MANUAL-01 | POST `/distributions` → 201 |
+| DIST-NO-AUTO-RULE-01 | POST `/distributions` with legacy rule fixture → one manual DTO |
+| DIST-PARTICIPANT-01 | POST `/distributions` ParticipantDTO → canonical identity |
+| DIST-AUDIT-01 | POST `/distributions/:id/cancel` → auditable cancelled DTO |
+| DIST-TENANT-01 | POST foreign List/participant → 404/no write |
+| OBLIGATION-CREATE-01 | POST `/obligations` then `GET /summary` unchanged cash |
+| OBLIGATION-NO-FIXED-CADENCE-01 | POST `/obligations` → DTO has no schedule |
+| OBLIGATION-PAY-01 | POST `/:id/settle` → payment + paid state |
+| OBLIGATION-PAY-IDEMPOTENT-01 | retry settle same key → same payment, idempotent true |
+| OBLIGATION-TENANT-01 | foreign detail/action → 404/no mutation |
+| OBLIGATION-AUDIT-01 | POST settlement reversal → linked immutable evidence |
+| FIN-TECH-OWN-01 | technician GET distributions/obligations vs GET summary 403 |
+| FIN-CLIENT-INTERNAL-DENY-01 | operational positive control then finance GET 403 |
+| FIN-OWNER-SUMMARY-01 | owner GET `/summary` → 200 nonzero bucket |
+| FIN-CROSS-TENANT-01 | foreign concrete IDs → 404; own control → success |
+| FIN-WORKSPACE-SPOOF-01 | v2 request with spoof fields → scope A/reject, never B |
+| FIN-NO-FLOAT-01 | schema structural inspection + decimal-string v2 boundary |
+| FIN-NO-LEGACY-AUTHORITY-01 | summary fixture + targeted static dependency guard |
+| FIN-NO-SPEC004-MUTATION-01 | successful v2 mutation then snapshot invariant |

@@ -20,3 +20,4 @@
 * DEC-013 — Effective financial facts are corrected through actor/time/reason/original-linked cancel or reversal, never destructive rewrite.
 * DEC-014 — Finance aggregates are independent per ISO currency: no default EUR, FX engine or cross-currency total.
 * DEC-015 — Finance visibility requires authenticated workspace capability plus object authorization: linked technician own-only, client denied internal finance, and participant identity alone grants no access.
+* DEC-016 — The canonical HTTP surface is RequestContext-scoped `/api/finance/v2` REST resources/actions defined in `spec.md`; tenant and audit authority never come from transport fields.
