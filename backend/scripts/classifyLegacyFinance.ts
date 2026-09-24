@@ -75,10 +75,10 @@ async function runClassification(applyMode: boolean) {
   }
 
   // 4. ServiceOrderDistribution
-  const sods = await prisma.serviceOrderDistribution.findMany({ include: { serviceOrder: { select: { workspaceId: true } } } });
+  const sods = await prisma.serviceOrderDistribution.findMany();
   report.totals.serviceOrderDistribution = sods.length;
   for (const sod of sods) {
-    classify("ARCHIVE_ONLY", sod.serviceOrder?.workspaceId || null);
+    classify("ARCHIVE_ONLY", null);
   }
 
   // 5. Reconciliation
