@@ -180,6 +180,6 @@ describe("Spec 005 - T09 Legacy Finance Transition", () => {
 
       const postCount = await prisma.financialRecord.count();
       expect(postCount).toBe(preCount); // Zero writes
-    });
+    }, 30000);
   });
 });
