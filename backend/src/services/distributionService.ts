@@ -138,7 +138,7 @@ export async function cancelDistribution(ctx: RequestContext, distributionId: st
       const current = await tx.distribution.findFirst({ where: { id: distributionId, workspaceId } });
       if (!current) fail(404, "DISTRIBUTION_NOT_FOUND", "Distribuição não encontrada.");
       if (current.status !== "active") fail(409, "DISTRIBUTION_NOT_CANCELLABLE", "Distribuição não pode ser cancelada.");
-      if (await tx.financialObligation.findFirst({ where: { workspaceId, distributionId, status: "paid" }, select: { id: true } })) fail(409, "DISTRIBUTION_NOT_CANCELLABLE", "Distribuição não pode ser cancelada após liquidação.");
+      if (await tx.financialObligation.findFirst({ where: { workspaceId, distributionId, status: { in: ["pending", "paid", "reversed"] } }, select: { id: true } })) fail(409, "DISTRIBUTION_NOT_CANCELLABLE", "Distribuição possui obrigação vinculada.");
       const changed = await tx.distribution.updateMany({ where: { id: distributionId, workspaceId, status: "active" }, data: { status: "cancelled", cancelledAt: new Date(), cancelledByUserId: ctx.actorUserId, cancellationReason: input.reason.trim() } });
       if (changed.count !== 1) {
         const raced = await replay(tx, workspaceId, ctx.actorUserId, "distribution.cancel", idempotencyKey, requestHash);

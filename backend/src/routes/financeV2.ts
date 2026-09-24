@@ -5,6 +5,7 @@ import { resolveRequestContext } from "../middleware/requestContext.js";
 import { getFinanceSummary } from "../services/financeSummaryService.js";
 import { createExpense, FinanceError, getExpense, listExpenses, presentExpense, reverseExpense } from "../services/expenseService.js";
 import { cancelDistribution, createDistribution, getDistribution, listDistributions, presentDistribution } from "../services/distributionService.js";
+import { cancelObligation, createObligation, getObligation, listObligations, presentObligation, reversePayment, settleObligation } from "../services/obligationService.js";
 
 export const financeV2Router = Router();
 const money = z.string().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/);
@@ -27,10 +28,14 @@ const allocation = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("percentage"), percentage: money }).strict(),
 ]);
 const distributionSchema = z.object({ paymentListId: z.string().uuid(), paymentListItemId: z.string().uuid().nullable().optional(), participant, allocation }).strict();
+const obligationSchema = z.object({ distributionId: z.string().uuid() }).strict();
+const emptySchema = z.object({}).strict();
 function idempotencyKey(req: Request) { const value = req.header("Idempotency-Key")?.trim(); if (!value || value.length > 255) throw new FinanceError(422, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key é obrigatório."); return value; }
 function ctx(req: AuthenticatedRequest) { if (!req.ctx) throw new FinanceError(401, "REQUEST_CONTEXT_MISSING", "Contexto de requisição ausente."); return req.ctx; }
 function expenseId(req: Request) { const value = req.params.expenseId; return Array.isArray(value) ? value[0] : value; }
 function distributionId(req: Request) { const value = req.params.distributionId; return Array.isArray(value) ? value[0] : value; }
+function obligationId(req: Request) { const value = req.params.obligationId; return Array.isArray(value) ? value[0] : value; }
+function paymentId(req: Request) { const value = req.params.paymentId; return Array.isArray(value) ? value[0] : value; }
 // Finance v2 has no transport-level workspace selector: RequestContext must
 // resolve its normal active scope, never a query-string override.
 financeV2Router.use((req, _res, next) => {
@@ -69,6 +74,24 @@ financeV2Router.get("/distributions/:distributionId", requireAuth, resolveReques
 });
 financeV2Router.post("/distributions/:distributionId/cancel", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try { const result = await cancelDistribution(ctx(req), distributionId(req), reverseSchema.parse(req.body), idempotencyKey(req)); return res.json({ ...presentDistribution(result.distribution), idempotent: result.idempotent }); } catch (error) { return next(error); }
+});
+financeV2Router.post("/obligations", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try { const result = await createObligation(ctx(req), obligationSchema.parse(req.body).distributionId, idempotencyKey(req)); return res.status(result.idempotent ? 200 : 201).json({ ...presentObligation(result.obligation, result.distribution, result.payment), idempotent: result.idempotent }); } catch (error) { return next(error); }
+});
+financeV2Router.get("/obligations", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try { return res.json({ items: (await listObligations(ctx(req))).map(result => presentObligation(result.obligation, result.distribution, result.payment)) }); } catch (error) { return next(error); }
+});
+financeV2Router.get("/obligations/:obligationId", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try { const result = await getObligation(ctx(req), obligationId(req)); return res.json(presentObligation(result.obligation, result.distribution, result.payment)); } catch (error) { return next(error); }
+});
+financeV2Router.post("/obligations/:obligationId/cancel", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try { const result = await cancelObligation(ctx(req), obligationId(req), reverseSchema.parse(req.body), idempotencyKey(req)); return res.json({ ...presentObligation(result.obligation, result.distribution, result.payment), idempotent: result.idempotent }); } catch (error) { return next(error); }
+});
+financeV2Router.post("/obligations/:obligationId/settle", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try { emptySchema.parse(req.body); const result = await settleObligation(ctx(req), obligationId(req), idempotencyKey(req)); return res.json({ ...presentObligation(result.obligation, result.distribution, result.payment), idempotent: result.idempotent }); } catch (error) { return next(error); }
+});
+financeV2Router.post("/obligations/:obligationId/settlements/:paymentId/reverse", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try { const result = await reversePayment(ctx(req), obligationId(req), paymentId(req), reverseSchema.parse(req.body), idempotencyKey(req)); return res.json({ ...presentObligation(result.obligation, result.distribution, result.payment), idempotent: result.idempotent }); } catch (error) { return next(error); }
 });
 financeV2Router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
   if (error instanceof z.ZodError) return res.status(422).json({ error: { code: "FINANCE_VALIDATION_INVALID", message: "Payload financeiro inválido." } });
