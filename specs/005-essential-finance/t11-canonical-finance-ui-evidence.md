@@ -50,7 +50,14 @@ T11 delivers:
 
 ---
 
-## 4. Mutation Safety & Money Handling
+## 4. PaymentListDetail.tsx Change Classification
+- **Diff**: Addition of type import `PaymentListTransitionStatus` and explicit cast `action.toStatus as PaymentListTransitionStatus` in `src/components/payment-lists/PaymentListDetail.tsx`.
+- **Classification**: `TYPE_ALIGNMENT_ONLY` (Strictly non-behavioral TypeScript type alignment).
+- **Invariants Preserved**: Does not alter PaymentList transitions, confrontation decisions, recognized totals, claims, pending/paid semantics, or technician visibility.
+
+---
+
+## 5. Mutation Safety & Money Handling
 
 1. **Strict String Transport for Money**:
    - `amount` values in forms are maintained and validated as raw decimal strings (`"0.10"`, `"1500.50"`).
@@ -67,9 +74,9 @@ T11 delivers:
 
 ---
 
-## 5. Verification & Test Evidence
+## 6. Verification & Test Evidence
 
-### 5.1 T11 Focused UI Component & Contract Tests
+### 6.1 T11 Focused UI Component & Contract Tests
 - Test File: `tests/unit/finance-ui-contracts.test.tsx`
 - Results: **10/10 PASS**
   - `renders distinct currency buckets without combining them into a grand total`
@@ -83,27 +90,50 @@ T11 delivers:
   - `renders correct obligation action controls per lifecycle state`
   - `verifies static source code does not contain legacy financial authority`
 
-### 5.2 Frontend Suite & Quality Gates
-- `npx vitest run tests/unit/`: **62/62 PASS** across 5 files
+### 6.2 Frontend Suite & Quality Gates
+- T10 Client Contracts (`tests/unit/finance-v2-client-contracts.test.ts`): **11/11 PASS**
+- All Unit Suites in `tests/unit/` (5 test files): **62/62 PASS**
 - `npm run typecheck`: **PASS** (0 errors)
-- `npm run lint`: **PASS** (0 errors, 0 warnings from T11)
-- `npm run build`: **PASS** (Vite production bundle generated successfully)
+- `npm run lint`: **0 errors, 1 known unrelated warning** (`ProductionBoard.tsx`)
+- `npm run build`: **PASS** (Vite production bundle generated successfully in 58.39s)
 
-### 5.3 Backend Regressions & Normative Suite
-- Spec 005 Normative Suite (`tests/integration/essential-finance-red-baseline.test.ts`): **33/33 PASS**
+### 6.3 Prior Specifications Consolidated Baseline (Specs 001–004)
+
+| Spec | Canonical Test Inventory | Expected Count | Executed Count | Status | Notes |
+|---|---|---|---|---|---|
+| **Spec 001** | `foundation-security.test.ts`, `tenant-isolation.test.ts` | 17 | 17 | **17/17 PASS** | Foundation security & tenant boundaries |
+| **Spec 002** | `budget-production-flow.test.ts` | 59 | 59 | **59/59 PASS** | Budget revision & production order lineage |
+| **Spec 003** | `weeklog-operational-flow.test.ts`, `service-orders-legacy-sanitization.test.ts`, `tests/unit/weeklog-frontend-contracts.test.ts` | 137 | 137 | **137/137 PASS** | Weeklog lifecycle & legacy sanitization |
+| **Spec 004** | `payment-list-schema.test.ts`, `payment-list-invariants.test.ts`, `payment-list-import.test.ts`, `commercial-confrontation.test.ts`, `external-weeklog-import.test.ts`, `legacy-payment-order-transition.test.ts`, `tests/unit/payment-list-frontend-contracts.test.ts`, `tests/unit/payment-list-ui-contracts.test.ts` | 127 | 127 | **127/127 PASS** | Commercial reconciliation & confrontation |
+| **Total Baseline** | **13 files** | **340** | **340** | **340/340 PASS** | Complete historical baseline verified |
+
+*Reconciliation Note*: The previous mention of 299 tests reflected running `tests/integration/` without the 3 unit contract files in `tests/unit/` (`weeklog-frontend-contracts.test.ts` [21], `payment-list-frontend-contracts.test.ts` [10], `payment-list-ui-contracts.test.ts` [10]). Consolidated execution across all canonical files confirms 299 + 41 = **340/340 PASS**.
+
+### 6.4 Spec 005 Backend Regressions & Normative Suite
+- Spec 005 Normative Suite (`tests/integration/essential-finance-red-baseline.test.ts`): **33/33 GREEN**
 - T09 Legacy Transition Suite (`tests/integration/essential-finance-legacy-transition.test.ts`): **5/5 PASS**
 - T08 Obligations & Settlement Suite (`tests/integration/essential-finance-obligations.test.ts`): **7/7 PASS**
 - T07 Manual Distributions Suite (`tests/integration/essential-finance-distributions.test.ts`): **7/7 PASS**
 - T06 Expenses Ledger Suite (`tests/integration/essential-finance-expenses.test.ts`): **7/7 PASS**
 - T05 Summary Projections Suite (`tests/integration/essential-finance-summary.test.ts`): **8/8 PASS**
 - Schema Constraints Suite (`tests/integration/essential-finance-schema.test.ts`): **7/7 PASS**
-- Specs 001–004 Regressions: **299/299 PASS**
-- Backend Typecheck & Build: **PASS**
-- Prisma Schema Validation: **PASS**
+
+### 6.5 Full Repository Serial Aggregate
+- Command: `npx vitest run --fileParallelism=false`
+- Total Test Files: **27 passed (27)**
+- Total Tests: **454 passed (454)**
+- Passes: **454** | Failures: **0** | Errors: **0** | Skip: **0** | Todo: **0**
+
+### 6.6 Backend Quality, Schema & Migration Status
+- Backend Typecheck (`npm --prefix backend run typecheck`): **PASS** (0 errors)
+- Backend Build (`npm --prefix backend run build`): **PASS** (0 errors)
+- Prisma Schema Validation (`prisma validate`): **PASS** (Schema is valid 🚀)
+- Prisma Migration Status (`prisma migrate status`): **11 migrations found; database schema is up to date**
+- Schema / Migrations Diff Guard (`git diff 46afcf20..HEAD -- backend/prisma`): **Empty (0 diff)**
 
 ---
 
-## 6. Source Audit & Legacy Removal
+## 7. Source Audit & Legacy Authority Removal
 
 Static and dynamic source audit confirmed zero references in active Finance screens to:
 - `apiFinance.ts`
