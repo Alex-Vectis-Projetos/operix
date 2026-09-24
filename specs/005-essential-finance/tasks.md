@@ -7,7 +7,7 @@
 | T05 | **COMPLETE** — canonical summary service and authenticated `/api/finance/v2/summary` route | Focused 8/8, schema 7/7, serial Specs001–004 340/340; evidence: `t05-finance-summary-evidence.md` |
 | T06 | **COMPLETE** — canonical Expense create/read/reversal lifecycle | Focused 7/7, T05 8/8, schema 7/7, normative 21 GREEN / 12 legitimate future RED; evidence: `t06-expense-evidence.md` |
 | T07 | **COMPLETE** — canonical manual Distribution create/read/cancel lifecycle | Focused 7/7, T06 7/7, T05 8/8, schema 7/7, normative 26 GREEN / 7 legitimate future RED; evidence: `t07-distribution-evidence.md` |
-| T08 | full obligations/settlements | OBLIGATION-CREATE-01, OBLIGATION-NO-FIXED-CADENCE-01, OBLIGATION-PAY-01, OBLIGATION-PAY-IDEMPOTENT-01, OBLIGATION-AUDIT-01 |
+| T08 | **COMPLETE** — full obligations/settlements | Focused 7/7, T07 7/7, T06 7/7, T05 8/8, schema 7/7, normative 33/33 GREEN, Specs001–004 340/340; evidence: `t08-obligation-settlement-evidence.md` |
 | T09 | legacy retirement/migration | FIN-NO-LEGACY-AUTHORITY-01; report ambiguous rows, no reverse sync |
 | T10/T11 | typed client/UI | FIN-TECH-OWN-01, FIN-CLIENT-INTERNAL-DENY-01, FIN-OWNER-SUMMARY-01 |
 | T12 | regression/security/handoff | FIN-NO-SPEC004-MUTATION-01 plus all 33 normative scenarios, migration rehearsal and authenticated smoke evidence |
