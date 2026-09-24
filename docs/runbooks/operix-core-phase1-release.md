@@ -13,9 +13,10 @@ This runbook governs the deployment, verification, and contingency rollback for 
 
 ## 2. Pre-Deployment Checklist
 Prior to triggering deployment, verify:
-- [ ] Database backup snapshot completed and validated for recovery.
+- [ ] Database backup snapshot completed and validated for recovery (Local rehearsal verified: `LOCAL_DATABASE_RESTORE_REHEARSED`; staging execution pending: `STAGING_BACKUP_RESTORE_PENDING_EXTERNAL_ACCESS`).
 - [ ] Git commit SHA corresponds to approved Phase 1 Release Candidate (`feat/005-essential-finance`).
 - [ ] Environment variables verified in target environment secret manager (see Section 3).
+- [ ] Staging prerequisites available: VPS SSH/panel access, PostgreSQL 16 endpoint, DNS/routing, S3/MinIO credentials, runtime secrets, authorized accounts (`STAGING_BLOCKED_EXTERNAL_DEPENDENCY`).
 - [ ] Active maintenance window scheduled or traffic drain prepared.
 - [ ] Zero uncommitted migrations; migration status reports clean up to `20260923140000_spec005_essential_finance_domain`.
 

@@ -102,12 +102,17 @@ During homologation review, please note that the following items are **intention
 
 ---
 
-## 4. Client Sample Dependencies
+## 4. Homologation Dependencies & Requested Materials
 
-To complete full homologation of edge cases with VECTIS data, the following client samples are requested:
-1. **Representative Payment List Documents**: Real sample PDF / Excel payment lists from insurance or fleet clients for OCR / import testing.
-2. **External WEEKLOG Sheets**: Sample weekly operational files used for staging and coverage validation.
-3. **Known Divergence Cases**: Real-world examples of disputed labor or paint line items for commercial confrontation validation.
+To execute business homologation against real operational scenarios, the following contractual items are required:
+1. **Representative WEEKLOGs**: Historical or synthetic weekly production batches with real operational structure.
+2. **Representative Lists**: Commercial payment lists for staging and confrontation validation.
+3. **Documents / Vehicle Data**: Representative vehicle and damage documentation for end-to-end operational flow verification.
+4. **Import/OCR Source Formats Where Applicable**: Source formats utilized by client organizations *(OPTIONAL example: sample PDF or Excel lists from fleet/insurance clients)*.
+5. **Confrontation/Divergence Scenarios**: Discrepancy test cases *(OPTIONAL example: contested paint or labor line items)*.
+6. **Validation of Financial Business Rules**: Confirmation of operational financial rules *(OPTIONAL example: technician split models or tax withholding policies)*.
+7. **Authorized VECTIS Homologation Contact**: Designated stakeholder with authority to sign off on acceptance rounds.
+8. **Required Infrastructure / Storage / Service Credentials**: Target staging environment access and MinIO/S3 object storage credentials.
 
 ---
 
