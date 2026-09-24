@@ -4,8 +4,8 @@
 This runbook governs the deployment, verification, and contingency rollback for **Operix Core — Phase 1 (Release Candidate 1)** across staging and production environments.
 
 - **Artifacts Included**:
-  - Backend API: Express server (`qw-nexus-api`)
-  - Frontend SPA: React + Vite application
+  - Backend API: Express server (`qw-nexus-api`) with Multer 2.3.0 and Nodemailer 9.1.1 security baselines
+  - Frontend SPA: React + Vite application with MapLibre GL 6.4.1 XSS remediation
   - Database: PostgreSQL with Prisma schema & versioned migrations (11 migrations)
   - Object Storage: MinIO / S3 compatible storage for documents, import artifacts, and validation signatures
 

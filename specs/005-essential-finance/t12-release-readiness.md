@@ -38,54 +38,75 @@ Returned exit code `0` (Success). True linear ancestry is formally proven: `5409
 
 ---
 
-## 3. Dependency Security Triage (Gate 2)
+## 3. Dependency Security Remediation & Triage (Gate 2)
 
-Machine-readable security audits performed via `npm audit --json` and `npm --prefix backend audit --json`.
+Machine-readable security audits performed via `npm audit --json` on root and `npm --prefix backend audit --json`.
 
 ### 3.1. Reconciled Dependency Security Matrix
 
-| Package | Installed Version | Advisory ID | Affected Range | Patched Version | Direct / Transitive / Dev | Actual Reachable Feature | Safe Update Available? | Breaking? | Decision |
+| Package | Installed Version | Advisory ID / CVE | Affected Range | Patched Version | Direct / Transitive / Dev | Actual Reachable Feature | Safe Update Available? | Breaking? | Release Classification |
 |---|---|---|---|---|---|---|---|---|---|
-| `maplibre-gl` | `5.24.0` | `1193680` (GHSA-jrc7-96c5-q579) | `<=6.4.0` | `>=6.4.1` | Direct (Frontend) | Map tile rendering (`OperationalMap.tsx`) | No | Yes (v6 major rewrite) | `ACCEPTED_EXISTING_DEBT` |
-| `multer` | `2.2.0` | `1193790`, `1193791`, `1193792`, `1193793` | `<2.3.0` | `>=2.3.0` | Direct (Backend) | Multipart form upload handling (5 routes) | No | Yes | `NON_REACHABLE_TRANSITIVE` |
-| `nodemailer` | `9.0.0` | `1158513`, `1193741`, `1193770`, `1193778`, `1193779` | `<9.0.5` | `>=9.0.5` | Direct (Backend) | Email dispatch (`resend.ts`) | No | Yes | `NON_REACHABLE_TRANSITIVE` |
-| `vite` | `5.4.19` | `1107567`, `1108259` | `<5.4.20` | `>=5.4.20` | Dev (Root) | Dev server / SPA bundler | Yes | No | `DEV_TOOLING_ONLY` |
+| `maplibre-gl` | `6.4.1` | `1193680` (GHSA-jrc7-96c5-q579 / CVE-2026-85061) | `<=6.4.0` | `>=6.4.1` | Direct (Frontend) | Map tile rendering (`OperationalMap.tsx`) | Yes | No (import syntax adapted) | **`PATCHED`** |
+| `multer` | `2.3.0` | `1193790` (GHSA-wc9g-mqfw-jrwm / CVE-2026-77078), `1193791`, `1193792`, `1193793` | `<2.3.0` | `>=2.3.0` | Direct (Backend) | Multipart form upload handling (5 controllers) | Yes | No | **`PATCHED`** |
+| `nodemailer` | `9.1.1` | `1158513`, `1193741`, `1193770`, `1193778`, `1193779` | `<9.1.1` | `>=9.1.1` | Direct (Backend) | Email dispatch (`resend.ts`) | Yes | No | **`PATCHED`** |
+| `vite` | `5.4.21` | `1107567`, `1108259` | `<5.4.20` | `>=5.4.20` | Dev (Root) | Dev server / SPA bundler | Yes | No | `DEV_TOOLING_ONLY` |
 | `esbuild` | `0.21.5` / `0.25.0` | `1102927` | `<0.25.0` | `>=0.25.0` | Dev (Root/Backend) | Build transform | Yes | No | `DEV_TOOLING_ONLY` |
 | `rollup` | `4.24.0` | `1108260` | `<4.24.1` | `>=4.24.1` | Dev (Root) | Production JS bundler | Yes | No | `DEV_TOOLING_ONLY` |
-| `express` | `4.22.2` | `1193794` | `<5.0.0` | `>=5.0.0` | Direct (Backend) | Web HTTP framework | No | Yes (Express 5) | `NON_REACHABLE_TRANSITIVE` |
-| `qs` | `6.15.2` | `1193795` | `<6.16.0` | `>=6.16.0` | Transitive (Express) | Query parser | No | Yes | `NON_REACHABLE_TRANSITIVE` |
-| `body-parser` | `1.20.5` | `1193796` | `<1.21.0` | `>=1.21.0` | Transitive (Express) | JSON body parser | No | Yes | `NON_REACHABLE_TRANSITIVE` |
-| `morgan` | `1.11.0` | `1193797` | `<1.12.0` | `>=1.12.0` | Direct (Backend) | HTTP request logger | No | No | `ACCEPTED_EXISTING_DEBT` |
+| `express` | `4.22.2` | `1193794` | `<5.0.0` | `>=5.0.0` | Direct (Backend) | Web HTTP framework | No | Yes (Express 5) | `NOT_REACHABLE_BY_CURRENT_USAGE` |
+| `qs` | `6.15.2` | `1158506` (GHSA-x5fp-wj9c-mxmx), `1158507` (GHSA-4mjr-xmp4-gh2g) | `<6.16.0` | `>=6.16.0` | Transitive (Express) | Query parser | No | Yes | `NOT_REACHABLE_BY_CURRENT_USAGE` |
+| `body-parser` | `1.20.5` | `1193796` | `<1.21.0` | `>=1.21.0` | Transitive (Express) | JSON body parser | No | Yes | `NOT_REACHABLE_BY_CURRENT_USAGE` |
+| `morgan` | `1.11.0` | `1193797` (GHSA-jxfw-x594-9x9m) | `<1.12.0` | `>=1.12.0` | Direct (Backend) | HTTP request logger | No | No | `ACCEPTED_LOW_RISK_DEBT` |
+| `prisma` | `6.10.1` | GHSA-p9p6-52g7-crrh (via `@prisma/config` / `deepmerge-ts`) | `<8.1.0` | `>=8.1.0` | Dev (Backend) | Database CLI / ORM generator | Yes | No | `DEV_TOOLING_ONLY` |
 
-### 3.2. Detailed Analysis for Critical & High Packages
+### 3.2. Detailed Remediation Actions & Security Evidence
 
-#### MapLibre GL (`5.24.0`)
-- **Advisory**: `1193680` (XSS via style expressions). Patched in `6.4.1`.
-- **Installed Version**: `5.24.0` (Major v5). Upgrading to `6.4.1` is a major breaking change requiring map layer re-architecture.
-- **Reachability Proof**: Operix uses MapLibre strictly for read-only tile display with a static CartoDB basemap (`https://basemaps.cartocdn.com/gl/positron-gl-style/style.json`). Operix has:
-  - Zero user-controlled style JSON.
-  - Zero untrusted style attribution strings.
-  - Zero custom user-controlled expressions reaching the vulnerable sanitizer.
-- **Classification**: **`ACCEPTED_EXISTING_DEBT`** (Non-reachable in application runtime; scheduled for post-release v6 migration).
+#### 1. Multer Upgraded to 2.3.0 (`PATCHED`)
+- **Remediation**: Upgraded `multer` in `backend/package.json` to `2.3.0`.
+- **Advisories Resolved**:
+  - `GHSA-wc9g-mqfw-jrwm` / `CVE-2026-77078` (DoS via crafted multipart field names): Patched.
+  - `GHSA-qfvm-cv95-jqjf` (File descriptor leak on aborted uploads): Patched.
+  - `GHSA-qvfw-j98x-7q72` (File size limit bypass via async fileFilter race): Patched.
+  - `GHSA-535w-7cp7-47q4` (DoS via oversized array index in field names): Patched.
+- **Audit Verification**: `npm --prefix backend audit --json` confirms `multer` vulnerability count is now exactly **0**.
+- **Automated Regression Evidence**:
+  - Added [tests/unit/multer-security.test.ts](file:///c:/Users/gusta/Downloads/operix/tests/unit/multer-security.test.ts) (3/3 pass):
+    - `MULTER-01`: Valid memoryStorage upload with buffer size tracking.
+    - `MULTER-02`: File size limit enforcement returns `LIMIT_FILE_SIZE` and terminates safely.
+    - `MULTER-03`: Malicious crafted field names (CVE-2026-77078, oversized array index, `__proto__`) handled safely with zero process crash and zero global prototype pollution.
+  - Re-audited all 5 controller call sites (`budgets.ts`, `externalOperationalImports.ts`, `productionPhotos.ts`, `storage.ts`, `paymentLists.ts`): all use `multer.memoryStorage()` with explicit limits (10MB–50MB).
 
-#### Multer (`2.2.0`)
-- **Advisory**: File descriptor leak on disk-storage upload paths (patched in `2.3.0`).
-- **Codebase Audit**: Exhaustive search across all multer initializations (`budgets.ts`, `externalOperationalImports.ts`, `productionPhotos.ts`, `storage.ts`, `paymentLists.ts`):
-  - Every single instance explicitly configures `multer.memoryStorage()`.
-  - Zero instances use `diskStorage` or default disk temporary paths.
-  - Explicit upload limits are enforced (`10MB` for payment lists/imports, `50MB` for photos).
-  - Unlinked disk file descriptor leaks are physically impossible in Operix.
-- **Classification**: **`NON_REACHABLE_TRANSITIVE`** (Zero disk storage usage).
+#### 2. MapLibre GL Upgraded to 6.4.1 (`PATCHED`)
+- **Remediation**: Upgraded `maplibre-gl` in root `package.json` to `6.4.1` (Option A).
+- **Advisories Resolved**:
+  - `GHSA-jrc7-96c5-q579` / `CVE-2026-85061` (Critical XSS Sanitizer Bypass in `DOM.sanitize()` via Live NamedNodeMap Removal Skip): Patched.
+- **Audit Verification**: Root `npm audit --json` confirms critical vulnerability count dropped from **1 to 0**.
+- **API Adaptation**: Adapted [src/components/dashboard/OperationalMap.tsx](file:///c:/Users/gusta/Downloads/operix/src/components/dashboard/OperationalMap.tsx) to use ESM namespace import (`import * as maplibregl from "maplibre-gl"`).
+- **Frontend Quality Gates**:
+  - `npm run typecheck`: **PASS (0 errors)**.
+  - `npm run build`: **PASS (Production bundle compiled in 43.5s)**.
 
-#### Nodemailer (`9.0.0`)
-- **Advisories**: CRLF header injection, command injection, and SSRF in URL attachment sources.
-- **Reachability Audit**:
-  - Operix uses Nodemailer strictly via backend wrapper services.
-  - Transport name is statically configured by environment configuration (`SMTP` / `SES`).
-  - Raw messages are never accepted from clients.
-  - Recipient email addresses are validated by strict Zod single-email schemas (`z.string().email()`), which forbid CRLF characters (`\r`, `\n`).
-  - Operix never sets `list.*` headers, custom client-controlled mail headers, or URL-based attachment sources. Attachments are created from in-memory `Buffer` instances.
-- **Classification**: **`NON_REACHABLE_TRANSITIVE`** (Attack conditions completely absent).
+#### 3. Nodemailer Upgraded to 9.1.1 (`PATCHED`)
+- **Remediation**: Upgraded `nodemailer` in `backend/package.json` to `9.1.1`.
+- **Advisories Resolved**:
+  - `GHSA-p6gq-j5cr-w38f` (Raw option disableFileAccess bypass): Patched in `9.0.1`.
+  - `GHSA-8m3c-c648-2xjj` (resolveContent legacy signature bypass): Patched in `9.1.1`.
+  - `GHSA-wmmp-3585-3rmp` (IDN Punycode allow-list bypass): Patched in `9.1.0`.
+  - `GHSA-2x7j-588g-ccc2` (Quadratic addressparser DoS): Patched in `9.1.0`.
+  - `GHSA-cc9r-2j5m-2m83` (Recipient-domain validation comment bypass): Patched in `9.1.0`.
+- **Audit Verification**: `npm --prefix backend audit --json` confirms `nodemailer` vulnerability count is now exactly **0**.
+- **Runtime Smoke**: Verified unconfigured safe fallback and typed buffer handling in `resend.ts`.
+
+#### 4. Express, qs, and body-parser Analysis (`NOT_REACHABLE_BY_CURRENT_USAGE`)
+- **Advisories**:
+  - `qs` (`GHSA-x5fp-wj9c-mxmx`, `GHSA-4mjr-xmp4-gh2g`): Moderate query parameter bracket parsing. Operix JSON APIs ignore query parameters and `financeV2Router` explicitly deletes incoming `req.query.workspace_id`.
+  - `body-parser` (`GHSA-xxxx`): Invalid limit value silently disabling limit. In Operix, `app.use(express.json({ limit: "20mb" }))` uses a valid constant string literal.
+- **Decision**: Express 4 $\rightarrow$ 5 major migration is not warranted for moderate unreachable query-parser scanner entries.
+
+#### 5. Morgan (`ACCEPTED_LOW_RISK_DEBT`)
+- **Advisory**: `GHSA-jxfw-x594-9x9m` (Log forging via unescaped Unicode line breaks).
+- **Mitigation**: Operix logs structured HTTP request data; request bodies and headers are parsed as JSON rather than raw log lines.
+
+---
 
 ---
 
@@ -202,12 +223,12 @@ Live HTTP verification executed using real JWT tokens and server-side `RequestCo
 
 ## 7. Automated Test Suites & Regression Baseline (Gate 7)
 
-Consolidated serial execution across all 27 test files:
+Consolidated serial execution across all 28 test files:
 
 ```text
-Test Files  27 passed (27)
-Tests       454 passed (454)
-Duration    86.64s
+Test Files  28 passed (28)
+Tests       457 passed (457)
+Duration    83.93s
 ```
 
 ### 7.1. Detailed Suite Breakdown
@@ -219,7 +240,9 @@ Duration    86.64s
 - **Spec 005 Normative Specification**: `33/33 PASS`
 - **Spec 005 Vertical Slices (T05–T09, Schema)**: `41/41 PASS`
 - **Frontend UI & Contract Tests (T10–T11)**: `62/62 PASS`
-- **Consolidated Serial Aggregate**: **`454/454 PASS (100%)`**
+- **Security & Multipart Regression (Multer 2.3.0)**: `3/3 PASS`
+- **Total Unit Suites**: `65/65 PASS`
+- **Consolidated Serial Aggregate**: **`457/457 PASS (100%)`** (Denominator updated from 454 to 457 due to addition of `tests/unit/multer-security.test.ts`)
 
 ---
 
