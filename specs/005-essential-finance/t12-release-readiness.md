@@ -4,9 +4,8 @@
 This document records the final verification, security audit, migration rehearsal, and release readiness evidence for **Operix Core — Phase 1 (Spec 001 through Spec 005)**.
 
 - **Branch**: `feat/005-essential-finance`
-- **T11 Approved Baseline**: `54098256619f3cfa53aff443cdf7e4803c166f39`
-- **Release Candidate Version**: Phase 1 Release Candidate 1 (RC1)
-- **Status**: **SPEC 005 T12 TECHNICAL PASSED — OPERIX CORE PHASE 1 RELEASE CANDIDATE VERIFIED — STAGING / HOMOLOGATION PENDING EXTERNAL DEPENDENCIES**
+- **Release Candidate Baseline**: Phase 1 Release Candidate 1 (RC1)
+- **Status**: **SPEC 005 T12 TECHNICAL PASSED — OPERIX CORE PHASE 1 RELEASE CANDIDATE VERIFIED — FRESH MIGRATION + AUTHENTICATED LOCAL SMOKE VERIFIED — STAGING / VECTIS HOMOLOGATION PENDING EXTERNAL DEPENDENCIES**
 
 ---
 
@@ -45,93 +44,107 @@ The following capabilities are deliberately out of scope for Phase 1 Essential F
 
 ---
 
-## 4. Fresh Environment Rehearsal & Database Verification
+## 4. Truly Fresh Environment Rehearsal & Database Verification
 
 ### 4.1. Migration Replay from Zero
-- Executed against disposable PostgreSQL 16 container (`operix_local:55432`).
-- Command: `npx prisma migrate status --schema=backend/prisma/schema.prisma`
-- Result: **11 migrations found in prisma/migrations. Database schema is up to date!**
-- Drift: Zero drift.
-- Migration Count: Exactly 11 forward-only migrations. No migration 12.
+- Executed against a brand-new, isolated PostgreSQL 16 container (`operix-spec005-t12-fresh` on port `55433`).
+- Command: `npx --prefix backend prisma migrate deploy --schema=backend/prisma/schema.prisma`
+- Result: **All 11 migrations applied successfully from an empty database**:
+  1. `20260814000000_init_baseline`
+  2. `20260814130000_add_customer_display_id`
+  3. `20260914150000_spec_002_mobile_operation_budget_production`
+  4. `20260917000000_add_weeklog_canonical_domain_and_versioned_rectification`
+  5. `20260917100000_strengthen_spec002_budget_lineage_constraints`
+  6. `20260917110000_spec_003_weeklog_validation_round_lifecycle`
+  7. `20260917120000_fix_legacy_weeklog_validation_semantics`
+  8. `20260921120000_spec004_payment_list_domain`
+  9. `20260921130000_spec004_relational_hardening`
+  10. `20260921140000_spec004_import_staging_unblock`
+  11. `20260923140000_spec005_essential_finance_domain`
+- Status: **11 migrations found; database schema is up to date; no drift; no manual SQL; no migration 12.**
+- Schema Validation: `The schema at backend\prisma\schema.prisma is valid 🚀`.
 
-### 4.2. Schema Validation
-- Command: `npx prisma validate --schema=backend/prisma/schema.prisma`
-- Result: `The schema at backend\prisma\schema.prisma is valid 🚀`
-- Git Diff: `git diff 46afcf20..HEAD -- backend/prisma` is completely **empty**.
+### 4.2. Fresh-DB Verification Run
+- Executed against the new database on port `55433`:
+  - `essential-finance-schema.test.ts`: **7/7 PASS**
+  - `essential-finance-red-baseline.test.ts`: **33/33 PASS**
+  - `foundation-security.test.ts`: **7/7 PASS**
+  - Total: **47/47 PASS**
 
-### 4.3. Pre-Spec005 Upgrade Path
-- Immediately prior migration: `20260921140000_spec004_import_staging_unblock`
-- Spec005 migration: `20260923140000_spec005_essential_finance_domain`
-- All legacy financial tables (`financial_records`, `financial_events`, `profit_rules`, `reconciliations`) are preserved intact as non-authoritative read-only archives.
+### 4.3. Legacy Classifier Execution on Fresh Environment
+- `npx tsx backend/scripts/classifyLegacyFinance.ts` (dry-run): Read database, 0 writes, verified `ARCHIVE_ONLY` classification.
+- `npx tsx backend/scripts/classifyLegacyFinance.ts --apply` (negative apply control): Returned `Apply mode has no deterministic safe migrations to execute. Classification only.` with zero writes (`NO_SAFE_AUTOMATIC_MIGRATION`).
 
-### 4.4. Legacy Classifier Execution
-- Command: `npx tsx backend/scripts/classifyLegacyFinance.ts`
-- Result: Mode `dry-run`, zero database writes, explicit `ARCHIVE_ONLY` classification for historical profit rules and financial records.
-- Negative Apply Control: `npx tsx backend/scripts/classifyLegacyFinance.ts --apply` confirmed `NO_SAFE_AUTOMATIC_MIGRATION` (zero writes performed).
+### 4.4. Container Cleanup
+- `operix-spec005-t12-fresh` container stopped, removed, and verified non-existent after verification.
 
 ---
 
-## 5. Automated Regression Test Results
+## 5. Local Authenticated Runtime HTTP Smoke
 
-### 5.1. Summary Overview
-- **Prior Specs Consolidated (Spec 001–004)**: **340/340 PASS (100%)**
+Verified against live Express HTTP listener with real network fetch calls:
+
+1. **Owner / Admin HTTP Smoke**:
+   - `GET /api/finance/v2/summary`: **200 OK**
+   - `GET /api/finance/v2/expenses`: **200 OK**
+   - Mutation chain: `POST /api/finance/v2/expenses` (`250.75 BRL`) -> **201 Created** $\rightarrow$ `POST /api/finance/v2/expenses/:id/reverse` -> **200 OK (`status: reversed`)**.
+2. **Linked Technician HTTP Smoke**:
+   - `GET /api/finance/v2/summary`: **403 Forbidden** (Denied)
+   - `GET /api/finance/v2/expenses`: **403 Forbidden** (Denied)
+   - `GET /api/finance/v2/distributions`: **200 OK** (Own participant scope only)
+3. **Personal Workspace Owner HTTP Smoke**:
+   - `GET /api/finance/v2/summary` (Actor with technician global identity who is Owner in personal workspace): **200 OK** (Ownership preserved).
+4. **Client HTTP Smoke**:
+   - `GET /api/payment-lists` (Operational positive control): **200 OK**
+   - `GET /api/finance/v2/summary` (Internal finance denial): **403 Forbidden**
+5. **Cross-Tenant HTTP Smoke**:
+   - Workspace A user attempting `X-Workspace-Id` spoofing for Workspace B: **403 Forbidden**
+   - Workspace A user attempting foreign ID lookup: **404 Not Found** (Zero entity details leaked).
+
+---
+
+## 6. Frontend Runtime & Responsive Status
+
+- **UI Runtime Status**: `UI_RUNTIME_SMOKE_NOT_EXECUTED — AUTOMATED COMPONENT CONTRACTS PASSED`
+- **Responsive Claim**: `RESPONSIVE DESIGN COVERED BY COMPONENT/LAYOUT IMPLEMENTATION; MANUAL STAGING HOMOLOGATION REQUIRED`
+- **Frontend Verification Evidence**:
+  - `tests/unit/finance-ui-contracts.test.tsx`: **10/10 PASS**
+  - `tests/unit/finance-v2-client-contracts.test.ts`: **11/11 PASS**
+  - All unit suites: **62/62 PASS**
+  - Production build: `npm run build` completed successfully (5333 modules transformed).
+
+---
+
+## 7. Automated Test Suites Baseline
+
+- **Prior Specifications Consolidated (Specs 001–004)**: **340/340 PASS (100%)**
+  - Spec 001: 17/17 PASS
+  - Spec 002: 59/59 PASS
+  - Spec 003: 137/137 PASS
+  - Spec 004: 127/127 PASS
 - **Spec 005 Normative Suite**: **33/33 GREEN (100%)**
-- **Spec 005 Backend Vertical Suites**: **41/41 PASS (100%)**
-- **Unit & Contract Suites**: **62/62 PASS (100%)**
-- **Full Serial Aggregate**: **454/454 PASS (100%)** across 27 files
-
-### 5.2. Breakdown by Specification Suite
-
-| Specification / Suite | Target Test Files | Test Count | Result |
-|---|---|---|---|
-| **Spec 001** (Foundation & Tenancy) | `foundation-security.test.ts`, `tenant-isolation.test.ts` | 17 | **17/17 PASS** |
-| **Spec 002** (Budget -> Production) | `budget-production-flow.test.ts` | 59 | **59/59 PASS** |
-| **Spec 003** (WEEKLOG & Rectification) | `weeklog-operational-flow.test.ts`, `service-orders-legacy-sanitization.test.ts`, `tests/unit/weeklog-frontend-contracts.test.ts` | 137 | **137/137 PASS** |
-| **Spec 004** (PaymentList & Confrontation) | `payment-list-schema.test.ts`, `payment-list-invariants.test.ts`, `payment-list-import.test.ts`, `commercial-confrontation.test.ts`, `external-weeklog-import.test.ts`, `legacy-payment-order-transition.test.ts`, `tests/unit/payment-list-frontend-contracts.test.ts`, `tests/unit/payment-list-ui-contracts.test.ts` | 127 | **127/127 PASS** |
-| **Spec 005 Normative Baseline** | `essential-finance-red-baseline.test.ts` | 33 | **33/33 GREEN** |
-| **Spec 005 T09 Legacy Transition** | `essential-finance-legacy-transition.test.ts` | 5 | **5/5 PASS** |
-| **Spec 005 T08 Obligations & Settle** | `essential-finance-obligations.test.ts` | 7 | **7/7 PASS** |
-| **Spec 005 T07 Manual Distributions** | `essential-finance-distributions.test.ts` | 7 | **7/7 PASS** |
-| **Spec 005 T06 Expenses Ledger** | `essential-finance-expenses.test.ts` | 7 | **7/7 PASS** |
-| **Spec 005 T05 Finance Summary** | `essential-finance-summary.test.ts` | 8 | **8/8 PASS** |
-| **Spec 005 Schema Constraints** | `essential-finance-schema.test.ts` | 7 | **7/7 PASS** |
-| **Spec 005 T11 Canonical UI** | `tests/unit/finance-ui-contracts.test.tsx` | 10 | **10/10 PASS** |
-| **Spec 005 T10 Frontend Client** | `tests/unit/finance-v2-client-contracts.test.ts` | 11 | **11/11 PASS** |
-| **Other Unit Suites** | `apiBudgets.test.ts`, `budgetPdf.test.ts`, `productionWorkflowStatus.test.ts`, `example.test.ts` | 19 | **19/19 PASS** |
-| **Consolidated Serial Aggregate** | **All 27 Test Files** | **454** | **454/454 PASS** |
-
-### 5.3. Parallel Runner Debt
-- When executing tests in parallel against a single shared test database, `essential-finance-summary.test.ts` experienced unique-constraint collisions on shared fixture email records (`tech@t`).
-- In the authoritative serial execution (`--fileParallelism=false`), all 454 tests in all 27 files pass with zero failures.
+- **Spec 005 Vertical Backend Suites**: **41/41 PASS (100%)** (T05: 8/8, T06: 7/7, T07: 7/7, T08: 7/7, T09: 5/5, Schema: 7/7)
+- **Consolidated Serial Aggregate**: **454/454 PASS (100%)** across 27 files (`npx vitest run --fileParallelism=false`).
+- **Parallel Runner Note**: Concurrency table locking on shared fixture setups occurs during parallel execution; serial aggregate is authoritative and 100% green.
 
 ---
 
-## 6. Security Release Audit
+## 8. Broadened Secrets & Security Audit
 
-1. **Authentication (Zero-Trust JWT)**: All canonical endpoints require valid bearer tokens. Missing or forged tokens return HTTP 401.
-2. **Tenant Isolation & Spoofing**: `workspaceId` headers, query parameters, or body attributes cannot spoof tenancy; claims derive strictly from verified server-side JWT membership. Cross-tenant access returns 403 or 404 (zero data leakage).
-3. **IDOR / BOLA Prevention**: Direct entity access checks verify workspace ownership at the database query level. Accessing foreign workspace entities yields 404.
-4. **Mass Assignment**: Audit timestamps (`createdAt`, `paidAt`, `reversedAt`), creator identities, and resolved monetary amounts are calculated strictly on the backend.
-5. **Money Precision**: All financial amounts use PostgreSQL `Decimal(12, 2)` or `Decimal(15, 2)`. Zero floating point arithmetic is used in domain calculations.
-6. **Idempotency**: Composite unique constraints (`@@unique([workspaceId, actorUserId, actionNamespace, idempotencyKey])`) protect financial mutations from double-submit or retry duplication.
-7. **Legacy Authority Retirement**: Retired `/financial-records`, `/finance/summary` (v1), and `/finance/reconciliations` return HTTP 410 Gone.
-8. **Secrets & Logging**: Source code audit confirmed zero committed passwords, private keys, or production tokens.
-
----
-
-## 7. Build & Static Quality Gates
-
-- **Root Typecheck**: `npm run typecheck` — **PASS** (0 errors)
-- **Backend Typecheck**: `npm --prefix backend run typecheck` — **PASS** (0 errors)
-- **Lint**: `npm run lint` — **PASS** (0 errors, 1 known unrelated warning in `ProductionBoard.tsx`)
-- **Frontend Production Build**: `npm run build` — **PASS** (5333 modules transformed; bundle generated in 58.39s)
-- **Backend Production Build**: `npm --prefix backend run build` — **PASS** (tsc build clean)
-- **Prisma Validate**: **PASS**
+Committed codebase audit verified:
+- **Private Keys**: 0 RSA/EC private keys (`BEGIN PRIVATE KEY`)
+- **AWS Keys**: 0 AWS AKIA access key patterns
+- **Hardcoded JWTs**: 0 hardcoded bearer tokens in product code
+- **Database URLs**: 0 real production database credentials
+- **Stripe Keys**: 0 live Stripe secret keys (`sk_live_`)
+- **Zero-Trust Boundaries**: All endpoints enforce RequestContext authentication and workspace tenancy.
 
 ---
 
-## 8. Staging & External Dependencies Status
+## 9. Staging & Homologation Status
 
-- **Classification**: `EXTERNAL_DEPENDENCY_BLOCKED`
-- **Reason**: Remote staging environment credentials, MinIO S3 production buckets, and external VECTIS client testing accounts are managed externally and are not provisioned in the local development workspace.
-- **Handoff Action**: Staging deployment and VECTIS homologation checklist packaged for deployment engineers in `docs/runbooks/operix-core-phase1-release.md` and `docs/handoff/operix-core-phase1-homologation.md`.
+- **Staging Target**: `EXTERNAL_DEPENDENCY_BLOCKED`
+  - Reason: Staging hosting infrastructure, S3 bucket credentials, and external client accounts are managed outside this repository workspace.
+- **VECTIS Homologation**: `AWAITING_VECTIS_HOMOLOGATION`
+  - Release candidate handoff guide prepared in [docs/handoff/operix-core-phase1-homologation.md](file:///c:/Users/gusta/Downloads/operix/docs/handoff/operix-core-phase1-homologation.md).
+  - Deployment runbook prepared in [docs/runbooks/operix-core-phase1-release.md](file:///c:/Users/gusta/Downloads/operix/docs/runbooks/operix-core-phase1-release.md).
