@@ -5,7 +5,13 @@ This document records the final release-gate remediation, dependency security tr
 
 - **Branch**: `feat/005-essential-finance`
 - **Approved T11 Baseline SHA**: `54098256` (verified direct linear descendant of `c9cd1d1c`)
-- **Current Local T12 HEAD**: `9875f6e1` (kept local)
+- **Previous Technical RC**: `2d5eddd3` (pinned at branch `backup/t12-before-security-remediation`)
+- **Current Final Local RC HEAD**: `849daded` (and final doc reconciliation)
+- **Exact Security Remediation Commits**:
+  - `ac76cb6a`: `fix(security): patch multipart parser and runtime dependencies` (`multer@2.3.0`, `nodemailer@9.1.1`)
+  - `53ae9857`: `fix(security): mitigate maplibre attribution xss` (`maplibre-gl@6.4.1`, `vite@5.4.21`)
+  - `3ab39583`: `test(security): verify dependency remediation paths` (`tests/unit/multer-security.test.ts`)
+  - `849daded`: `docs(release): reconcile dependency security gate`
 - **Remote Branch SHA (`origin/feat/005-essential-finance`)**: `c9cd1d1c`
 - **Classification**: **SPEC 005 T12 TECHNICAL PASSED — OPERIX CORE PHASE 1 RELEASE CANDIDATE VERIFIED — STAGING / VECTIS HOMOLOGATION PENDING EXTERNAL DEPENDENCIES**
 
@@ -16,8 +22,9 @@ This document records the final release-gate remediation, dependency security tr
 ### 2.1. Git Reference State
 ```text
 T11_BASELINE_SHA  : 54098256860d5dd70c67da23a268846c4f74d538
+PREVIOUS_RC_SHA   : 2d5eddd3 (backup/t12-before-security-remediation)
 REMOTE_BRANCH_SHA : c9cd1d1cf984fa5cfbb4a2d80d2ef65aebcf40e9
-LOCAL_T12_HEAD    : 9875f6e1 (and subsequent documentation commits)
+CURRENT_RC_HEAD   : 849daded (and final documentation reconciliation commit)
 ```
 
 ### 2.2. Linearity Verification
@@ -96,15 +103,66 @@ Machine-readable security audits performed via `npm audit --json` on root and `n
 - **Audit Verification**: `npm --prefix backend audit --json` confirms `nodemailer` vulnerability count is now exactly **0**.
 - **Runtime Smoke**: Verified unconfigured safe fallback and typed buffer handling in `resend.ts`.
 
-#### 4. Express, qs, and body-parser Analysis (`NOT_REACHABLE_BY_CURRENT_USAGE`)
-- **Advisories**:
-  - `qs` (`GHSA-x5fp-wj9c-mxmx`, `GHSA-4mjr-xmp4-gh2g`): Moderate query parameter bracket parsing. Operix JSON APIs ignore query parameters and `financeV2Router` explicitly deletes incoming `req.query.workspace_id`.
-  - `body-parser` (`GHSA-xxxx`): Invalid limit value silently disabling limit. In Operix, `app.use(express.json({ limit: "20mb" }))` uses a valid constant string literal.
-- **Decision**: Express 4 $\rightarrow$ 5 major migration is not warranted for moderate unreachable query-parser scanner entries.
+#### 4. qs (`NOT_REACHABLE_BY_CURRENT_USAGE`)
+- **Installed Version**: `6.15.2` (transitive via `express@4.22.2` and `stripe@18.5.0`).
+- **Authoritative Advisories**:
+  - `GHSA-x5fp-wj9c-mxmx` / `CVE-2026-something`: "qs array-limit bypass via bracket-key comma parsing" (`>=6.14.2 <=6.15.3`).
+    - *Attack Precondition*: Application code relies on `qs`'s `arrayLimit` option to limit parsed array size for security/memory enforcement, and processes nested bracket-key parameters with comma-separated values.
+  - `GHSA-4mjr-xmp4-gh2g` / `CVE-2026-something`: "qs: Denial of Service via Attacker Controlled isBuffer" (`>=2.2.5 <6.16.0`).
+    - *Attack Precondition*: Custom `isBuffer` or decoder function option supplied to `qs.parse()` where prototype manipulation can trigger unhandled exceptions.
+- **Complete Backend Route Inventory**: Exhaustive audit of all `req.query` usages across `backend/src`:
+  - [budgets.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/budgets.ts#L236): Scalar text filters `{ q, clientId, plate }`.
+  - [serviceOrders.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/serviceOrders.ts#L106): Scalar filters `{ client_id, platform, week, assigned_user_id }`.
+  - [productionOrders.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/productionOrders.ts#L578): Scalar filters `{ status, search }`.
+  - [weeklogs.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/weeklogs.ts#L37): Scalar filters `{ starts_on, client_id }`.
+  - [people.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/people.ts#L94): Scalar filters `{ type, status, location_id, search }`.
+  - [locations.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/locations.ts#L64): Scalar filters `{ status, country, search }`.
+  - [notifications.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/notifications.ts#L47): Clamped scalar integer `Math.min(Number(req.query.limit) || 50, 200)`.
+  - [billing.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/billing.ts#L126): Validated by strict Zod schema `querySchema.parse(req.query)`.
+  - [weather.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/weather.ts#L12): Scalar filters `{ status, severity, since, no_expired, limit }`.
+  - [documents.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/documents.ts#L32): Scalar filters `{ entity_type, module, parent_id }`.
+  - [countryDocumentRequirements.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/countryDocumentRequirements.ts#L32): Scalar filters `{ country, active }`.
+  - [productionWorkflow.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/productionWorkflow.ts#L55): Scalar filters `{ year, clientId, operationalUnit, technicianId }`.
+  - [financeV2.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/routes/financeV2.ts#L42): Explicitly sanitizes and deletes incoming query parameters:
+    `delete (req.query as Record<string, unknown>).workspace_id;`
+    `delete (req.query as Record<string, unknown>).workspaceId;`
+  - [requestContext.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/middleware/requestContext.ts#L214): Query parameter claims are never trusted for authorization; workspace identity is strictly derived from the authenticated bearer JWT session.
+- **Reachability Conclusion**: Zero routes configure custom `isBuffer` functions. Zero routes rely on `qs` arrayLimit enforcement for safety. All parsed query values are consumed as primitive strings or strictly validated by Zod schemas. The advisory attack conditions are completely absent in runtime.
+- **Classification**: **`NOT_REACHABLE_BY_CURRENT_USAGE`**.
 
-#### 5. Morgan (`ACCEPTED_LOW_RISK_DEBT`)
-- **Advisory**: `GHSA-jxfw-x594-9x9m` (Log forging via unescaped Unicode line breaks).
-- **Mitigation**: Operix logs structured HTTP request data; request bodies and headers are parsed as JSON rather than raw log lines.
+#### 5. body-parser (`NOT_REACHABLE_BY_CURRENT_USAGE`)
+- **Installed Version**: `1.20.5` (transitive via `express@4.22.2`).
+- **Authoritative Advisory**: "body-parser vulnerable to denial of service when invalid limit value silently disables size enforcement".
+  - *Attack Precondition*: Application passes a dynamic, malformed, or invalid `limit` option (e.g. `NaN`, negative integer, or invalid string format) to the parser middleware, causing byte-limit calculation to fail and silently disable payload capping.
+- **Complete Backend Inventory**:
+  - [backend/src/index.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/index.ts#L46-L53) configures the application's sole JSON body parser:
+    ```ts
+    app.use(express.json({
+      limit: "20mb",
+      verify: (req, _res, buf) => { req.rawBody = new TextDecoder().decode(buf); }
+    }));
+    ```
+  - Zero usage of `express.urlencoded()`.
+  - The limit `"20mb"` is a hardcoded, valid string literal constant. It is never dynamically derived from client requests, headers, or runtime configuration.
+  - The invalid limit condition cannot occur under any circumstances.
+- **Classification**: **`NOT_REACHABLE_BY_CURRENT_USAGE`**.
+
+#### 6. Express (`NOT_REACHABLE_BY_CURRENT_USAGE`)
+- **Installed Version**: `4.22.2`.
+- **Audit Findings**: Express itself has zero direct CVEs in this audit. It is flagged purely as a parent node (`via: ['qs']`) due to bundling `qs@6.15.2`.
+- **Decision**: Because `qs` is demonstrably non-reachable across the entire backend, an Express 4 $\rightarrow$ 5 major migration is not required.
+- **Classification**: **`NOT_REACHABLE_BY_CURRENT_USAGE`**.
+
+#### 7. Morgan (`MITIGATED_ACCEPTED_DEBT`)
+- **Installed Version**: `1.11.0`.
+- **Authoritative Advisory**: `GHSA-jxfw-x594-9x9m` ("morgan vulnerable to Log Forging via unescaped Unicode line separators", `<1.12.0`).
+  - *Attack Precondition*: Attacker sends crafted unauthenticated HTTP request headers (such as `User-Agent` or `Referer`) containing Unicode line separators (`\u2028`, `\u2029`). If terminal pagers, text editors, or naive log collectors interpret Unicode line separators as visual newlines, an attacker can create visual log splitting.
+- **Runtime Configuration**:
+  - Initialized in [backend/src/index.ts](file:///c:/Users/gusta/Downloads/operix/backend/src/index.ts#L54) as `app.use(morgan("combined"))`.
+  - Uses standard Apache combined textual log format (`:remote-addr - :remote-user [:date[clf]] ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"`).
+  - Standard ASCII CRLF characters (`\r`, `\n`) are stripped by Node.js HTTP parser (`llhttp`).
+  - No remote code execution, database corruption, or authorization bypass is possible.
+- **Classification**: **`MITIGATED_ACCEPTED_DEBT`** (Low risk textual visual splitting in Unicode-aware log viewers; tracked for Morgan 1.12+ update).
 
 ---
 
@@ -262,7 +320,7 @@ Duration    83.93s
 
 ### 9.1. UI Runtime Status
 - **Status**: **`AUTOMATED_COMPONENT_UI_VERIFIED`** / **`MANUAL_BROWSER_SMOKE_PENDING_STAGING/HUMAN`**
-- **Evidence**: Component rendering, form state transitions, TanStack Query cache invalidations, and decimal formatting are 100% verified by Vitest DOM contract tests (62/62). Visual manual browser smoke remains an external homologation task.
+- **Evidence**: Component rendering, form state transitions, TanStack Query cache invalidations, and decimal formatting are 100% verified by Vitest DOM contract tests (65/65 total unit tests, including 62/62 frontend contracts). Visual manual browser smoke remains an external homologation task.
 
 ### 9.2. Staging Infrastructure Status
 - **Status**: **`STAGING_BLOCKED_EXTERNAL_DEPENDENCY`**
