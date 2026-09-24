@@ -5,7 +5,7 @@
 | T01/T02 | RED acceptance and request-context helpers; `tests/**`, finance routes | DEC-016; FIN-CROSS-TENANT-01, FIN-WORKSPACE-SPOOF-01, EXPENSE-TENANT-01, EXPENSE-IDOR-01, DIST-TENANT-01, OBLIGATION-TENANT-01 |
 | T03/T04 | Decimal models/migration/repository; Prisma schema/migration/services | FIN-NO-FLOAT-01, FIN-CURRENCY-SEPARATION-01, EXPENSE-DECIMAL-01; DEC-009–015; forward-only dry run |
 | T05 | **COMPLETE** — canonical summary service and authenticated `/api/finance/v2/summary` route | Focused 8/8, schema 7/7, serial Specs001–004 340/340; evidence: `t05-finance-summary-evidence.md` |
-| T06 | expense domain | EXPENSE-CREATE-01, EXPENSE-LINKAGE-01, EXPENSE-AUDIT-01 |
+| T06 | **COMPLETE** — canonical Expense create/read/reversal lifecycle | Focused 7/7, T05 8/8, schema 7/7, normative 21 GREEN / 12 legitimate future RED; evidence: `t06-expense-evidence.md` |
 | T07 | manual distributions | DIST-MANUAL-01, DIST-NO-AUTO-RULE-01, DIST-PARTICIPANT-01, DIST-AUDIT-01 |
 | T08 | full obligations/settlements | OBLIGATION-CREATE-01, OBLIGATION-NO-FIXED-CADENCE-01, OBLIGATION-PAY-01, OBLIGATION-PAY-IDEMPOTENT-01, OBLIGATION-AUDIT-01 |
 | T09 | legacy retirement/migration | FIN-NO-LEGACY-AUTHORITY-01; report ambiguous rows, no reverse sync |
