@@ -10,7 +10,7 @@
 | T08 | **COMPLETE** — full obligations/settlements | Focused 7/7, T07 7/7, T06 7/7, T05 8/8, schema 7/7, normative 33/33 GREEN, Specs001–004 340/340; evidence: `t08-obligation-settlement-evidence.md` |
 | T09 | **COMPLETE** — legacy retirement/migration | FIN-NO-LEGACY-AUTHORITY-01; report ambiguous rows, no reverse sync |
 | T10 | **COMPLETE** — typed frontend Finance v2 client + TanStack query hooks | FIN-TECH-OWN-01, FIN-CLIENT-INTERNAL-DENY-01, FIN-OWNER-SUMMARY-01; unit 11/11, frontend build/lint pass; evidence: `t10-frontend-client-evidence.md` |
-| T11 | typed UI migration | FinancialPage and ProfitDistribution canonical migration |
+| T11 | **COMPLETE** — typed canonical Finance v2 UI | FinancialPage canonical migration, per-currency summary, Expenses ledger/reversal, manual Distributions, Obligations/settlement lifecycle, technician own view, client denial, 0 legacy authority; unit 62/62 (10/10 focused UI), build/type/lint pass; evidence: `t11-canonical-finance-ui-evidence.md` |
 | T12 | regression/security/handoff | FIN-NO-SPEC004-MUTATION-01 plus all 33 normative scenarios, migration rehearsal and authenticated smoke evidence |
 
 Each mutation must derive tenant from RequestContext, prevent mass assignment of audit fields, return non-leaking authorization errors, and pass serial and isolation tests.
