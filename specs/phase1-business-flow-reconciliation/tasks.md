@@ -22,12 +22,12 @@
   - [x] Preserve direct ProductionOrder creation (`DIRECT-PO-PRESERVED-01`).
   - [x] Implement `GET /api/production-orders/:id/timeline` strictly from persisted canonical facts (zero fabricated pause/resume events).
 
-- [ ] **R03: Spec 003 — Week Boundary Auto-Closure & Startup Catch-Up Engine**
-  - [ ] Implement `reconcileExpiredWeeklogs` in `backend/src/services/weeklogService.ts`.
-  - [ ] Implement `runStartupCatchup` in `backend/src/lib/weekCloseRunner.ts`.
-  - [ ] Register 60-second periodic interval runner in `backend/src/index.ts`.
-  - [ ] Implement concise operational projection: `GET /api/weeklogs/:id/projection`.
-  - [ ] Verify external WEEKLOG upload and commit on canonical route `/api/external-operational-imports`.
+- [x] **R03: Spec 003 — Week Boundary Auto-Closure & Startup Catch-Up Engine**
+  - [x] Implement `reconcileExpiredWeeklogs` in `backend/src/services/weeklogService.ts`.
+  - [x] Implement `runStartupCatchup` in `backend/src/lib/weekCloseRunner.ts`.
+  - [x] Register 60-second periodic interval runner in `backend/src/index.ts`.
+  - [x] Implement concise operational projection: `GET /api/weeklogs/:id/projection`.
+  - [x] Verify external WEEKLOG upload and commit on canonical route `/api/external-operational-imports`.
 
 - [ ] **R04: Spec 004 / ADR-002 — Source-Aware Provisional Claims, Multiweek Absorption, Manual List Coexistence & Auto-Draft PaymentList Handoff**
   - **R04 Pre-Flight Note A (Tenant-safe composite FKs)**: `originWeeklogId` and `supersededByPaymentListId` must strictly preserve Spec004 composite tenant FK architecture `(origin_weeklog_id, workspace_id) REFERENCES weeklogs(id, workspace_id)` and `(superseded_by_payment_list_id, workspace_id) REFERENCES payment_lists(id, workspace_id)`. Never introduce simple, non-tenant FKs.

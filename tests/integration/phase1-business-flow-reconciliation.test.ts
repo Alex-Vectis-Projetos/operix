@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL =
@@ -394,6 +395,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
           workspaceId: fixture.workspaceA,
           code: "PO-PROJ-01",
           clientId: fixture.clientAId,
+          operationalSiteKey: "Atelier Paris Nord",
           status: "delivered",
         },
       });
@@ -419,7 +421,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         },
       });
 
-      // RED: Concise projection endpoint GET /api/weeklogs/:id/projection
+      // Concise projection endpoint GET /api/weeklogs/:id/projection
       const response = await request(`/api/weeklogs/${wl.id}/projection`, {
         headers: headers(),
       });
@@ -440,6 +442,284 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       );
       // Ensures raw panel damage matrix is not present in top-level business item projection
       expect(data.items[0]).not.toHaveProperty("damagePanelsMatrix");
+    });
+
+    it("WEEK-AUTO-CLOSE-MANUAL-RACE-01: Concurrent manual submit and auto-close runner converge safely without duplicated rounds", async () => {
+      const raceWl = await prisma.weeklog.create({
+        data: {
+          id: "75000000-0000-4000-8000-000000000021",
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-default",
+          startsOn: new Date("2026-08-02T00:00:00.000Z"),
+          endsOn: new Date("2026-08-08T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W32",
+          weekNumber: 32,
+          status: "open",
+        },
+      });
+
+      const reconcileFn = (weeklogService as any).reconcileExpiredWeeklogs;
+      const ctx = {
+        activeWorkspaceId: fixture.workspaceA,
+        actorUserId: fixture.ownerA,
+        membershipRole: "admin",
+        scope: "workspace",
+      };
+
+      const [manualResult, autoResult] = await Promise.allSettled([
+        (weeklogService as any).submitWeeklogForValidation(ctx, raceWl.id),
+        reconcileFn(fixture.workspaceA),
+      ]);
+
+      expect(manualResult.status).toBe("fulfilled");
+      expect(autoResult.status).toBe("fulfilled");
+
+      const finalWl = await prisma.weeklog.findUniqueOrThrow({ where: { id: raceWl.id } });
+      expect(finalWl.status).toBe("pending_validation");
+
+      const rounds = await prisma.weeklogValidation.findMany({
+        where: { weeklogId: raceWl.id },
+      });
+      expect(rounds.length).toBe(1);
+    });
+
+    it("WEEK-AUTO-CLOSE-CONCURRENT-RUNNERS-01: Multiple concurrent runner instances process expired weeklogs safely under SKIP LOCKED", async () => {
+      const runnerWl = await prisma.weeklog.create({
+        data: {
+          id: "75000000-0000-4000-8000-000000000022",
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-default",
+          startsOn: new Date("2026-07-26T00:00:00.000Z"),
+          endsOn: new Date("2026-08-01T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W31",
+          weekNumber: 31,
+          status: "open",
+        },
+      });
+
+      const reconcileFn = (weeklogService as any).reconcileExpiredWeeklogs;
+
+      await Promise.all([
+        reconcileFn(fixture.workspaceA),
+        reconcileFn(fixture.workspaceA),
+        reconcileFn(fixture.workspaceA),
+      ]);
+
+      const finalWl = await prisma.weeklog.findUniqueOrThrow({ where: { id: runnerWl.id } });
+      expect(finalWl.status).toBe("pending_validation");
+
+      const rounds = await prisma.weeklogValidation.findMany({
+        where: { weeklogId: runnerWl.id },
+      });
+      expect(rounds.length).toBe(1);
+    });
+
+    it("WEEK-AUTO-CLOSE-NEXT-SEQUENCE-01: Auto-close increments validation sequence when prior historical validation rounds exist", async () => {
+      const seqWl = await prisma.weeklog.create({
+        data: {
+          id: "75000000-0000-4000-8000-000000000023",
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-default",
+          startsOn: new Date("2026-07-19T00:00:00.000Z"),
+          endsOn: new Date("2026-07-25T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W30",
+          weekNumber: 30,
+          status: "open",
+        },
+      });
+
+      await prisma.weeklogValidation.create({
+        data: {
+          weeklogId: seqWl.id,
+          workspaceId: fixture.workspaceA,
+          validationSequence: 1,
+          status: "validated",
+          submittedAt: new Date("2026-07-26T10:00:00.000Z"),
+          validatedAt: new Date("2026-07-26T11:00:00.000Z"),
+          coverageSnapshot: [],
+          auditTrail: [],
+        },
+      });
+
+      const reconcileFn = (weeklogService as any).reconcileExpiredWeeklogs;
+      await reconcileFn(fixture.workspaceA);
+
+      const latestRound = await prisma.weeklogValidation.findFirst({
+        where: { weeklogId: seqWl.id, status: "pending" },
+        orderBy: { validationSequence: "desc" },
+      });
+
+      expect(latestRound).not.toBeNull();
+      expect(latestRound?.validationSequence).toBe(2);
+    });
+
+    it("WEEK-AUTO-CLOSE-COVERAGE-FREEZE-01: Auto-close creates immutable coverage snapshot and does not invent a human submittedBy actor", async () => {
+      const freezeWl = await prisma.weeklog.create({
+        data: {
+          id: "75000000-0000-4000-8000-000000000024",
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-default",
+          startsOn: new Date("2026-07-12T00:00:00.000Z"),
+          endsOn: new Date("2026-07-18T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W29",
+          weekNumber: 29,
+          status: "open",
+        },
+      });
+
+      const po = await prisma.productionOrder.create({
+        data: {
+          id: "76000000-0000-4000-8000-000000000024",
+          workspaceId: fixture.workspaceA,
+          code: "PO-FREEZE-01",
+          clientId: fixture.clientAId,
+          status: "delivered",
+        },
+      });
+
+      const entry = await prisma.weeklogEntry.create({
+        data: {
+          id: "77000000-0000-4000-8000-000000000024",
+          workspaceId: fixture.workspaceA,
+          weeklogId: freezeWl.id,
+          productionOrderId: po.id,
+          technicianUserId: fixture.ownerA,
+          technicianName: "Owner A",
+          clientId: fixture.clientAId,
+          totalAmount: 450.0,
+          currencyCode: "EUR",
+          deliveredAt: new Date("2026-07-15T10:00:00.000Z"),
+          validationStatus: "pending",
+        },
+      });
+
+      const reconcileFn = (weeklogService as any).reconcileExpiredWeeklogs;
+      await reconcileFn(fixture.workspaceA);
+
+      const round = await prisma.weeklogValidation.findFirstOrThrow({
+        where: { weeklogId: freezeWl.id },
+      });
+
+      expect(round.submittedBy).toBeNull();
+
+      const snapshot = round.coverageSnapshot as any[];
+      expect(snapshot).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            weeklogEntryId: entry.id,
+            productionOrderId: po.id,
+            totalAmount: "450",
+            currencyCode: "EUR",
+          }),
+        ])
+      );
+    });
+
+    it("WEEK-PROJECTION-CROSS-TENANT-01: Weeklog projection enforces strict tenant boundary and returns 404 for foreign workspace", async () => {
+      const foreignWl = await prisma.weeklog.create({
+        data: {
+          id: "75000000-0000-4000-8000-000000000025",
+          workspaceId: fixture.workspaceB,
+          clientId: fixture.clientBId,
+          siteKey: "site-foreign",
+          startsOn: new Date("2026-07-05T00:00:00.000Z"),
+          endsOn: new Date("2026-07-11T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W28",
+          weekNumber: 28,
+          status: "open",
+        },
+      });
+
+      const response = await request(`/api/weeklogs/${foreignWl.id}/projection`, {
+        headers: headers(fixture.ownerA, fixture.workspaceA),
+      });
+
+      expect([403, 404]).toContain(response.status);
+    });
+
+    it("WEEK-PROJECTION-CLIENT-SITE-SCOPE-01: Client collaborator projection access enforces siteKey scope and client boundary", async () => {
+      const lyonWl = await prisma.weeklog.create({
+        data: {
+          id: "75000000-0000-4000-8000-000000000026",
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-lyon",
+          startsOn: new Date("2026-06-28T00:00:00.000Z"),
+          endsOn: new Date("2026-07-04T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W27",
+          weekNumber: 27,
+          status: "open",
+        },
+      });
+
+      const parisWl = await prisma.weeklog.create({
+        data: {
+          id: "75000000-0000-4000-8000-000000000027",
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-paris",
+          startsOn: new Date("2026-06-28T00:00:00.000Z"),
+          endsOn: new Date("2026-07-04T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W27",
+          weekNumber: 27,
+          status: "open",
+        },
+      });
+
+      const scopedUser = randomUUID();
+      const scopedUserApp = randomUUID();
+      await prisma.user.create({
+        data: {
+          id: scopedUser,
+          email: `${scopedUser}@client.com`,
+          fullName: "Lyon Client Proj User",
+          role: "user",
+          passwordHash: "x",
+          appUser: { create: { id: scopedUserApp, email: `${scopedUser}@client.com` } },
+        },
+      });
+      await prisma.membership.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          userId: scopedUserApp,
+          role: "client",
+          status: "active",
+        },
+      });
+      await prisma.clientAccessGrant.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          userId: scopedUser,
+          clientId: fixture.clientAId,
+          role: "representative",
+          status: "active",
+          siteKey: "site-lyon",
+          capabilities: ["weeklog.validate"],
+        },
+      });
+
+      const allowedRes = await request(`/api/weeklogs/${lyonWl.id}/projection`, {
+        headers: headers(scopedUser, fixture.workspaceA, "proj-lyon-key", "client"),
+      });
+      expect(allowedRes.status).toBe(200);
+
+      const deniedRes = await request(`/api/weeklogs/${parisWl.id}/projection`, {
+        headers: headers(scopedUser, fixture.workspaceA, "proj-paris-key", "client"),
+      });
+      expect(deniedRes.status).toBe(403);
+      const deniedBody = await deniedRes.json();
+      expect(deniedBody.message).toContain("SITE_SCOPE_UNAUTHORIZED");
     });
   });
 

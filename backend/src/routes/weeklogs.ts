@@ -4,6 +4,7 @@ import { resolveRequestContext } from "../middleware/requestContext.js";
 import {
   listWeeklogs,
   getWeeklogById,
+  getWeeklogProjection,
   getWeeklogEntries,
   getWeeklogEntryById,
   submitWeeklogForValidation,
@@ -44,6 +45,23 @@ weeklogsRouter.get("/", async (req: Request, res: Response, next: NextFunction) 
     });
 
     return res.json(weeklogs);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// GET /api/weeklogs/:id/projection
+weeklogsRouter.get("/:id/projection", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const id = req.params["id"] as string;
+    const projection = await getWeeklogProjection(ctx, id);
+
+    return res.status(200).json(projection);
   } catch (error) {
     return next(error);
   }

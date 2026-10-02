@@ -1774,4 +1774,236 @@ export function rectifyWeeklogEntryInTransaction(
   return rectifyWeeklogEntry(ctx, weeklogId, entryId, payload, tx);
 }
 
+export function formatServicesSummary(servicesSnapshot: any): string {
+  if (!servicesSnapshot) return "";
+  let list: any[] = [];
+  if (Array.isArray(servicesSnapshot)) {
+    list = servicesSnapshot;
+  } else if (typeof servicesSnapshot === "object" && servicesSnapshot !== null) {
+    if (Array.isArray((servicesSnapshot as any).services)) {
+      list = (servicesSnapshot as any).services;
+    } else {
+      list = Object.values(servicesSnapshot);
+    }
+  } else if (typeof servicesSnapshot === "string") {
+    try {
+      const parsed = JSON.parse(servicesSnapshot);
+      if (Array.isArray(parsed)) list = parsed;
+      else list = [servicesSnapshot];
+    } catch {
+      return servicesSnapshot;
+    }
+  }
+  const names = list
+    .map((s) => {
+      if (typeof s === "string") return s;
+      if (typeof s === "object" && s !== null) {
+        return s.name || s.serviceName || s.description || s.label || "";
+      }
+      return "";
+    })
+    .filter((n) => Boolean(n && typeof n === "string" && n.trim().length > 0));
+  return names.join(" + ");
+}
+
+export interface ReconcileExpiredWeeklogsOptions {
+  now?: Date;
+}
+
+export async function reconcileExpiredWeeklogs(
+  workspaceId?: string,
+  options?: ReconcileExpiredWeeklogsOptions,
+) {
+  const now = options?.now ?? new Date();
+
+  const expiredCandidates = await prisma.$queryRaw<Array<{ id: string; workspace_id: string }>>`
+    SELECT id, workspace_id
+    FROM weeklogs
+    WHERE status = 'open'
+      AND ends_on < ${now}
+      ${workspaceId ? Prisma.sql`AND workspace_id = ${workspaceId}` : Prisma.empty}
+    ORDER BY ends_on ASC
+  `;
+
+  const results: any[] = [];
+
+  for (const candidate of expiredCandidates) {
+    try {
+      const result = await prisma.$transaction(
+        async (tx) => {
+          const lockedRows = await tx.$queryRaw<Array<{
+            id: string;
+            workspace_id: string;
+            status: string;
+            client_id: string;
+            site_key: string;
+          }>>`
+            SELECT id, workspace_id, status, client_id, site_key
+            FROM weeklogs
+            WHERE id = ${candidate.id}
+              AND workspace_id = ${candidate.workspace_id}
+              AND status = 'open'
+            FOR UPDATE SKIP LOCKED
+          `;
+
+          if (!lockedRows || lockedRows.length === 0) {
+            return null;
+          }
+
+          const currentWl = lockedRows[0];
+          if (currentWl.status !== "open") {
+            return null;
+          }
+
+          const eligibleEntries = await tx.weeklogEntry.findMany({
+            where: {
+              weeklogId: currentWl.id,
+              workspaceId: currentWl.workspace_id,
+              validationStatus: "pending",
+            },
+            orderBy: { executionSequence: "asc" },
+          });
+
+          const coverageSnapshot = eligibleEntries.map((e) => ({
+            weeklogEntryId: e.id,
+            productionOrderId: e.productionOrderId,
+            executionSequence: e.executionSequence,
+            validationStatus: e.validationStatus,
+            totalAmount: e.totalAmount.toString(),
+            currencyCode: e.currencyCode,
+          }));
+
+          const latestValidation = await tx.weeklogValidation.findFirst({
+            where: { weeklogId: currentWl.id },
+            orderBy: { validationSequence: "desc" },
+            select: { validationSequence: true },
+          });
+          const nextSequence = (latestValidation?.validationSequence ?? 0) + 1;
+
+          const validationRound = await tx.weeklogValidation.create({
+            data: {
+              weeklogId: currentWl.id,
+              workspaceId: currentWl.workspace_id,
+              validationSequence: nextSequence,
+              status: "pending",
+              submittedAt: now,
+              submittedBy: null,
+              coverageSnapshot,
+              auditTrail: [
+                {
+                  action: "weeklog.auto_closed",
+                  timestamp: now.toISOString(),
+                  trigger: "reconcile_expired_weeklogs",
+                },
+              ],
+            },
+          });
+
+          const updatedWeeklog = await tx.weeklog.update({
+            where: { id: currentWl.id },
+            data: { status: "pending_validation" },
+          });
+
+          return {
+            weeklog: updatedWeeklog,
+            validationRound,
+            coverageSnapshot,
+            status: "pending_validation",
+          };
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+        },
+      );
+
+      if (result) {
+        results.push(result);
+      }
+    } catch (err) {
+      console.error(`[reconcileExpiredWeeklogs] Error reconciling weeklog ${candidate.id}:`, err);
+    }
+  }
+
+  return results;
+}
+
+export async function getWeeklogProjection(ctx: RequestContext, id: string) {
+  if (!ctx.activeWorkspaceId || !ctx.actorUserId) {
+    throw new ForbiddenError("Contexto de autenticação incompleto.");
+  }
+
+  const weeklog = await prisma.weeklog.findUnique({
+    where: { id },
+    include: {
+      client: { select: { id: true, name: true } },
+      entries: {
+        orderBy: { executionSequence: "asc" },
+        include: {
+          productionOrder: {
+            select: {
+              id: true,
+              code: true,
+              operationalSiteKey: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!weeklog || weeklog.workspaceId !== ctx.activeWorkspaceId) {
+    throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+  }
+
+  const isInternalManager = ctx.membershipRole === "admin" || ctx.membershipRole === "owner";
+  if (!isInternalManager) {
+    await assertClientCapability(ctx, {
+      clientId: weeklog.clientId,
+      capability: "weeklog.validate",
+      siteKey: weeklog.siteKey,
+    });
+  }
+
+  let sumDecimal = new Prisma.Decimal(0);
+  const items = weeklog.entries.map((entry) => {
+    sumDecimal = sumDecimal.add(entry.totalAmount);
+
+    const vehicleDescription = [entry.brand, entry.model].filter(Boolean).join(" ") || "Véhicule non spécifié";
+    const licensePlate = entry.licensePlate || "";
+    const vin = entry.vin || "";
+    const serviceLocation = entry.productionOrder?.operationalSiteKey || weeklog.siteKey || "";
+    const servicesSummary = formatServicesSummary(entry.servicesSnapshot);
+    const amountDecimal = entry.totalAmount;
+
+    return {
+      entryId: entry.id,
+      productionOrderId: entry.productionOrderId,
+      completionDate: entry.deliveredAt ? entry.deliveredAt.toISOString().slice(0, 10) : "",
+      deliveryDate: entry.deliveredAt ? entry.deliveredAt.toISOString().slice(0, 10) : "",
+      vehicleDescription,
+      licensePlate,
+      vin,
+      serviceLocation,
+      servicesSummary,
+      amount: Number(amountDecimal.toFixed(2)),
+      totalAmount: amountDecimal.toFixed(2),
+    };
+  });
+
+  return {
+    weeklogId: weeklog.id,
+    siteKey: weeklog.siteKey,
+    clientId: weeklog.clientId,
+    clientName: weeklog.client?.name || weeklog.entries[0]?.clientName || "",
+    weekDisplay: weeklog.week || `Week ${String(weeklog.weekNumber).padStart(2, "0")}`,
+    weekNumber: weeklog.weekNumber,
+    yearReference: weeklog.yearReference,
+    status: weeklog.status,
+    totalAmount: sumDecimal.toFixed(2),
+    currencyCode: weeklog.entries[0]?.currencyCode || "EUR",
+    items,
+  };
+}
+
+
 

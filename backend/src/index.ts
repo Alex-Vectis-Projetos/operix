@@ -38,6 +38,7 @@ import { weeklogsRouter } from "./routes/weeklogs.js";
 import { paymentListsRouter } from "./routes/paymentLists.js";
 import { externalOperationalImportsRouter } from "./routes/externalOperationalImports.js";
 import { runWeatherIngest } from "./services/weatherIngest.js";
+import { runStartupCatchup, startPeriodicCloseRunner } from "./lib/weekCloseRunner.js";
 
 const app = express();
 
@@ -117,6 +118,8 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 
+await runStartupCatchup();
+
 app.listen(env.PORT, async () => {
   console.log(`[api] listening on port ${env.PORT}`);
   try {
@@ -125,6 +128,8 @@ app.listen(env.PORT, async () => {
     console.error("[minio] falha ao inicializar buckets:", err);
   }
 });
+
+startPeriodicCloseRunner(60_000);
 
 // Scheduled hail weather ingest every 15 minutes
 setTimeout(() => {

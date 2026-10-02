@@ -6,7 +6,7 @@
 - **Given** an open Weeklog whose `endsOn` timestamp is in the past (`endsOn < NOW()`),
 - **When** the closure runner executes (`reconcileExpiredWeeklogs`),
 - **Then** the Weeklog status transitions to `pending_validation`, and an initial validation round is created in `status: 'pending'`.
-- **Status**: `RED` (Proves missing auto-close service).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### WEEK-BOUNDARY-ROLLFORWARD-01: Late Finalization Rollforward
 - **Given** an operational week boundary has passed (Saturday 23:59:59.999),
@@ -24,19 +24,54 @@
 - **Given** a week boundary expired while the backend server was offline,
 - **When** the server starts up,
 - **Then** the startup hook (`runStartupCatchup`) executes before accepting HTTP requests, safely closing all expired weeks.
-- **Status**: `RED` (Proves missing startup hook).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### WEEK-CLOSE-IDEMPOTENT-01: Repeated Closure Idempotency
 - **Given** an already-closed or pending Weeklog,
 - **When** the closure runner executes repeatedly,
 - **Then** no duplicate validation rounds or modified states are produced.
-- **Status**: `RED` (Proves missing idempotent closure runner).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### WEEK-PROJECTION-01: Concise Business WEEKLOG Projection
 - **Given** a Weeklog with validated entries,
 - **When** querying `GET /api/weeklogs/:id/projection`,
 - **Then** the payload returns vehicle, license plate, VIN, delivery date, site, joined services summary, and total amount, without panel/damage repair trivia.
-- **Status**: `RED` (Proves missing `/projection` endpoint).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### WEEK-AUTO-CLOSE-MANUAL-RACE-01: Concurrent Manual Submit and Auto-Close Race
+- **Given** an expired open Weeklog,
+- **When** manual submission and the auto-close runner execute concurrently,
+- **Then** they converge safely without duplicating validation rounds or producing constraint failures.
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### WEEK-AUTO-CLOSE-CONCURRENT-RUNNERS-01: Multi-Instance Runner Concurrency
+- **Given** multiple background runners executing `reconcileExpiredWeeklogs` simultaneously,
+- **When** processing the same expired weeklog,
+- **Then** `SKIP LOCKED` pessimistic locking ensures exactly one runner executes the state transition and round creation.
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### WEEK-AUTO-CLOSE-NEXT-SEQUENCE-01: Incremental Validation Sequence Preservation
+- **Given** a Weeklog that already possesses historical validation rounds (e.g. sequence 1),
+- **When** the auto-close runner executes,
+- **Then** `validationSequence` is monotonically incremented (e.g. sequence 2) rather than hardcoding sequence 1.
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### WEEK-AUTO-CLOSE-COVERAGE-FREEZE-01: Immutable Coverage Snapshot and System Submitter Semantics
+- **Given** an auto-closed Weeklog,
+- **When** the validation round is created,
+- **Then** its `coverageSnapshot` is frozen immutably with all eligible entries, and `submittedBy` remains `null` (never inventing a fabricated human user).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### WEEK-PROJECTION-CROSS-TENANT-01: Projection Workspace Boundary Isolation
+- **Given** a Weeklog in Workspace B,
+- **When** queried by an authenticated actor from Workspace A,
+- **Then** the request is rejected with `404 Not Found` without leaking resource existence.
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### WEEK-PROJECTION-CLIENT-SITE-SCOPE-01: Client Collaborator Projection Site-Scope Governance
+- **Given** a client collaborator with `weeklog.validate` capability scoped to `siteKey = 'site-lyon'`,
+- **When** accessing a projection for `'site-lyon'`, the request succeeds (`200 OK`); when accessing `'site-paris'`, it is rejected with `403 Forbidden` (`SITE_SCOPE_UNAUTHORIZED`).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ---
 

@@ -1,82 +1,287 @@
-# Operix — Agent Instructions & Engineering Constitution
+# AGENTS.md — Operix Engineering Control Plane
 
-## 1. Mission & Philosophy
-Stabilize, secure, and evolve the existing Operix brownfield system. 
-- **Preserve reusable implementation**: Leverage the existing React/Vite SPA, Express API, Prisma models, MinIO S3 integration, and third-party adapters.
-- **Do not rewrite for aesthetic reasons**: Avoid big-bang horizontal rewrites.
-- **Vertical Slice Engineering**: Refactor, stabilize, and test end-to-end along complete vertical business slices.
-- **No Mock Data / No Fake CRUDs**: Every capability must have real server-side authority, schema-backed persistence, and automated test coverage.
+Primary instructions for any coding agent working in this repository.
 
-## 2. Current Scope & Contracting Phases
-- **R0 — Foundation & Authority (Current P0)**: RequestContext, server-side tenant isolation, object authorization, MinIO ownership, Prisma baseline.
-- **R1 — Mobile Operational Flow**: Orçamento (Budget) $\rightarrow$ Produção $\rightarrow$ WEEKLOG $\rightarrow$ Retificação.
-- **R2 — Commercial Reconciliation & Essential Finance**: Payment List $\rightarrow$ Import/OCR $\rightarrow$ Confronto $\rightarrow$ Canonical Financial Projections.
-- **Out of Scope (Deferred/Future)**: R3/R4, Marketplace, generic automation engine, standalone autonomous AI agents, SaaS multi-tenant billing platform. Do NOT implement these opportunistically.
+The repository is the memory. Do not reconstruct project history when the answer already exists in versioned artifacts. Load the smallest context needed for the current task.
 
-## 3. Hierarchy of Source of Truth
-When conflicts arise, resolve them strictly in this order:
+## 1. Context loading order
 
-### For Product & Business Requirements:
-1. **Active Specification** (`specs/<spec-id>/spec.md`)
-2. **Accepted ADRs** (`docs/adr/`)
-3. **Core Domain Model** (`docs/project/DOMAIN.md`)
-4. **Project Master Scope** (`docs/project/PROJECT.md`)
-5. **Historical Audit & Meeting Records** (`docs/audit/`, `docs/Reunião Alex Operix 2.txt`)
+Default:
+1. Read this `AGENTS.md`.
+2. Read the current spec/task artifacts only.
+3. Inspect the exact code paths and tests touched.
+4. Read `docs/ai/OPENAI_AGENT_CONTEXT.md` only for cross-spec/domain context.
+5. Read historical specs/ADRs only when referenced or when a contradiction is discovered.
+6. Do not read meeting transcripts by default. Frozen specs/acceptance are the normal execution authority.
 
-### For Current System State:
-1. **Source Code** (`backend/src/`, `src/`)
-2. **Database Schema** (`backend/prisma/schema.prisma`)
-3. **Automated Test Suites** (`tests/`, `*.test.ts`)
-4. **Audit Diagnostic Reports** (`docs/audit/`)
+For Phase 1 reconciliation, prefer:
+- `specs/phase1-business-flow-reconciliation/spec.md`
+- `specs/phase1-business-flow-reconciliation/decisions.md`
+- `specs/phase1-business-flow-reconciliation/acceptance.md`
+- `specs/phase1-business-flow-reconciliation/plan.md`
+- `specs/phase1-business-flow-reconciliation/tasks.md`
 
-*Never assume current behavior reflects desired business rules; never assume a documentation draft reflects actual code without verifying active implementation.*
+Acceptance IDs are semantic compression. Read the named acceptance definition instead of asking prompts to restate it.
 
-## 4. Inviolable Architectural & Security Rules
+## 2. Source-of-truth hierarchy
 
-1. **Server-Side Tenant & Object Authorization (Zero Trust / CWE-639 / OWASP API1)**:
-   - NEVER trust `workspaceId`, `userId`, `role`, or entity IDs passed in query parameters or request bodies.
-   - All tenant and identity claims MUST be resolved on the server from the verified JWT bearer session into `RequestContext`.
-   - Every read/write operation MUST enforce tenant boundaries and object ownership deny-by-default.
-2. **No New Supabase Dependencies**:
-   - Do NOT add imports from `@/integrations/supabase/client`.
-   - Whenever touching a vertical slice, eliminate its Supabase/noop dependencies completely.
-3. **No Business State in LocalStorage**:
-   - `localStorage` is permitted strictly for non-critical client preferences (theme, UI sidebar collapse, transient UI filters).
-   - Business entities (Budgets, Production, WEEKLOG, Lists, Invoices) MUST be persisted in PostgreSQL via API.
-4. **Expand-Contract Database Migrations**:
-   - NEVER execute destructive `prisma db push` in shared, staging, or production environments.
-   - All schema evolutions MUST be versioned Prisma migrations.
-   - Destructive field removals must follow Expand $\rightarrow$ Migrate $\rightarrow$ Contract.
-5. **Idempotency & Transactional Integrity**:
-   - Operations that produce derived business events (e.g., concluding an OP to generate WEEKLOG) MUST be idempotent and atomic, backed by composite unique constraints or explicit retry/recovery states.
-6. **No Secrets or PII in Logs**:
-   - NEVER log bearer tokens, JWTs, signed URLs, passwords, API keys, or raw provider payloads.
+Unless a human explicitly overrides:
+1. Current approved specification / acceptance contract.
+2. Current approved ADRs / decisions.
+3. Current canonical code + versioned migrations.
+4. Prior approved specs and regression evidence.
+5. `docs/ai/OPENAI_AGENT_CONTEXT.md`.
+6. Historical reports / handoffs.
+7. Meeting transcripts / raw notes.
 
-## 5. The 7-Step Engineering Loop
-Every agent and engineer must follow this structured cycle before declaring work done:
+Never silently resolve a conflict between higher-priority sources. Stop the affected work, report the conflict concisely, and propose the smallest deterministic resolution.
+
+## 3. Canonical architecture
+
+`React / Vite`
+→ authenticated API transport
+→ `Express`
+→ `RequestContext / AuthZ`
+→ focused domain services
+→ `Prisma / PostgreSQL`
++ MinIO/adapters where needed.
+
+Engineering direction:
+- brownfield selective redesign, not rewrite;
+- reuse existing code where sound;
+- no parallel authority;
+- Git is source of truth;
+- spec-first and test-first;
+- preserve tenant isolation, auditability, idempotency and historical evidence.
+
+Do not reintroduce:
+- Supabase as parallel domain authority;
+- localStorage as business authority;
+- client-controlled tenant/audit fields;
+- Float money in canonical backend logic;
+- legacy Finance models as current authority.
+
+## 4. Non-negotiable invariants
+
+### Tenant
+`RequestContext.activeWorkspaceId` is tenant authority.
+Never trust body/query/header tenant IDs as owning authority without server validation.
+Foreign concrete resource IDs should normally not leak existence.
+
+### Money
+Backend:
+- Prisma `Decimal`;
+- `Decimal(12,2)` where applicable;
+- explicit ISO currency;
+- HTTP monetary values as decimal strings where possible.
+Never use floating-point arithmetic for canonical money.
+
+### Canonical business flow
+`Budget / direct ProductionOrder`
+→ `Production`
+→ `WEEKLOG`
+→ `Validation`
+→ `PaymentList`
+→ `Invoice / Finance`
+→ `Payments / Distribution`
+
+WEEKLOG != PaymentList.
+PaymentList is commercial recognition authority.
+Finance consumes canonical PaymentList state.
+
+### Finance
+- `pending` contributes to Expected.
+- `paid` contributes to Received.
+- a paid List must not remain in Expected.
+- pre-invoice/non-authoritative states have zero revenue effect.
+- Available per currency = Received - effective Expenses - effective settled ObligationPayments.
+- no FX/cross-currency total in Phase 1.
+- Distribution has zero cash effect.
+- settlement is cash movement and must not duplicate Expense.
+
+### WEEKLOG
+- operational week: Sunday 00:00 through Saturday 23:59:59.999 in workspace timezone;
+- persisted in UTC;
+- validation rounds are versioned;
+- coverage snapshots are immutable after submission;
+- rectification preserves lineage/history;
+- later execution must not rewrite historical validation evidence.
+
+## 5. Authorization
+
+Use server-side authorization primitives.
+
+Preserve:
+- workspace boundary;
+- object boundary;
+- client boundary;
+- capability boundary;
+- optional `siteKey` scope;
+- revocation semantics.
+
+Current client-safe capabilities:
+- `budget.approve`
+- `weeklog.validate`
+- `payment_list.review`
+- `invoice.view`
+- `client.collaborators.manage`
+
+Client collaborators never receive internal Finance ledger authority.
+
+Do not create route aliases merely to satisfy tests. Test canonical active routes.
+
+## 6. Migration policy
+
+Use versioned forward-only Prisma/PostgreSQL migrations.
+
+Default:
+- expand-contract;
+- additive fields;
+- safe backfills;
+- tenant-safe foreign keys;
+- historical rows preserved;
+- replayable from fresh PostgreSQL.
+
+Never:
+- use `prisma db push` for release changes;
+- edit already-published migrations to rewrite history;
+- drop historical evidence by convenience.
+
+If an approved task says no migration but implementation appears to require one, stop and report first.
+
+For schema work verify:
+- `prisma validate`;
+- `prisma migrate status`;
+- fresh PostgreSQL replay when risk justifies it.
+
+## 7. Git controller
+
+Policy:
+- `main` = frozen production;
+- `develop/operix-core` = integration;
+- feature/fix branch per workstream;
+- no force push;
+- no published-history rewrite;
+- no production/main merge before staging/regression/migrations/homologation.
+
+Per phase:
+1. Verify branch / HEAD / worktree.
+2. Confirm approved baseline.
+3. Implement only current phase.
+4. Run focused tests.
+5. Run required regressions.
+6. Run quality gates.
+7. Commit atomically.
+8. Do not push/deploy unless explicitly requested.
+9. Stop for human review before next phase.
+
+Do not stage untracked reference/sample assets unless explicitly requested.
+
+## 8. Test controller
+
+Do not weaken tests merely to obtain GREEN.
+
+Classify failures:
+- intended RED for future phase;
+- regression;
+- harness defect;
+- environment/external dependency;
+- contract ambiguity.
+
+Already-GREEN behavior should not be rewritten without a new failing acceptance proving a defect.
+
+Concurrency/idempotency/security changes should use real PostgreSQL behavior when the race matters.
+
+## 9. Token/context economy
+
+Prefer repository references over prompt repetition.
+
+Do not restate entire specs in reports or implementation notes.
+Use acceptance IDs and ADR IDs.
+Do not narrate routine successful commands.
+Do not print large successful logs.
+
+Report by exception:
+- failed checks;
+- architecture decisions;
+- migrations;
+- authorization/security changes;
+- new risks;
+- unresolved ambiguity.
+
+Aggregate routine success:
+- `59/59 PASS`
+- `typecheck PASS`
+- `build PASS`
+
+For review:
+- inspect baseline SHA → new SHA diff;
+- compare against named acceptance IDs;
+- expand beyond the diff only when hidden coupling/risk requires it.
+
+## 10. Phase completion report controller
+
+A final report is mandatory but concise:
 
 ```text
-1. UNDERSTAND ──> Read active spec, ADRs, and DOMAIN.md. Locate active files, DB models, and legacy paths.
-2. PLAN       ──> Produce or update plan.md. List exact files, migrations, risk analysis, and tests.
-3. TEST FIRST ──> Write failing unit/integration tests for critical business/tenant invariants.
-4. IMPLEMENT  ──> Implement strictly the planned slice. No unrelated changes.
-5. VERIFY     ──> Run quality gates: lint, typecheck, unit tests, integration tests.
-6. SELF-REVIEW──> Check diff for: tenancy leaks, any-types, silent failures, localStorage, missing tests.
-7. HANDOFF    ──> Update tasks.md, record remaining risks/open questions, and obtain human approval.
+PHASE RESULT
+
+Phase:
+Baseline SHA:
+Commit SHA:
+
+Scope completed:
+- ...
+
+Acceptance:
+- current-phase: X/X GREEN
+- remaining intentional RED: N
+- runtime/homologation pending: N
+
+Regression:
+- suite/spec: X/X PASS
+
+Quality:
+- frontend typecheck: PASS/FAIL
+- backend typecheck: PASS/FAIL
+- frontend build: PASS/FAIL
+- backend build: PASS/FAIL
+- lint: PASS/FAIL
+- migrations: current/replay status
+
+Architecture / migrations:
+- only material changes
+
+Risks / unresolved:
+- none
+or
+- concise blockers
+
+Git status:
+- ...
+
+Next allowed phase:
+- ...
 ```
 
-## 6. Definition of Done (DoD) Checklist
-A task is NOT done until ALL of the following criteria are satisfied:
-- [ ] UI consumes authoritative API endpoints (no mock data, no silent noop facades).
-- [ ] Server validates inputs strictly (Zod schemas).
-- [ ] Authentication and `RequestContext` enforced.
-- [ ] Tenant isolation verified (Workspace A cannot read/mutate Workspace B).
-- [ ] Object-level authorization enforced (`own` vs `team` vs `all`).
-- [ ] Persistence is transactional and survives page reloads.
-- [ ] Error handling is explicit (no silent catches returning null).
-- [ ] Retries are idempotent (no duplicate records).
-- [ ] No sensitive data in logs.
-- [ ] Automated tests pass (unit + integration).
-- [ ] Typecheck passes with zero errors (`npm run typecheck`).
-- [ ] Linter passes with zero errors (`npm run lint`).
-- [ ] Legacy Supabase/noop code removed for the migrated capability.
+Detailed command logs are required only when a gate fails or the user explicitly requests them.
+
+## 11. Stop conditions
+
+Stop before continuing when:
+- current work changes a frozen business rule;
+- migration contradicts policy;
+- high-priority sources conflict;
+- tenant isolation would weaken;
+- audit/history would be destroyed;
+- tests would need weakening;
+- scope crosses into a future phase without approval;
+- push/deploy/production action was not explicitly authorized.
+
+## 12. Broader context
+
+For cross-spec semantics, actors, Finance, WEEKLOG, PaymentList, legacy boundaries and current execution state, read:
+
+`docs/ai/OPENAI_AGENT_CONTEXT.md`
+
+Do not load it for every local task unless necessary.
