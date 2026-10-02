@@ -1673,7 +1673,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       });
       expect(resOther.status).toBe(403);
 
-      // 2. TECH-BUDGET-APPROVE-OWN: Técnico A1 aprova o próprio orçamento -> 200 OK
+      // 2. TECH-BUDGET-APPROVE-OWN: Técnico A1 tenta aprovar o próprio orçamento -> 403 Forbidden (TECH_SELF_APPROVAL_FORBIDDEN)
       const resOwn = await fetch(`${baseUrl}/api/budgets/${budgetApprove.id}/revisions/${revApprove.id}/approve`, {
         method: "POST",
         headers: {
@@ -1683,7 +1683,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         },
         body: JSON.stringify({ revisionId: revApprove.id }),
       });
-      expect(resOwn.status).toBe(200);
+      expect(resOwn.status).toBe(403);
     });
 
     it("TECH-BUDGET-REJECT-OWN & TECH-BUDGET-REJECT-OTHER: Técnico só rejeita orçamento atribuído a ele", async () => {
@@ -1742,7 +1742,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       });
       expect(resOther.status).toBe(403);
 
-      // 2. TECH-BUDGET-REJECT-OWN: Técnico A1 rejeita o próprio orçamento -> 200 OK
+      // 2. TECH-BUDGET-REJECT-OWN: Técnico A1 tenta rejeitar o próprio orçamento -> 403 Forbidden (TECH_SELF_APPROVAL_FORBIDDEN)
       const resOwn = await fetch(`${baseUrl}/api/budgets/${budgetReject.id}/revisions/${revReject.id}/reject`, {
         method: "POST",
         headers: {
@@ -1752,7 +1752,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         },
         body: JSON.stringify({ reason: "Cliente recusou presencialmente" }),
       });
-      expect(resOwn.status).toBe(200);
+      expect(resOwn.status).toBe(403);
     });
   });
 

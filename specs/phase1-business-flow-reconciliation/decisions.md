@@ -94,6 +94,13 @@ To support auto-draft handoff, provenance, and idempotency, `PaymentList` schema
 - `originWeeklogId`: nullable UUID referencing `Weeklog(id)`.
 - `supersededByPaymentListId`: nullable UUID referencing `PaymentList(id)`.
 - `status`: enum preserving `draft`, `under_review`, `confronted`, `pending`, `paid`, `cancelled` and adding `ready_for_billing`, `superseded`.
+- **R04 Pre-Flight Note A (Tenant-Safe Composite FKs)**:
+  `originWeeklogId` and `supersededByPaymentListId` must strictly preserve Spec004 composite tenant FK architecture:
+  - `FOREIGN KEY (origin_weeklog_id, workspace_id) REFERENCES weeklogs(id, workspace_id)`
+  - `FOREIGN KEY (superseded_by_payment_list_id, workspace_id) REFERENCES payment_lists(id, workspace_id)`
+  Never introduce simple cross-workspace FK linkage.
+- **R04 Pre-Flight Note B (Auto-List Idempotency Authority Audit)**:
+  Before migration, audit whether one Weeklog can produce multiple valid `WeeklogValidation` rounds due to rectification/re-finalization. If yes, `originWeeklogId` alone is too coarse as exactly-once authority. Evaluate `originWeeklogValidationId` / `validationSequence` as the handoff idempotency identity. Do NOT implement the partial unique index until this is proven against Spec003 validation-round semantics.
 - **Deterministic Auto-Draft Idempotency Constraint** (`LIST-AUTO-IDEMPOTENT-01`):
   ```sql
   CREATE UNIQUE INDEX "unique_active_auto_payment_list_origin_weeklog"

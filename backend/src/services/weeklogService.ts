@@ -12,6 +12,7 @@ import {
   assertTenantAccess,
   assertObjectAccess,
   validateTechnicianAssignment,
+  assertClientCapability,
 } from "../lib/objectAuth.js";
 import { operationalWeekOf } from "../lib/weekUtils.js";
 
@@ -975,36 +976,18 @@ export async function submitWeeklogForValidation(
 export async function assertActiveClientAccessGrant(
   tx: Prisma.TransactionClient,
   ctx: RequestContext,
-  clientId: string
-): Promise<{ id: string; status: string; role: string }> {
-  if (!ctx.activeWorkspaceId || !ctx.actorUserId) {
-    throw new ForbiddenError("Contexto de autenticação incompleto.");
-  }
-
-  const grants: Array<{ id: string; status: string; role: string; revokedAt: Date | null }> =
-    await tx.$queryRaw`
-      SELECT id, status, role, revoked_at as "revokedAt"
-      FROM client_access_grants
-      WHERE workspace_id = ${ctx.activeWorkspaceId}
-        AND user_id = ${ctx.actorUserId}
-        AND client_id = ${clientId}
-      FOR UPDATE
-    `;
-
-  if (!grants || grants.length === 0) {
-    throw new ForbiddenError(
-      "VALIDATOR_GRANT_REQUIRED: Validador não possui vínculo (ClientAccessGrant) com este cliente no workspace."
-    );
-  }
-
-  const grant = grants[0];
-  if (grant.status !== "active" || grant.revokedAt != null) {
-    throw new ForbiddenError(
-      "VALIDATOR_REVOKED: O vínculo de validação (ClientAccessGrant) para este cliente foi revogado."
-    );
-  }
-
-  return grant;
+  clientId: string,
+  siteKey?: string | null
+): Promise<{ id: string; status: string; role: string; capabilities: string[]; siteKey: string | null }> {
+  return (await assertClientCapability(
+    ctx,
+    {
+      clientId,
+      capability: "weeklog.validate",
+      siteKey: siteKey ?? null,
+    },
+    tx
+  )) as any;
 }
 
 export interface ReviewWeeklogEntryPayload {
@@ -1064,7 +1047,7 @@ export async function reviewWeeklogEntry(
       }
 
       // 2. Validação de grant ativo para o cliente
-      await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId);
+      await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId, weeklog.siteKey);
 
       // 3. Carregar entrada com lock
       const entries: any[] = await tx.$queryRaw`
@@ -1175,7 +1158,7 @@ export async function uploadWeeklogSignature(
 
   // 3. Validação de grant ativo do validador
   await prisma.$transaction(async (tx) => {
-    await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId);
+    await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId, weeklog.siteKey);
   });
 
   // 4. Salvar arquivo no storage sob caminho de staging governado
@@ -1267,7 +1250,7 @@ export async function validateWeeklogBatch(
     async (tx) => {
       // 1. Lock pessimista no cabeçalho do Weeklog
       const lockedWeeklogs: any[] = await tx.$queryRaw`
-        SELECT id, workspace_id as "workspaceId", status, client_id as "clientId"
+        SELECT id, workspace_id as "workspaceId", status, client_id as "clientId", site_key as "siteKey"
         FROM weeklogs
         WHERE id = ${weeklogId} AND workspace_id = ${workspaceId}
         FOR UPDATE
@@ -1311,7 +1294,7 @@ export async function validateWeeklogBatch(
       }
 
       // 3. Validar e travar o ClientAccessGrant ativo (evita race de revogação)
-      await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId);
+      await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId, weeklog.siteKey);
 
       // 4. Localizar a MESMA Validation Round em estado 'pending'
       let activeRound = await tx.weeklogValidation.findFirst({
@@ -1607,7 +1590,7 @@ export async function rectifyWeeklogEntry(
 
       // Step 4.4: Autoridade do Caller
       if (ctx.membershipRole === "client") {
-        await assertActiveClientAccessGrant(tx, ctx, currentWl.clientId);
+        await assertActiveClientAccessGrant(tx, ctx, currentWl.clientId, currentWl.siteKey);
       } else if (ctx.membershipRole === "technician") {
         assertObjectAccess(ctx, currentEntry);
       }

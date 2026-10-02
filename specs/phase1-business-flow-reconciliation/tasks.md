@@ -14,13 +14,13 @@
   - [x] Update `tests/integration/phase1-business-flow-reconciliation.test.ts` to test observable behaviors on canonical routes.
   - [x] Verify intentional RED for absent behaviors and GREEN for preserved invariants.
 
-- [ ] **R02: Spec 002 — Budget Client Authority, Rejection Refinement, Client Delegation & Production Timeline**
-  - [ ] Ban technician self-approval in `backend/src/routes/budgets.ts` (throw `403 TECH_SELF_APPROVAL_FORBIDDEN`).
-  - [ ] Enforce granular `ClientAccessGrant` capabilities: `budget.approve`, `weeklog.validate`, `payment_list.review`, `invoice.view`, `client.collaborators.manage`.
-  - [ ] Enforce client `siteKey` operational scope restriction (`403 SITE_SCOPE_UNAUTHORIZED`).
-  - [ ] Implement client representative delegation endpoints: `POST /api/clients/:clientId/collaborators`, `PATCH /:grantId`, `DELETE /:grantId` with same-client boundary, capability ceiling, and zero Finance access.
-  - [ ] Preserve direct ProductionOrder creation (`DIRECT-PO-PRESERVED-01`).
-  - [ ] Implement `GET /api/production-orders/:id/timeline` strictly from persisted canonical facts (zero fabricated pause/resume events).
+- [x] **R02: Spec 002 — Budget Client Authority, Rejection Refinement, Client Delegation & Production Timeline**
+  - [x] Ban technician self-approval in `backend/src/routes/budgets.ts` (throw `403 TECH_SELF_APPROVAL_FORBIDDEN`).
+  - [x] Enforce granular `ClientAccessGrant` capabilities: `budget.approve`, `weeklog.validate`, `payment_list.review`, `invoice.view`, `client.collaborators.manage`.
+  - [x] Enforce client `siteKey` operational scope restriction (`403 SITE_SCOPE_UNAUTHORIZED`).
+  - [x] Implement client representative delegation endpoints: `POST /api/clients/:clientId/collaborators`, `PATCH /:grantId`, `DELETE /:grantId` with same-client boundary, capability ceiling, and zero Finance access.
+  - [x] Preserve direct ProductionOrder creation (`DIRECT-PO-PRESERVED-01`).
+  - [x] Implement `GET /api/production-orders/:id/timeline` strictly from persisted canonical facts (zero fabricated pause/resume events).
 
 - [ ] **R03: Spec 003 — Week Boundary Auto-Closure & Startup Catch-Up Engine**
   - [ ] Implement `reconcileExpiredWeeklogs` in `backend/src/services/weeklogService.ts`.
@@ -30,6 +30,8 @@
   - [ ] Verify external WEEKLOG upload and commit on canonical route `/api/external-operational-imports`.
 
 - [ ] **R04: Spec 004 / ADR-002 — Source-Aware Provisional Claims, Multiweek Absorption, Manual List Coexistence & Auto-Draft PaymentList Handoff**
+  - **R04 Pre-Flight Note A (Tenant-safe composite FKs)**: `originWeeklogId` and `supersededByPaymentListId` must strictly preserve Spec004 composite tenant FK architecture `(origin_weeklog_id, workspace_id) REFERENCES weeklogs(id, workspace_id)` and `(superseded_by_payment_list_id, workspace_id) REFERENCES payment_lists(id, workspace_id)`. Never introduce simple, non-tenant FKs.
+  - **R04 Pre-Flight Note B (Auto-list idempotency authority)**: Audit whether one Weeklog can produce multiple valid `WeeklogValidation` rounds due to rectification/re-finalization. If yes, `originWeeklogId` alone may be too coarse as an exactly-once authority. Evaluate `originWeeklogValidationId` / `validationSequence` as handoff idempotency identity before creating the partial unique index.
   - [ ] Add `PaymentList` schema additions: `sourceType`, `originWeeklogId`, `supersededByPaymentListId`, status values (`ready_for_billing`, `superseded`), and partial unique index `unique_active_auto_payment_list_origin_weeklog`.
   - [ ] Execute forward-only claim constraint migration replacing `payment_list_entry_claims_status_check` and `payment_list_entry_claims_lifecycle_check`, preserving `unique_active_or_consumed_weeklog_entry_claim` and adding `unique_provisional_weeklog_entry_claim`.
   - [ ] Hook `createAuthoritativeDraftListFromWeeklog` inside `validateWeeklogBatch` and external import commit with `provisional` claims.

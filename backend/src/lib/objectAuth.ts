@@ -199,3 +199,121 @@ export async function validateTechnicianAssignment(
   };
 }
 
+export type ClientCapability =
+  | "budget.approve"
+  | "weeklog.validate"
+  | "payment_list.review"
+  | "invoice.view"
+  | "client.collaborators.manage";
+
+export const ALLOWED_CLIENT_CAPABILITIES: readonly ClientCapability[] = [
+  "budget.approve",
+  "weeklog.validate",
+  "payment_list.review",
+  "invoice.view",
+  "client.collaborators.manage",
+] as const;
+
+export interface AssertClientCapabilityOptions {
+  clientId: string;
+  capability: ClientCapability;
+  siteKey?: string | null;
+}
+
+export interface ClientCapabilityGrant {
+  id: string;
+  clientId: string;
+  status: string;
+  role: string;
+  capabilities: string[];
+  siteKey: string | null;
+  revokedAt: Date | null;
+}
+
+/**
+ * Validação central de capacidades granulares de cliente (Spec006 R02).
+ * Garante tenant isolation, não-revogação, restrição de escopo por siteKey e compatibilidade com grants legados.
+ */
+export async function assertClientCapability(
+  ctx: RequestContext,
+  options: AssertClientCapabilityOptions,
+  tx?: any
+): Promise<ClientCapabilityGrant> {
+  if (!ctx.activeWorkspaceId || !ctx.actorUserId) {
+    throw new ForbiddenError("Contexto de autenticação incompleto.");
+  }
+
+  const db = tx ?? prisma;
+
+  let grants: ClientCapabilityGrant[] = [];
+  if (tx && typeof tx.$queryRaw === "function") {
+    grants = await tx.$queryRaw`
+      SELECT id, client_id as "clientId", status, role, capabilities, site_key as "siteKey", revoked_at as "revokedAt"
+      FROM client_access_grants
+      WHERE workspace_id = ${ctx.activeWorkspaceId}
+        AND user_id = ${ctx.actorUserId}
+      FOR UPDATE
+    `;
+  } else {
+    const rawGrants = await db.clientAccessGrant.findMany({
+      where: {
+        workspaceId: ctx.activeWorkspaceId,
+        userId: ctx.actorUserId,
+      },
+    });
+    grants = rawGrants.map((g: any) => ({
+      id: g.id,
+      clientId: g.clientId,
+      status: g.status,
+      role: g.role,
+      capabilities: g.capabilities ?? [],
+      siteKey: g.siteKey ?? null,
+      revokedAt: g.revokedAt ?? null,
+    }));
+  }
+
+  const matchingGrant = grants.find((g) => g.clientId === options.clientId);
+
+  if (!matchingGrant) {
+    if (grants.length > 0) {
+      throw new ForbiddenError(
+        "CROSS_CLIENT_FORBIDDEN: Usuário não autorizado para este cliente no workspace."
+      );
+    }
+    throw new ForbiddenError(
+      "VALIDATOR_GRANT_REQUIRED: Validador não possui vínculo (ClientAccessGrant) com este cliente no workspace."
+    );
+  }
+
+  if (matchingGrant.status !== "active" || matchingGrant.revokedAt != null) {
+    throw new ForbiddenError(
+      "VALIDATOR_REVOKED: O vínculo de validação (ClientAccessGrant) para este cliente foi revogado."
+    );
+  }
+
+  // Compatibilidade com grants legados: role 'validator' mantém 'weeklog.validate'
+  const effectiveCapabilities =
+    matchingGrant.capabilities && matchingGrant.capabilities.length > 0
+      ? matchingGrant.capabilities
+      : matchingGrant.role === "validator"
+      ? ["weeklog.validate"]
+      : [];
+
+  if (!effectiveCapabilities.includes(options.capability)) {
+    throw new ForbiddenError(
+      `CAPABILITY_UNAUTHORIZED: Usuário não possui permissão suficiente (${options.capability} necessária).`
+    );
+  }
+
+  if (matchingGrant.siteKey && options.siteKey && matchingGrant.siteKey !== options.siteKey) {
+    throw new ForbiddenError(
+      "SITE_SCOPE_UNAUTHORIZED: Local operacional não autorizado para este validador."
+    );
+  }
+
+  return {
+    ...matchingGrant,
+    capabilities: effectiveCapabilities,
+  };
+}
+

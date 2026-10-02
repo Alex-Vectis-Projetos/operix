@@ -10,6 +10,7 @@ import {
   assertTenantAccess,
   assertObjectAccess,
   validateTechnicianAssignment,
+  assertClientCapability,
 } from "../lib/objectAuth.js";
 import {
   createBudget,
@@ -488,6 +489,26 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
     assertTenantAccess(ctx, budget.workspaceId);
     assertObjectAccess(ctx, budget);
 
+    if (
+      (budget.technicianUserId && budget.technicianUserId === ctx.actorUserId) ||
+      ctx.membershipRole === "technician"
+    ) {
+      throw new ForbiddenError(
+        "TECH_SELF_APPROVAL_FORBIDDEN: O técnico executor não pode aprovar o próprio orçamento."
+      );
+    }
+
+    if (ctx.membershipRole !== "owner" && ctx.membershipRole !== "admin") {
+      if (!budget.clientId) {
+        throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
+      }
+      await assertClientCapability(ctx, {
+        clientId: budget.clientId,
+        capability: "budget.approve",
+        siteKey: (budget as any).siteKey ?? null,
+      });
+    }
+
     const result = await approveBudgetRevision(
       ctx.activeWorkspaceId,
       budgetId,
@@ -536,6 +557,26 @@ budgetsRouter.post("/:id/revisions/:revisionId/reject", async (req: Request, res
     }
     assertTenantAccess(ctx, budget.workspaceId);
     assertObjectAccess(ctx, budget);
+
+    if (
+      (budget.technicianUserId && budget.technicianUserId === ctx.actorUserId) ||
+      ctx.membershipRole === "technician"
+    ) {
+      throw new ForbiddenError(
+        "TECH_SELF_APPROVAL_FORBIDDEN: O técnico executor não pode rejeitar o próprio orçamento."
+      );
+    }
+
+    if (ctx.membershipRole !== "owner" && ctx.membershipRole !== "admin") {
+      if (!budget.clientId) {
+        throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
+      }
+      await assertClientCapability(ctx, {
+        clientId: budget.clientId,
+        capability: "budget.approve",
+        siteKey: (budget as any).siteKey ?? null,
+      });
+    }
 
     const result = await rejectBudgetRevision(
       ctx.activeWorkspaceId,

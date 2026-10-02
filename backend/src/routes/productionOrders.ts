@@ -647,6 +647,152 @@ productionOrdersRouter.get("/:id", async (req: Request, res: Response, next: Nex
   }
 });
 
+// GET /api/production-orders/:id/timeline — Linha do tempo factual e determinística (Spec006 R02)
+productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params["id"] as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const order = await prisma.productionOrder.findUnique({
+      where: { id },
+      include: {
+        weeklogEntries: {
+          orderBy: { createdAt: "asc" },
+        },
+        rectificationOriginEntry: true,
+      },
+    });
+
+    if (!order || order.workspaceId !== ctx.activeWorkspaceId) {
+      return res.status(404).json({ message: "Ordem de produção não encontrada." });
+    }
+
+    assertObjectAccess(ctx, order);
+
+    type TimelineEventType =
+      | "created"
+      | "in_production"
+      | "finalized"
+      | "weeklog_entry"
+      | "rectification_requested"
+      | "reopened";
+
+    interface TimelineEvent {
+      type: TimelineEventType;
+      timestamp: string;
+      actorId?: string | null;
+      metadata?: Record<string, any>;
+    }
+
+    const events: TimelineEvent[] = [];
+
+    // 1. Fact: created
+    events.push({
+      type: "created",
+      timestamp: order.createdAt instanceof Date ? order.createdAt.toISOString() : new Date(order.createdAt).toISOString(),
+      actorId: order.createdBy || null,
+      metadata: {
+        code: order.code,
+        clientId: order.clientId,
+        licensePlate: order.licensePlate,
+      },
+    });
+
+    // 2. Fact: in_production (if startedAt present)
+    if (order.startedAt) {
+      events.push({
+        type: "in_production",
+        timestamp: order.startedAt instanceof Date ? order.startedAt.toISOString() : new Date(order.startedAt).toISOString(),
+        actorId: order.technicianUserId || null,
+      });
+    }
+
+    // 3. Fact: finalized (finishedAt or deliveredAt, if present)
+    const finalizedTime = order.finishedAt ?? order.deliveredAt;
+    if (finalizedTime) {
+      events.push({
+        type: "finalized",
+        timestamp: finalizedTime instanceof Date ? finalizedTime.toISOString() : new Date(finalizedTime).toISOString(),
+        actorId: order.technicianUserId || null,
+        metadata: {
+          finishedAt: order.finishedAt ? (order.finishedAt instanceof Date ? order.finishedAt.toISOString() : new Date(order.finishedAt).toISOString()) : null,
+          deliveredAt: order.deliveredAt ? (order.deliveredAt instanceof Date ? order.deliveredAt.toISOString() : new Date(order.deliveredAt).toISOString()) : null,
+        },
+      });
+    }
+
+    // 4. Fact: weeklog_entry (associated WeeklogEntry records)
+    for (const entry of order.weeklogEntries) {
+      events.push({
+        type: "weeklog_entry",
+        timestamp: entry.createdAt instanceof Date ? entry.createdAt.toISOString() : new Date(entry.createdAt).toISOString(),
+        actorId: entry.technicianUserId || null,
+        metadata: {
+          weeklogEntryId: entry.id,
+          weeklogId: entry.weeklogId,
+          totalAmount: entry.totalAmount,
+          validationStatus: entry.validationStatus,
+        },
+      });
+
+      if (
+        entry.isRectification ||
+        entry.rectificationOriginEntryId ||
+        entry.validationStatus === "rejected" ||
+        entry.validationStatus === "rectification_pending"
+      ) {
+        events.push({
+          type: "rectification_requested",
+          timestamp: entry.rectificationRequestedAt
+            ? (entry.rectificationRequestedAt instanceof Date ? entry.rectificationRequestedAt.toISOString() : new Date(entry.rectificationRequestedAt).toISOString())
+            : (entry.updatedAt instanceof Date ? entry.updatedAt.toISOString() : new Date(entry.updatedAt).toISOString()),
+          metadata: {
+            weeklogEntryId: entry.id,
+            isRectification: entry.isRectification,
+            rectificationReason: entry.rectificationReason || entry.rejectionReason,
+            rectificationRequestedBy: entry.rectificationRequestedBy,
+          },
+        });
+      }
+    }
+
+    // 5. Fact: reopened / rectification lineage
+    if (order.rectificationOriginId || order.executionSequence > 1) {
+      events.push({
+        type: "reopened",
+        timestamp: order.createdAt instanceof Date ? order.createdAt.toISOString() : new Date(order.createdAt).toISOString(),
+        metadata: {
+          executionSequence: order.executionSequence,
+          rectificationOriginId: order.rectificationOriginId,
+        },
+      });
+    }
+
+    // Deterministic tie-breaker priorities
+    const typePriority: Record<TimelineEventType, number> = {
+      created: 1,
+      in_production: 2,
+      finalized: 3,
+      weeklog_entry: 4,
+      rectification_requested: 5,
+      reopened: 6,
+    };
+
+    events.sort((a, b) => {
+      const timeDiff = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return (typePriority[a.type] ?? 99) - (typePriority[b.type] ?? 99);
+    });
+
+    return res.status(200).json(events);
+  } catch (error) {
+    return next(error);
+  }
+});
+
 // POST /api/production-orders
 productionOrdersRouter.post("/", async (req: Request, res: Response, next: NextFunction) => {
   try {

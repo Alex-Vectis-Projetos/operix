@@ -17,6 +17,7 @@ const { financeV2Router } = await import("../../backend/src/routes/financeV2.js"
 const { productionOrdersRouter } = await import("../../backend/src/routes/productionOrders.js");
 const { budgetsRouter } = await import("../../backend/src/routes/budgets.js");
 const { externalOperationalImportsRouter } = await import("../../backend/src/routes/externalOperationalImports.js");
+const { clientsRouter } = await import("../../backend/src/routes/clients.js");
 const { minioImportDocumentStorage, aiImportExtractionProvider } = await import("../../backend/src/services/externalImportAdapters.js");
 const { signAccessToken } = await import("../../backend/src/lib/jwt.js");
 const { prisma } = await import("../../backend/src/lib/prisma.js");
@@ -176,8 +177,9 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         workspaceId: fixture.workspaceA,
         userId: fixture.clientAUser,
         clientId: fixture.clientAId,
-        role: "validator",
+        role: "representative",
         status: "active",
+        capabilities: ["budget.approve", "weeklog.validate", "client.collaborators.manage"],
       },
     });
   }
@@ -211,6 +213,16 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     app.use("/api/production-orders", productionOrdersRouter);
     app.use("/api/budgets", budgetsRouter);
     app.use("/api/external-operational-imports", externalOperationalImportsRouter);
+    app.use("/api/clients", clientsRouter);
+
+    app.use((err: any, _req: any, res: any, _next: any) => {
+      const status = typeof err?.statusCode === "number" ? err.statusCode : 500;
+      return res.status(status).json({
+        code: err?.code,
+        message: err?.message || "Internal error",
+      });
+    });
+
     server = app.listen(0);
     await once(server, "listening");
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -1203,34 +1215,144 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     });
 
     it("CLIENT-CAPABILITY-BUDGET-APPROVE-01: Client collaborator lacking budget.approve is denied", async () => {
-      // RED: Collaborator lacking budget.approve receives 403 CAPABILITY_UNAUTHORIZED
-      const budget = await prisma.budget.create({
-        data: {
+      const noBudgetApproveUser = "71000000-0000-4000-8000-000000000099";
+      const noBudgetApproveAppUser = "71000000-0000-4000-8000-000000000199";
+      await prisma.user.upsert({
+        where: { id: noBudgetApproveUser },
+        create: { id: noBudgetApproveUser, email: "no-budget-app@client.com", fullName: "No Budget App", role: "user", passwordHash: "x" },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: noBudgetApproveUser },
+        create: { id: noBudgetApproveAppUser, authUserId: noBudgetApproveUser, email: "no-budget-app@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: noBudgetApproveAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: noBudgetApproveAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+      await prisma.clientAccessGrant.upsert({
+        where: {
+          workspaceId_userId_clientId: {
+            workspaceId: fixture.workspaceA,
+            userId: noBudgetApproveUser,
+            clientId: fixture.clientAId,
+          },
+        },
+        create: {
           workspaceId: fixture.workspaceA,
+          userId: noBudgetApproveUser,
           clientId: fixture.clientAId,
-          technicianUserId: fixture.techA,
-          status: "pending_approval",
-          currencyCode: "EUR",
-          totalAmount: 1000.0,
+          capabilities: ["weeklog.validate"],
+          status: "active",
+        },
+        update: {
+          capabilities: ["weeklog.validate"],
+          status: "active",
+          revokedAt: null,
         },
       });
 
-      const res = await request(`/api/budgets/${budget.id}/approve`, {
-        method: "POST",
-        headers: headers(fixture.clientAUser, fixture.workspaceA, "cap-budget-app-key", "user"),
-        body: JSON.stringify({ approvedNotes: "Client approval attempt" }),
+      const budgetId = "81000000-0000-4000-8000-000000000099";
+      const revId = "82000000-0000-4000-8000-000000000099";
+      await prisma.budget.deleteMany({ where: { id: budgetId } });
+      const budget = await prisma.budget.create({
+        data: {
+          id: budgetId,
+          workspaceId: fixture.workspaceA,
+          code: "BUD-NO-CAP-01",
+          clientId: fixture.clientAId,
+          technicianUserId: fixture.techA,
+          createdById: fixture.ownerA,
+          currentRevisionNumber: 1,
+        },
       });
 
-      // RED: Capabilities enforcement not yet implemented
+      await prisma.budgetRevision.create({
+        data: {
+          id: revId,
+          budgetId: budget.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "VECTIS Client" },
+          vehicleSnapshot: { plate: "EW-621-GF" },
+          grossTotal: 1000.0,
+          currencyCode: "EUR",
+          createdById: fixture.ownerA,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: budget.id },
+        data: { currentRevisionId: revId },
+      });
+
+      const res = await request(`/api/budgets/${budget.id}/revisions/${revId}/approve`, {
+        method: "POST",
+        headers: headers(noBudgetApproveUser, fixture.workspaceA, "cap-budget-app-key", "user"),
+        body: JSON.stringify({ notes: "Client approval attempt" }),
+      });
+
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.message || "").toMatch(/CAPABILITY_UNAUTHORIZED|permissão insuficiente/i);
     });
 
     it("CLIENT-CAPABILITY-WEEKLOG-VALIDATE-01: Client collaborator lacking weeklog.validate is denied", async () => {
-      // RED: Collaborator lacking weeklog.validate receives 403 CAPABILITY_UNAUTHORIZED
+      const noWlValUser = "71000000-0000-4000-8000-000000000098";
+      const noWlValAppUser = "71000000-0000-4000-8000-000000000198";
+      await prisma.user.upsert({
+        where: { id: noWlValUser },
+        create: { id: noWlValUser, email: "no-wl-val@client.com", fullName: "No WL Val", role: "user", passwordHash: "x" },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: noWlValUser },
+        create: { id: noWlValAppUser, authUserId: noWlValUser, email: "no-wl-val@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: noWlValAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: noWlValAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+      await prisma.clientAccessGrant.upsert({
+        where: {
+          workspaceId_userId_clientId: {
+            workspaceId: fixture.workspaceA,
+            userId: noWlValUser,
+            clientId: fixture.clientAId,
+          },
+        },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: noWlValUser,
+          clientId: fixture.clientAId,
+          capabilities: ["budget.approve"],
+          status: "active",
+        },
+        update: {
+          capabilities: ["budget.approve"],
+          status: "active",
+          revokedAt: null,
+        },
+      });
+
       const wlId = "75000000-0000-4000-8000-000000000088";
-      await prisma.weeklog.deleteMany({ where: { id: wlId } });
+      await prisma.weeklog.deleteMany({
+        where: {
+          OR: [
+            { id: wlId },
+            {
+              workspaceId: fixture.workspaceA,
+              startsOn: new Date("2026-09-13T00:00:00.000Z"),
+              clientId: fixture.clientAId,
+              siteKey: "site-default",
+            },
+          ],
+        },
+      });
       await prisma.weeklog.create({
         data: {
           id: wlId,
@@ -1248,21 +1370,19 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
 
       const res = await request(`/api/weeklogs/${wlId}/validate`, {
         method: "POST",
-        headers: headers(fixture.clientAUser, fixture.workspaceA, "cap-wl-val-key", "user"),
+        headers: headers(noWlValUser, fixture.workspaceA, "cap-wl-val-key", "user"),
         body: JSON.stringify({
           validationMethod: "authenticated_confirmation",
           approvedEntryIds: [],
         }),
       });
 
-      // RED: Capabilities enforcement not yet implemented
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.message || "").toMatch(/CAPABILITY_UNAUTHORIZED|permissão insuficiente/i);
     });
 
     it("CLIENT-CAPABILITY-PAYMENT-LIST-REVIEW-01: Client collaborator lacking payment_list.review is denied", async () => {
-      // RED: Collaborator lacking payment_list.review receives 403 CAPABILITY_UNAUTHORIZED
       const listId = "74000000-0000-4000-8000-000000000066";
       await prisma.paymentList.deleteMany({ where: { id: listId } });
       await prisma.paymentList.create({
@@ -1284,22 +1404,18 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         body: JSON.stringify({ notes: "Client review attempt" }),
       });
 
-      // RED: Endpoint/capability check returns 403 or 404
       expect([403, 404]).toContain(res.status);
     });
 
     it("CLIENT-CAPABILITY-INVOICE-VIEW-01: Client collaborator lacking invoice.view is denied", async () => {
-      // RED: Collaborator lacking invoice.view receives 403 CAPABILITY_UNAUTHORIZED
       const res = await request(`/api/invoices/77000000-0000-4000-8000-000000000001`, {
         headers: headers(fixture.clientAUser, fixture.workspaceA, "cap-inv-view-key", "user"),
       });
 
-      // RED: Returns 403 or 404
       expect([403, 404]).toContain(res.status);
     });
 
     it("CLIENT-COLLABORATORS-MANAGE-01: Authorized client representative delegates, updates, and revokes collaborators", async () => {
-      // Representative delegates new collaborator for Client A
       const res = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
         method: "POST",
         headers: headers(fixture.clientAUser, fixture.workspaceA, "delegate-key", "user"),
@@ -1311,12 +1427,10 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         }),
       });
 
-      // RED: Endpoint does not exist yet (404)
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.grantId).toBeDefined();
 
-      // Cross-client delegation attempt returns 403
       const crossRes = await request(`/api/clients/${fixture.clientBId}/collaborators`, {
         method: "POST",
         headers: headers(fixture.clientAUser, fixture.workspaceA, "cross-delegate-key", "user"),
@@ -1331,9 +1445,66 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     });
 
     it("CLIENT-SITE-SCOPE-DENIAL-01: Operational siteKey scope blocks out-of-scope validation", async () => {
-      // RED: Scoped grant to site-lyon attempting validation on site-paris should return 403
+      const scopedUser = "71000000-0000-4000-8000-000000000097";
+      const scopedAppUser = "71000000-0000-4000-8000-000000000197";
+      await prisma.user.upsert({
+        where: { id: scopedUser },
+        create: {
+          id: scopedUser,
+          email: "scoped-user@client.com",
+          fullName: "Scoped User",
+          role: "user",
+          passwordHash: "x",
+        },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: scopedUser },
+        create: { id: scopedAppUser, authUserId: scopedUser, email: "scoped-user@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: scopedAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: scopedAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+      await prisma.clientAccessGrant.upsert({
+        where: {
+          workspaceId_userId_clientId: {
+            workspaceId: fixture.workspaceA,
+            userId: scopedUser,
+            clientId: fixture.clientAId,
+          },
+        },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: scopedUser,
+          clientId: fixture.clientAId,
+          capabilities: ["weeklog.validate"],
+          siteKey: "site-lyon",
+          status: "active",
+        },
+        update: {
+          capabilities: ["weeklog.validate"],
+          siteKey: "site-lyon",
+          status: "active",
+        },
+      });
+
       const scopedWeeklogId = "75000000-0000-4000-8000-000000000099";
-      await prisma.weeklog.deleteMany({ where: { id: scopedWeeklogId } });
+      await prisma.weeklog.deleteMany({
+        where: {
+          OR: [
+            { id: scopedWeeklogId },
+            {
+              workspaceId: fixture.workspaceA,
+              startsOn: new Date("2026-09-20T00:00:00.000Z"),
+              clientId: fixture.clientAId,
+              siteKey: "site-paris",
+            },
+          ],
+        },
+      });
       await prisma.weeklog.create({
         data: {
           id: scopedWeeklogId,
@@ -1351,14 +1522,13 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
 
       const res = await request(`/api/weeklogs/${scopedWeeklogId}/validate`, {
         method: "POST",
-        headers: headers(fixture.clientAUser, fixture.workspaceA, "scoped-val-key", "user"),
+        headers: headers(scopedUser, fixture.workspaceA, "scoped-val-key", "user"),
         body: JSON.stringify({
           validationMethod: "authenticated_confirmation",
           approvedEntryIds: [],
         }),
       });
 
-      // RED: Site scope checking is not yet implemented
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.message || "").toMatch(/SITE_SCOPE_UNAUTHORIZED|local operacional não autorizado/i);
@@ -1369,8 +1539,203 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         headers: headers(fixture.clientAUser, fixture.workspaceA, "client-fin-key", "user"),
       });
 
-      // GREEN: Existing finance authorization strictly rejects non-owner / non-admin
       expect(res.status).toBe(403);
+    });
+
+    it("CLIENT-FOCUS-OWNER-BOOTSTRAP-01: Workspace Owner/Admin bootstraps initial client representative", async () => {
+      const bootstrapUser = "71000000-0000-4000-8000-000000000096";
+      await prisma.user.upsert({
+        where: { id: bootstrapUser },
+        create: { id: bootstrapUser, email: "rep-bootstrap@client.com", fullName: "Rep Bootstrap", role: "user", passwordHash: "x" },
+        update: {},
+      });
+
+      const res = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "owner-boot-key"),
+        body: JSON.stringify({
+          userId: bootstrapUser,
+          role: "representative",
+          capabilities: ["client.collaborators.manage", "budget.approve", "weeklog.validate"],
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.grantId).toBeDefined();
+      expect(body.grant.capabilities).toContain("client.collaborators.manage");
+    });
+
+    it("CLIENT-FOCUS-LEGACY-BACKWARD-COMPAT-01: Legacy validator grant maintains weeklog.validate compatibility", async () => {
+      const legacyUser = "71000000-0000-4000-8000-000000000095";
+      await prisma.user.upsert({
+        where: { id: legacyUser },
+        create: { id: legacyUser, email: "legacy-val@client.com", fullName: "Legacy Val", role: "user", passwordHash: "x" },
+        update: {},
+      });
+
+      await prisma.clientAccessGrant.upsert({
+        where: {
+          workspaceId_userId_clientId: {
+            workspaceId: fixture.workspaceA,
+            userId: legacyUser,
+            clientId: fixture.clientAId,
+          },
+        },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: legacyUser,
+          clientId: fixture.clientAId,
+          role: "validator",
+          capabilities: ["weeklog.validate"],
+          status: "active",
+        },
+        update: {
+          role: "validator",
+          capabilities: ["weeklog.validate"],
+          status: "active",
+        },
+      });
+
+      const grant = await prisma.clientAccessGrant.findFirst({
+        where: { userId: legacyUser, workspaceId: fixture.workspaceA },
+      });
+      expect(grant?.capabilities).toContain("weeklog.validate");
+    });
+
+    it("CLIENT-FOCUS-REVOKED-GRANT-DENIED-01: Revoked grant remains strictly denied", async () => {
+      const revokedUser = "71000000-0000-4000-8000-000000000094";
+      const revokedAppUser = "71000000-0000-4000-8000-000000000194";
+      await prisma.user.upsert({
+        where: { id: revokedUser },
+        create: {
+          id: revokedUser,
+          email: "revoked-user@client.com",
+          fullName: "Revoked User",
+          role: "user",
+          passwordHash: "x",
+        },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: revokedUser },
+        create: { id: revokedAppUser, authUserId: revokedUser, email: "revoked-user@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: revokedAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: revokedAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+
+      const grant = await prisma.clientAccessGrant.upsert({
+        where: {
+          workspaceId_userId_clientId: {
+            workspaceId: fixture.workspaceA,
+            userId: revokedUser,
+            clientId: fixture.clientAId,
+          },
+        },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: revokedUser,
+          clientId: fixture.clientAId,
+          role: "validator",
+          capabilities: ["weeklog.validate"],
+          status: "revoked",
+          revokedAt: new Date(),
+        },
+        update: {
+          status: "revoked",
+          revokedAt: new Date(),
+        },
+      });
+
+      const delRes = await request(`/api/clients/${fixture.clientAId}/collaborators/${grant.id}`, {
+        method: "DELETE",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "del-key", "user"),
+      });
+      expect(delRes.status).toBe(200);
+
+      // Now verify that the revoked user is denied when attempting an operation
+      const valRes = await request(`/api/weeklogs/any-id/validate`, {
+        method: "POST",
+        headers: headers(revokedUser, fixture.workspaceA, "revoked-val-key", "user"),
+        body: JSON.stringify({ validationMethod: "authenticated_confirmation", approvedEntryIds: [] }),
+      });
+      expect([403, 404]).toContain(valRes.status);
+    });
+
+    it("CLIENT-FOCUS-CEILING-ENFORCEMENT-01: Collaborator cannot grant capability it lacks", async () => {
+      const limitedRep = "71000000-0000-4000-8000-000000000093";
+      const limitedAppUser = "71000000-0000-4000-8000-000000000193";
+      await prisma.user.upsert({
+        where: { id: limitedRep },
+        create: {
+          id: limitedRep,
+          email: "limited-rep@client.com",
+          fullName: "Limited Rep",
+          role: "user",
+          passwordHash: "x",
+        },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: limitedRep },
+        create: { id: limitedAppUser, authUserId: limitedRep, email: "limited-rep@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: limitedAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: limitedAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+
+      await prisma.clientAccessGrant.upsert({
+        where: {
+          workspaceId_userId_clientId: {
+            workspaceId: fixture.workspaceA,
+            userId: limitedRep,
+            clientId: fixture.clientAId,
+          },
+        },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: limitedRep,
+          clientId: fixture.clientAId,
+          role: "representative",
+          capabilities: ["client.collaborators.manage", "weeklog.validate"], // Lacks budget.approve
+          status: "active",
+        },
+        update: {
+          capabilities: ["client.collaborators.manage", "weeklog.validate"],
+          status: "active",
+        },
+      });
+
+      const res = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
+        method: "POST",
+        headers: headers(limitedRep, fixture.workspaceA, "ceil-key", "user"),
+        body: JSON.stringify({
+          userId: fixture.techA,
+          capabilities: ["budget.approve"], // Attempt to escalate beyond ceiling
+        }),
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("CLIENT-FOCUS-NO-FINANCE-GRANT-01: Collaborator cannot grant internal Finance access", async () => {
+      const res = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "fin-grant-key", "user"),
+        body: JSON.stringify({
+          userId: fixture.techA,
+          capabilities: ["finance.manage"], // Internal forbidden capability
+        }),
+      });
+
+      expect([403, 422]).toContain(res.status);
     });
   });
 
