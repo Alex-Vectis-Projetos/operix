@@ -228,8 +228,15 @@ async function persistPlan(tx: Prisma.TransactionClient, workspace: string, list
   return tx.paymentListConfrontationRun.update({ where: { id: run.id }, data: { status: "completed", completedAt: new Date() }, include: { results: { orderBy: { createdAt: "asc" } } } });
 }
 
-export async function runConfrontation(ctx: RequestContext, listId: string, raw: unknown) {
-  requireManager(ctx);
+export async function runConfrontation(
+  ctx: RequestContext,
+  listId: string,
+  raw: unknown,
+  options?: { isClientAuthorized?: boolean }
+) {
+  if (!options?.isClientAuthorized) {
+    requireManager(ctx);
+  }
   const mode = raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw as object).length === 0)
     ? "current" as const
     : modeSchema.parse((raw as { mode?: unknown }).mode ?? "current");
@@ -262,8 +269,14 @@ export async function runConfrontation(ctx: RequestContext, listId: string, raw:
   }
 }
 
-export async function getConfrontation(ctx: RequestContext, listId: string) {
-  requireManager(ctx);
+export async function getConfrontation(
+  ctx: RequestContext,
+  listId: string,
+  options?: { isClientAuthorized?: boolean }
+) {
+  if (!options?.isClientAuthorized) {
+    requireManager(ctx);
+  }
   const workspace = workspaceId(ctx);
   const list = await prisma.paymentList.findFirst({ where: { id: listId, workspaceId: workspace }, include: { items: true } });
   if (!list) throw new NotFoundError("LIST_NOT_FOUND");
@@ -272,8 +285,16 @@ export async function getConfrontation(ctx: RequestContext, listId: string) {
   return presentRun(run, "current", true);
 }
 
-export async function decideConfrontationResult(ctx: RequestContext, listId: string, resultId: string, raw: unknown) {
-  requireManager(ctx);
+export async function decideConfrontationResult(
+  ctx: RequestContext,
+  listId: string,
+  resultId: string,
+  raw: unknown,
+  options?: { isClientAuthorized?: boolean }
+) {
+  if (!options?.isClientAuthorized) {
+    requireManager(ctx);
+  }
   const input = decisionSchema.parse(raw);
   const workspace = workspaceId(ctx);
   return prisma.$transaction(async (tx) => {

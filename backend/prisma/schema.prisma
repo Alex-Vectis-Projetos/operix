@@ -653,7 +653,7 @@ model ClientAccessGrant {
   clientId    String    @map("client_id")
   role         String    @default("validator")
   status       String    @default("active")
-  capabilities String[]  @default(["weeklog.validate"]) @map("capabilities")
+  capabilities String[]  @default([]) @map("capabilities")
   siteKey      String?   @map("site_key")
   grantedAt    DateTime  @default(now()) @map("granted_at")
   revokedAt   DateTime? @map("revoked_at")

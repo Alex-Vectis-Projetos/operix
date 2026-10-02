@@ -744,18 +744,24 @@ productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, 
         entry.validationStatus === "rejected" ||
         entry.validationStatus === "rectification_pending"
       ) {
-        events.push({
-          type: "rectification_requested",
-          timestamp: entry.rectificationRequestedAt
-            ? (entry.rectificationRequestedAt instanceof Date ? entry.rectificationRequestedAt.toISOString() : new Date(entry.rectificationRequestedAt).toISOString())
-            : (entry.updatedAt instanceof Date ? entry.updatedAt.toISOString() : new Date(entry.updatedAt).toISOString()),
-          metadata: {
-            weeklogEntryId: entry.id,
-            isRectification: entry.isRectification,
-            rectificationReason: entry.rectificationReason || entry.rejectionReason,
-            rectificationRequestedBy: entry.rectificationRequestedBy,
-          },
-        });
+        const eventTimestamp = entry.rectificationRequestedAt
+          ? (entry.rectificationRequestedAt instanceof Date ? entry.rectificationRequestedAt.toISOString() : new Date(entry.rectificationRequestedAt).toISOString())
+          : entry.reviewedAt
+          ? (entry.reviewedAt instanceof Date ? entry.reviewedAt.toISOString() : new Date(entry.reviewedAt).toISOString())
+          : null;
+
+        if (eventTimestamp) {
+          events.push({
+            type: "rectification_requested",
+            timestamp: eventTimestamp,
+            metadata: {
+              weeklogEntryId: entry.id,
+              isRectification: entry.isRectification,
+              rectificationReason: entry.rectificationReason || entry.rejectionReason,
+              rectificationRequestedBy: entry.rectificationRequestedBy,
+            },
+          });
+        }
       }
     }
 

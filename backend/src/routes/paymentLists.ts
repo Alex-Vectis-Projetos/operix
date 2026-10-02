@@ -3,6 +3,8 @@ import multer from "multer";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth.js";
 import { resolveRequestContext } from "../middleware/requestContext.js";
+import { prisma } from "../lib/prisma.js";
+import { assertClientCapability, ForbiddenError, NotFoundError } from "../lib/objectAuth.js";
 import {
   createExternalListImport,
   discardExternalListImport,
@@ -141,9 +143,43 @@ paymentListsRouter.post("/", async (req: Request, res: Response) => {
   }
 });
 
+async function assertPaymentListAccess(
+  req: Request,
+  listId: string,
+  capability: "payment_list.review"
+): Promise<{ list: any; isInternalManager: boolean }> {
+  const ctx = req.ctx!;
+  if (!ctx.activeWorkspaceId) {
+    throw new ForbiddenError("FORBIDDEN_ROLE");
+  }
+  const list = await prisma.paymentList.findFirst({
+    where: { id: listId, workspaceId: ctx.activeWorkspaceId },
+    include: { items: true },
+  });
+  if (!list) {
+    throw new NotFoundError("LIST_NOT_FOUND");
+  }
+  const isInternalManager =
+    ctx.platformRole === "platform_admin" ||
+    ctx.membershipRole === "owner" ||
+    ctx.membershipRole === "admin";
+
+  if (!isInternalManager) {
+    const siteKeys = [...new Set(list.items.map((i: any) => i.operationalSiteKey).filter(Boolean))];
+    const operationalSite = siteKeys.length === 1 ? (siteKeys[0] as string) : undefined;
+    await assertClientCapability(ctx, {
+      clientId: list.clientId,
+      capability,
+      siteKey: operationalSite,
+    });
+  }
+  return { list, isInternalManager };
+}
+
 paymentListsRouter.get("/:id/confrontation", async (req: Request, res: Response) => {
   try {
-    return res.json(await getConfrontation(req.ctx!, routeParam(req, "id")));
+    const { isInternalManager } = await assertPaymentListAccess(req, routeParam(req, "id"), "payment_list.review");
+    return res.json(await getConfrontation(req.ctx!, routeParam(req, "id"), { isClientAuthorized: !isInternalManager }));
   } catch (error) {
     return sendError(res, error);
   }
@@ -151,8 +187,9 @@ paymentListsRouter.get("/:id/confrontation", async (req: Request, res: Response)
 
 paymentListsRouter.post("/:id/confront", async (req: Request, res: Response) => {
   try {
+    const { isInternalManager } = await assertPaymentListAccess(req, routeParam(req, "id"), "payment_list.review");
     const payload = confrontSchema.parse(req.body ?? {});
-    const result = await runConfrontation(req.ctx!, routeParam(req, "id"), payload);
+    const result = await runConfrontation(req.ctx!, routeParam(req, "id"), payload, { isClientAuthorized: !isInternalManager });
     return res.status(result.idempotent ? 200 : 201).json(result);
   } catch (error) {
     return sendError(res, error);
@@ -161,7 +198,8 @@ paymentListsRouter.post("/:id/confront", async (req: Request, res: Response) => 
 
 paymentListsRouter.patch("/:id/confrontation/:resultId/decision", async (req: Request, res: Response) => {
   try {
-    return res.json(await decideConfrontationResult(req.ctx!, routeParam(req, "id"), routeParam(req, "resultId"), req.body));
+    const { isInternalManager } = await assertPaymentListAccess(req, routeParam(req, "id"), "payment_list.review");
+    return res.json(await decideConfrontationResult(req.ctx!, routeParam(req, "id"), routeParam(req, "resultId"), req.body, { isClientAuthorized: !isInternalManager }));
   } catch (error) {
     return sendError(res, error);
   }
@@ -177,7 +215,8 @@ paymentListsRouter.get("/:id", async (req: Request, res: Response) => {
 
 paymentListsRouter.patch("/:id/status", async (req: Request, res: Response) => {
   try {
-    return res.json(await transitionPaymentList(req.ctx!, routeParam(req, "id"), req.body?.toStatus));
+    const { isInternalManager } = await assertPaymentListAccess(req, routeParam(req, "id"), "payment_list.review");
+    return res.json(await transitionPaymentList(req.ctx!, routeParam(req, "id"), req.body?.toStatus, { isClientAuthorized: !isInternalManager }));
   } catch (error) {
     return sendError(res, error);
   }

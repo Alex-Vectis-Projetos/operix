@@ -168,6 +168,16 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         name: "Cliente Bravo 1",
       },
     });
+
+    await prisma.clientAccessGrant.create({
+      data: {
+        workspaceId: FIXTURES.wsAlpha,
+        userId: FIXTURES.ownerA.userId,
+        clientId: FIXTURES.clientA,
+        capabilities: ["budget.approve", "weeklog.validate"],
+        status: "active",
+      },
+    });
   });
 
   afterAll(async () => {
@@ -235,6 +245,9 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
     });
     await prisma.budgetRevision.deleteMany({});
     await prisma.budget.deleteMany({
+      where: { workspaceId: { in: [FIXTURES.wsAlpha, FIXTURES.wsBravo, FIXTURES.independentTechC.personalWsId] } },
+    });
+    await prisma.clientAccessGrant.deleteMany({
       where: { workspaceId: { in: [FIXTURES.wsAlpha, FIXTURES.wsBravo, FIXTURES.independentTechC.personalWsId] } },
     });
     await prisma.client.deleteMany({
@@ -1259,6 +1272,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           id: "b-approve-flow",
           workspaceId: FIXTURES.wsAlpha,
           code: "ORC-APPR-1",
+          clientId: FIXTURES.clientA,
           createdById: FIXTURES.ownerA.userId,
         },
       });
@@ -1351,6 +1365,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           id: "b-race-approve",
           workspaceId: FIXTURES.wsAlpha,
           code: "ORC-RACE",
+          clientId: FIXTURES.clientA,
           createdById: FIXTURES.ownerA.userId,
         },
       });
@@ -1414,6 +1429,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           id: "b-stale-test-13",
           workspaceId: FIXTURES.wsAlpha,
           code: "ORC-STALE-13",
+          clientId: FIXTURES.clientA,
           createdById: FIXTURES.ownerA.userId,
           currentRevisionNumber: 1,
         },

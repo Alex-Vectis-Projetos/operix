@@ -498,16 +498,35 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
       );
     }
 
-    if (ctx.membershipRole !== "owner" && ctx.membershipRole !== "admin") {
-      if (!budget.clientId) {
-        throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
-      }
-      await assertClientCapability(ctx, {
-        clientId: budget.clientId,
-        capability: "budget.approve",
-        siteKey: (budget as any).siteKey ?? null,
-      });
+    // Client authority: Budget approval belongs to the Client / authorized Client Collaborator.
+    // Workspace Owner/Admin may NOT approve a client Budget merely because they are workspace admins.
+    if (!budget.clientId) {
+      throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
     }
+
+    const revForApprove = await prisma.budgetRevision.findFirst({
+      where: { id: revisionId, budgetId: budget.id },
+    });
+    const clientSnapApprove = (revForApprove?.clientSnapshot as any) || {};
+    const dossierSnapApprove = (revForApprove?.dossierSnapshot as any) || {};
+    const vehicleSnapApprove = (revForApprove?.vehicleSnapshot as any) || {};
+
+    const canonicalSiteKeyApprove =
+      (budget as any).siteKey ||
+      (budget as any).operationalSiteKey ||
+      dossierSnapApprove.siteKey ||
+      dossierSnapApprove.operationalSiteKey ||
+      clientSnapApprove.siteKey ||
+      clientSnapApprove.operationalSiteKey ||
+      vehicleSnapApprove.siteKey ||
+      vehicleSnapApprove.operationalSiteKey ||
+      null;
+
+    await assertClientCapability(ctx, {
+      clientId: budget.clientId,
+      capability: "budget.approve",
+      siteKey: canonicalSiteKeyApprove,
+    });
 
     const result = await approveBudgetRevision(
       ctx.activeWorkspaceId,
@@ -567,16 +586,34 @@ budgetsRouter.post("/:id/revisions/:revisionId/reject", async (req: Request, res
       );
     }
 
-    if (ctx.membershipRole !== "owner" && ctx.membershipRole !== "admin") {
-      if (!budget.clientId) {
-        throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
-      }
-      await assertClientCapability(ctx, {
-        clientId: budget.clientId,
-        capability: "budget.approve",
-        siteKey: (budget as any).siteKey ?? null,
-      });
+    // Client authority: Budget rejection belongs to the Client / authorized Client Collaborator.
+    if (!budget.clientId) {
+      throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
     }
+
+    const revForReject = await prisma.budgetRevision.findFirst({
+      where: { id: revisionId, budgetId: budget.id },
+    });
+    const clientSnapReject = (revForReject?.clientSnapshot as any) || {};
+    const dossierSnapReject = (revForReject?.dossierSnapshot as any) || {};
+    const vehicleSnapReject = (revForReject?.vehicleSnapshot as any) || {};
+
+    const canonicalSiteKeyReject =
+      (budget as any).siteKey ||
+      (budget as any).operationalSiteKey ||
+      dossierSnapReject.siteKey ||
+      dossierSnapReject.operationalSiteKey ||
+      clientSnapReject.siteKey ||
+      clientSnapReject.operationalSiteKey ||
+      vehicleSnapReject.siteKey ||
+      vehicleSnapReject.operationalSiteKey ||
+      null;
+
+    await assertClientCapability(ctx, {
+      clientId: budget.clientId,
+      capability: "budget.approve",
+      siteKey: canonicalSiteKeyReject,
+    });
 
     const result = await rejectBudgetRevision(
       ctx.activeWorkspaceId,

@@ -168,7 +168,25 @@
 - **Given** a Client Collaborator belonging to Client A,
 - **When** attempting to approve a Budget belonging to Client B,
 - **Then** the request is rejected with `403 Forbidden` (`CROSS_CLIENT_FORBIDDEN`).
-- **Status**: `RED` (Proves missing client boundary check in budget routes).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### BUDGET-WORKSPACE-ADMIN-NO-CLIENT-APPROVAL-01: Workspace Admin Cannot Bypass Client Budget Approval
+- **Given** a Workspace Owner or Admin lacking an active ClientAccessGrant for Client A,
+- **When** calling `POST /api/budgets/:id/revisions/:revId/approve`,
+- **Then** the request is rejected with `403 Forbidden` (`VALIDATOR_GRANT_REQUIRED`).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### BUDGET-SITE-SCOPE-ALLOW-01: Site-Scoped Budget Approval Allowed
+- **Given** a Client Collaborator whose grant is scoped to `siteKey = 'site-lyon'`,
+- **When** approving a Budget revision whose operational platform/site matches `'site-lyon'`,
+- **Then** approval succeeds (`200 OK`).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### BUDGET-SITE-SCOPE-DENY-01: Site-Scoped Budget Approval Denied on Mismatch
+- **Given** a Client Collaborator whose grant is scoped to `siteKey = 'site-lyon'`,
+- **When** attempting to approve a Budget revision whose operational platform/site is `'site-paris'`,
+- **Then** the request is rejected with `403 Forbidden` (`SITE_SCOPE_UNAUTHORIZED`).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### DIRECT-PO-PRESERVED-01: Direct Production Order Creation Preserved
 - **Given** an authorized workspace user creating a ProductionOrder directly without a `budgetId`,
@@ -183,43 +201,54 @@
 ### CLIENT-GOVERNANCE-CAPABILITIES-01: Granular Role Capabilities Column
 - **Given** a `ClientAccessGrant`,
 - **Then** permissions are evaluated against granular capabilities (`budget.approve`, `weeklog.validate`, `payment_list.review`, `invoice.view`, `client.collaborators.manage`).
-- **Status**: `RED` (Proves missing granular capability column/enforcement).
+- **Status**: `GREEN` (ALIGNED — Schema migration applied and runtime resolver active).
 
 ### CLIENT-CAPABILITY-BUDGET-APPROVE-01: Budget Approval Capability Enforcement
 - **Given** a Client Collaborator session lacking `budget.approve`,
-- **When** calling `POST /api/budgets/:id/approve`,
+- **When** calling `POST /api/budgets/:id/revisions/:revId/approve`,
 - **Then** the request is rejected with `403 Forbidden` (`CAPABILITY_UNAUTHORIZED`).
-- **Status**: `RED` (Proves missing capability check).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### CLIENT-CAPABILITY-WEEKLOG-VALIDATE-01: Weeklog Validation Capability Enforcement
 - **Given** a Client Collaborator session lacking `weeklog.validate`,
 - **When** calling `POST /api/weeklogs/:id/validate`,
 - **Then** the request is rejected with `403 Forbidden` (`CAPABILITY_UNAUTHORIZED`).
-- **Status**: `RED` (Proves missing capability check).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### CLIENT-CAPABILITY-PAYMENT-LIST-REVIEW-01: Payment List Review Capability Enforcement
 - **Given** a Client Collaborator session lacking `payment_list.review`,
-- **When** calling `POST /api/payment-lists/:id/review`,
+- **When** calling canonical review actions such as `PATCH /api/payment-lists/:id/status` or `POST /api/payment-lists/:id/confront`,
 - **Then** the request is rejected with `403 Forbidden` (`CAPABILITY_UNAUTHORIZED`).
-- **Status**: `RED` (Proves missing capability check).
+- **Status**: `GREEN` (ALIGNED — Verified by real HTTP route test).
 
 ### CLIENT-CAPABILITY-INVOICE-VIEW-01: Invoice View Capability Enforcement
-- **Given** a Client Collaborator session lacking `invoice.view`,
-- **When** calling `GET /api/invoices/:id`,
-- **Then** the request is rejected with `403 Forbidden` (`CAPABILITY_UNAUTHORIZED`).
-- **Status**: `RED` (Proves missing capability check).
+- **Given** a Client Collaborator session evaluated for `invoice.view`,
+- **When** authority is asserted,
+- **Then** the capability model validates the grant; canonical route-level enforcement remains deferred to R05.
+- **Status**: `INFRASTRUCTURE_GREEN / ROUTE_WIRING_PENDING_R05` (Model & resolver active; canonical route deferred to R05).
 
 ### CLIENT-COLLABORATORS-MANAGE-01: Client Representative Delegation
 - **Given** an authorized client representative with `client.collaborators.manage`,
 - **When** delegating a new collaborator for Client A via `POST /api/clients/:clientId/collaborators`,
 - **Then** the grant is created successfully within client boundary; cross-client delegation returns `403 Forbidden` (`CROSS_CLIENT_FORBIDDEN`), internal Finance access cannot be granted (`422/403 INVALID_CLIENT_CAPABILITY`), and capability escalation is blocked.
-- **Status**: `RED` (Proves missing delegation management endpoint).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### CLIENT-FOCUS-DEFAULT-DENY-01: Newly Created Grant Default Deny
+- **Given** a newly created ClientAccessGrant where capabilities are omitted,
+- **Then** capabilities default to `[]` (empty array), preventing any ungranted validation or approval actions.
+- **Status**: `GREEN` (ALIGNED — Verified by migration and test).
+
+### CLIENT-COLLABORATOR-REINVITE-01: Atomic Collaborator Re-Invite / Reactivation
+- **Given** a previously revoked ClientAccessGrant for a user and client,
+- **When** reinvited via `POST /api/clients/:clientId/collaborators`,
+- **Then** the grant is reactivated atomically with new capabilities and siteKey without unique constraint failure.
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### CLIENT-SITE-SCOPE-DENIAL-01: Platform / Local Operational Scope
 - **Given** a Client Collaborator with a grant scoped to `siteKey = 'site-lyon'`,
 - **When** attempting to validate or approve an entity for `siteKey = 'site-paris'`,
 - **Then** the request is rejected with `403 Forbidden` (`SITE_SCOPE_UNAUTHORIZED`).
-- **Status**: `RED` (Proves missing siteKey scoping).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### CLIENT-NO-FINANCE-LEDGER-01: Internal Ledger Isolation
 - **Given** an authenticated Client Collaborator session,
@@ -265,7 +294,7 @@
 - **Given** a production order that progressed through creation, production, finalization, weeklog ingestion, and rectification,
 - **When** querying `GET /api/production-orders/:id/timeline`,
 - **Then** an ordered sequence of real domain events is returned based strictly on canonical facts (zero fabricated pause/resume events).
-- **Status**: `RED` (Proves missing `/timeline` endpoint).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ---
 

@@ -232,6 +232,7 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         userId: FIXTURES_003.validatorClientA.userId,
         clientId: FIXTURES_003.clientA.id,
         role: "validator",
+        capabilities: ["weeklog.validate"],
         status: "active",
       },
     });
@@ -243,6 +244,7 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         userId: FIXTURES_003.validatorClientB.userId,
         clientId: FIXTURES_003.clientB.id,
         role: "validator",
+        capabilities: ["weeklog.validate"],
         status: "active",
       },
     });
@@ -254,6 +256,7 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
         userId: FIXTURES_003.validatorRevoked.userId,
         clientId: FIXTURES_003.clientA.id,
         role: "validator",
+        capabilities: ["weeklog.validate"],
         status: "revoked",
         revokedAt: new Date("2026-09-15T10:00:00Z"),
         revokedBy: FIXTURES_003.ownerA.userId,

@@ -291,13 +291,9 @@ export async function assertClientCapability(
     );
   }
 
-  // Compatibilidade com grants legados: role 'validator' mantém 'weeklog.validate'
-  const effectiveCapabilities =
-    matchingGrant.capabilities && matchingGrant.capabilities.length > 0
-      ? matchingGrant.capabilities
-      : matchingGrant.role === "validator"
-      ? ["weeklog.validate"]
-      : [];
+  const effectiveCapabilities = matchingGrant.capabilities && Array.isArray(matchingGrant.capabilities)
+    ? matchingGrant.capabilities
+    : [];
 
   if (!effectiveCapabilities.includes(options.capability)) {
     throw new ForbiddenError(

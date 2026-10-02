@@ -157,11 +157,18 @@ export async function listPaymentLists(ctx: RequestContext) {
   return records.map((record) => sanitize(ctx, record));
 }
 
-export async function transitionPaymentList(ctx: RequestContext, id: string, target: unknown) {
+export async function transitionPaymentList(
+  ctx: RequestContext,
+  id: string,
+  target: unknown,
+  options?: { isClientAuthorized?: boolean }
+) {
   const parsedStatus = z.enum(["under_review", "confronted", "pending", "paid", "cancelled"]).safeParse(target);
   if (!parsedStatus.success) throw new ConflictError("LIST_INVALID_STATE_TRANSITION");
   const toStatus = parsedStatus.data as PaymentListStatus;
-  manager(ctx);
+  if (!options?.isClientAuthorized) {
+    manager(ctx);
+  }
   const workspaceId = ws(ctx);
   return prisma.$transaction(async (tx) => {
     const list = await tx.paymentList.findFirst({ where: { id, workspaceId }, include: { claims: true, items: true } });

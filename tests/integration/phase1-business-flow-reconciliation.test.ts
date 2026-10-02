@@ -23,6 +23,7 @@ const { signAccessToken } = await import("../../backend/src/lib/jwt.js");
 const { prisma } = await import("../../backend/src/lib/prisma.js");
 const weeklogService = await import("../../backend/src/services/weeklogService.js");
 const paymentListService = await import("../../backend/src/services/paymentListService.js");
+const { assertClientCapability, ALLOWED_CLIENT_CAPABILITIES } = await import("../../backend/src/lib/objectAuth.js");
 
 const fixture = {
   workspaceA: "70000000-0000-4000-8000-000000000001",
@@ -1020,6 +1021,19 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       expect(body.message || "").toMatch(/TECH_SELF_APPROVAL_FORBIDDEN|não pode aprovar/i);
     });
 
+    it("BUDGET-WORKSPACE-ADMIN-NO-CLIENT-APPROVAL-01: Workspace Owner/Admin cannot approve client Budget without client grant", async () => {
+      // Owner/Admin may bootstrap/manage grants but MUST NOT approve a client Budget merely because they are workspace admins.
+      const res = await request(`/api/budgets/${budgetId}/revisions/${rev1Id}/approve`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "owner-no-client-approve-key"),
+        body: JSON.stringify({ notes: "Owner unauthorized bypass attempt" }),
+      });
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.message || "").toMatch(/VALIDATOR_GRANT_REQUIRED|permissão insuficiente|não autorizado/i);
+    });
+
     it("BUDGET-CLIENT-APPROVE-01: Client Collaborator with budget.approve formally approves revision", async () => {
       const res = await request(`/api/budgets/${budgetId}/revisions/${rev1Id}/approve`, {
         method: "POST",
@@ -1180,6 +1194,133 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.message || "").toMatch(/CROSS_CLIENT_FORBIDDEN|não autorizado para este cliente/i);
+    });
+
+    it("BUDGET-SITE-SCOPE-ALLOW-01: Site-scoped client collaborator approves budget matching their operational site", async () => {
+      const siteScopedUser = "71000000-0000-4000-8000-000000000091";
+      const siteScopedAppUser = "71000000-0000-4000-8000-000000000191";
+      await prisma.user.upsert({
+        where: { id: siteScopedUser },
+        create: { id: siteScopedUser, email: "site-scoped@client.com", fullName: "Site Scoped User", role: "user", passwordHash: "x" },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: siteScopedUser },
+        create: { id: siteScopedAppUser, authUserId: siteScopedUser, email: "site-scoped@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: siteScopedAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: siteScopedAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+      await prisma.clientAccessGrant.upsert({
+        where: {
+          workspaceId_userId_clientId: {
+            workspaceId: fixture.workspaceA,
+            userId: siteScopedUser,
+            clientId: fixture.clientAId,
+          },
+        },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: siteScopedUser,
+          clientId: fixture.clientAId,
+          capabilities: ["budget.approve"],
+          siteKey: "site-lyon",
+          status: "active",
+        },
+        update: {
+          capabilities: ["budget.approve"],
+          siteKey: "site-lyon",
+          status: "active",
+        },
+      });
+
+      const lyonBudgetId = "81000000-0000-4000-8000-000000000071";
+      const lyonRevId = "82000000-0000-4000-8000-000000000071";
+      await prisma.budget.deleteMany({ where: { id: lyonBudgetId } });
+      const lyonBudget = await prisma.budget.create({
+        data: {
+          id: lyonBudgetId,
+          workspaceId: fixture.workspaceA,
+          code: "BUD-LYON-01",
+          clientId: fixture.clientAId,
+          technicianUserId: fixture.techA,
+          createdById: fixture.ownerA,
+          currentRevisionNumber: 1,
+        },
+      });
+      await prisma.budgetRevision.create({
+        data: {
+          id: lyonRevId,
+          budgetId: lyonBudget.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "VECTIS Client", siteKey: "site-lyon" },
+          vehicleSnapshot: { plate: "LYON-01" },
+          grossTotal: 400.0,
+          currencyCode: "EUR",
+          createdById: fixture.ownerA,
+        },
+      });
+      await prisma.budget.update({
+        where: { id: lyonBudgetId },
+        data: { currentRevisionId: lyonRevId },
+      });
+
+      const res = await request(`/api/budgets/${lyonBudgetId}/revisions/${lyonRevId}/approve`, {
+        method: "POST",
+        headers: headers(siteScopedUser, fixture.workspaceA, "lyon-approve-key", "user"),
+        body: JSON.stringify({ notes: "Site match approval" }),
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it("BUDGET-SITE-SCOPE-DENY-01: Site-scoped client collaborator is denied approval for another site", async () => {
+      const siteScopedUser = "71000000-0000-4000-8000-000000000091";
+      const parisBudgetId = "81000000-0000-4000-8000-000000000072";
+      const parisRevId = "82000000-0000-4000-8000-000000000072";
+      await prisma.budget.deleteMany({ where: { id: parisBudgetId } });
+      const parisBudget = await prisma.budget.create({
+        data: {
+          id: parisBudgetId,
+          workspaceId: fixture.workspaceA,
+          code: "BUD-PARIS-01",
+          clientId: fixture.clientAId,
+          technicianUserId: fixture.techA,
+          createdById: fixture.ownerA,
+          currentRevisionNumber: 1,
+        },
+      });
+      await prisma.budgetRevision.create({
+        data: {
+          id: parisRevId,
+          budgetId: parisBudget.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "VECTIS Client", siteKey: "site-paris" },
+          vehicleSnapshot: { plate: "PARIS-01" },
+          grossTotal: 400.0,
+          currencyCode: "EUR",
+          createdById: fixture.ownerA,
+        },
+      });
+      await prisma.budget.update({
+        where: { id: parisBudgetId },
+        data: { currentRevisionId: parisRevId },
+      });
+
+      const res = await request(`/api/budgets/${parisBudgetId}/revisions/${parisRevId}/approve`, {
+        method: "POST",
+        headers: headers(siteScopedUser, fixture.workspaceA, "paris-approve-key", "user"),
+        body: JSON.stringify({ notes: "Site mismatch approval attempt" }),
+      });
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.message || "").toMatch(/SITE_SCOPE_UNAUTHORIZED|local operacional não autorizado/i);
     });
 
     it("DIRECT-PO-PRESERVED-01: Direct ProductionOrder creation preserved without budget approval", async () => {
@@ -1382,7 +1523,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       expect(body.message || "").toMatch(/CAPABILITY_UNAUTHORIZED|permissão insuficiente/i);
     });
 
-    it("CLIENT-CAPABILITY-PAYMENT-LIST-REVIEW-01: Client collaborator lacking payment_list.review is denied", async () => {
+    it("CLIENT-CAPABILITY-PAYMENT-LIST-REVIEW-01: Client collaborator lacking payment_list.review is denied on canonical route", async () => {
       const listId = "74000000-0000-4000-8000-000000000066";
       await prisma.paymentList.deleteMany({ where: { id: listId } });
       await prisma.paymentList.create({
@@ -1395,24 +1536,239 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
           currencyCode: "EUR",
           status: "draft",
           createdBy: fixture.ownerA,
+          items: {
+            create: [
+              {
+                operationalSiteKey: "site-lyon",
+                totalAmount: 150.0,
+                servicesSnapshot: {},
+              },
+            ],
+          },
         },
       });
 
-      const res = await request(`/api/payment-lists/${listId}/review`, {
-        method: "POST",
-        headers: headers(fixture.clientAUser, fixture.workspaceA, "cap-pl-rev-key", "user"),
-        body: JSON.stringify({ notes: "Client review attempt" }),
+      // 1. User with grant for clientA but LACKING payment_list.review (only weeklog.validate) -> 403
+      const noReviewUser = "71000000-0000-4000-8000-000000000099"; // configured earlier with ["weeklog.validate"]
+      const resNoCap = await request(`/api/payment-lists/${listId}/status`, {
+        method: "PATCH",
+        headers: headers(noReviewUser, fixture.workspaceA, "cap-pl-no-rev-key", "user"),
+        body: JSON.stringify({ toStatus: "under_review" }),
       });
+      expect(resNoCap.status).toBe(403);
+      const bodyNoCap = await resNoCap.json();
+      expect(bodyNoCap.message || "").toMatch(/CAPABILITY_UNAUTHORIZED|permissão insuficiente/i);
 
-      expect([403, 404]).toContain(res.status);
+      // 2. User with payment_list.review but MISMATCHED site scope (site-paris vs site-lyon) -> 403
+      const parisUser = "71000000-0000-4000-8000-000000000092";
+      const parisAppUser = "71000000-0000-4000-8000-000000000192";
+      await prisma.user.upsert({
+        where: { id: parisUser },
+        create: { id: parisUser, email: "paris-pl@client.com", fullName: "Paris PL User", role: "user", passwordHash: "x" },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: parisUser },
+        create: { id: parisAppUser, authUserId: parisUser, email: "paris-pl@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: parisAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: parisAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+      await prisma.clientAccessGrant.upsert({
+        where: { workspaceId_userId_clientId: { workspaceId: fixture.workspaceA, userId: parisUser, clientId: fixture.clientAId } },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: parisUser,
+          clientId: fixture.clientAId,
+          capabilities: ["payment_list.review"],
+          siteKey: "site-paris",
+          status: "active",
+        },
+        update: {
+          capabilities: ["payment_list.review"],
+          siteKey: "site-paris",
+          status: "active",
+          revokedAt: null,
+        },
+      });
+      const resSiteMismatch = await request(`/api/payment-lists/${listId}/status`, {
+        method: "PATCH",
+        headers: headers(parisUser, fixture.workspaceA, "cap-pl-site-mismatch-key", "user"),
+        body: JSON.stringify({ toStatus: "under_review" }),
+      });
+      expect(resSiteMismatch.status).toBe(403);
+      const bodySiteMismatch = await resSiteMismatch.json();
+      expect(bodySiteMismatch.message || "").toMatch(/SITE_SCOPE_UNAUTHORIZED|local operacional não autorizado/i);
+
+      // 3. Revoked grant -> 403
+      await prisma.clientAccessGrant.update({
+        where: { workspaceId_userId_clientId: { workspaceId: fixture.workspaceA, userId: parisUser, clientId: fixture.clientAId } },
+        data: { status: "revoked", revokedAt: new Date() },
+      });
+      const resRevoked = await request(`/api/payment-lists/${listId}/status`, {
+        method: "PATCH",
+        headers: headers(parisUser, fixture.workspaceA, "cap-pl-revoked-key", "user"),
+        body: JSON.stringify({ toStatus: "under_review" }),
+      });
+      expect(resRevoked.status).toBe(403);
+
+      // 4. Cross-client collaborator -> 403
+      const crossClientUser = "71000000-0000-4000-8000-000000000093";
+      const crossClientAppUser = "71000000-0000-4000-8000-000000000193";
+      await prisma.user.upsert({
+        where: { id: crossClientUser },
+        create: { id: crossClientUser, email: "cross-pl@client.com", fullName: "Cross PL User", role: "user", passwordHash: "x" },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: crossClientUser },
+        create: { id: crossClientAppUser, authUserId: crossClientUser, email: "cross-pl@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: crossClientAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: crossClientAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+      const clientA2Id = "73000000-0000-4000-8000-000000000099";
+      await prisma.client.upsert({
+        where: { id: clientA2Id },
+        create: { id: clientA2Id, workspaceId: fixture.workspaceA, name: "Second Client A2" },
+        update: {},
+      });
+      await prisma.clientAccessGrant.upsert({
+        where: { workspaceId_userId_clientId: { workspaceId: fixture.workspaceA, userId: crossClientUser, clientId: clientA2Id } },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: crossClientUser,
+          clientId: clientA2Id,
+          capabilities: ["payment_list.review"],
+          status: "active",
+        },
+        update: {
+          capabilities: ["payment_list.review"],
+          status: "active",
+        },
+      });
+      const resCross = await request(`/api/payment-lists/${listId}/status`, {
+        method: "PATCH",
+        headers: headers(crossClientUser, fixture.workspaceA, "cap-pl-cross-key", "user"),
+        body: JSON.stringify({ toStatus: "under_review" }),
+      });
+      expect(resCross.status).toBe(403);
+      const bodyCross = await resCross.json();
+      expect(bodyCross.message || "").toMatch(/CROSS_CLIENT_FORBIDDEN|não autorizado para este cliente/i);
+
+      // 5. Authorized collaborator with payment_list.review and matching site (site-lyon) -> 200
+      const authorizedUser = "71000000-0000-4000-8000-000000000094";
+      const authorizedAppUser = "71000000-0000-4000-8000-000000000194";
+      await prisma.user.upsert({
+        where: { id: authorizedUser },
+        create: { id: authorizedUser, email: "auth-pl@client.com", fullName: "Auth PL User", role: "user", passwordHash: "x" },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: authorizedUser },
+        create: { id: authorizedAppUser, authUserId: authorizedUser, email: "auth-pl@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: authorizedAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: authorizedAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+      await prisma.clientAccessGrant.upsert({
+        where: { workspaceId_userId_clientId: { workspaceId: fixture.workspaceA, userId: authorizedUser, clientId: fixture.clientAId } },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: authorizedUser,
+          clientId: fixture.clientAId,
+          capabilities: ["payment_list.review"],
+          siteKey: "site-lyon",
+          status: "active",
+        },
+        update: {
+          capabilities: ["payment_list.review"],
+          siteKey: "site-lyon",
+          status: "active",
+        },
+      });
+      const resAllowed = await request(`/api/payment-lists/${listId}/status`, {
+        method: "PATCH",
+        headers: headers(authorizedUser, fixture.workspaceA, "cap-pl-allowed-key", "user"),
+        body: JSON.stringify({ toStatus: "under_review" }),
+      });
+      expect(resAllowed.status).toBe(200);
+      const bodyAllowed = await resAllowed.json();
+      expect(bodyAllowed.status).toBe("under_review");
+
+      // 6. Internal manager (Owner) can transition status via internal authority
+      const resOwner = await request(`/api/payment-lists/${listId}/status`, {
+        method: "PATCH",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "cap-pl-owner-key", "owner"),
+        body: JSON.stringify({ toStatus: "cancelled" }),
+      });
+      expect(resOwner.status).toBe(200);
+      const bodyOwner = await resOwner.json();
+      expect(bodyOwner.status).toBe("cancelled");
     });
 
-    it("CLIENT-CAPABILITY-INVOICE-VIEW-01: Client collaborator lacking invoice.view is denied", async () => {
-      const res = await request(`/api/invoices/77000000-0000-4000-8000-000000000001`, {
-        headers: headers(fixture.clientAUser, fixture.workspaceA, "cap-inv-view-key", "user"),
+    it("CLIENT-CAPABILITY-INVOICE-VIEW-01: [INFRASTRUCTURE_GREEN / ROUTE_WIRING_PENDING_R05] invoice.view is resolved in capability model while canonical route is deferred to R05", async () => {
+      // 1. Verify capability definition in infrastructure
+      expect(ALLOWED_CLIENT_CAPABILITIES).toContain("invoice.view");
+
+      // 2. Resolver verifies authority correctly against ClientAccessGrant
+      const dummyCtxLacking = {
+        activeWorkspaceId: fixture.workspaceA,
+        actorUserId: fixture.techA,
+        membershipRole: "client",
+      };
+      await expect(
+        assertClientCapability(dummyCtxLacking as any, {
+          clientId: fixture.clientAId,
+          capability: "invoice.view",
+        })
+      ).rejects.toThrow();
+
+      // 3. Grant with explicit invoice.view resolves successfully
+      const invViewUser = "71000000-0000-4000-8000-000000000095";
+      await prisma.user.upsert({
+        where: { id: invViewUser },
+        create: { id: invViewUser, email: "inv-view@client.com", fullName: "Invoice Viewer", role: "user", passwordHash: "x" },
+        update: {},
+      });
+      await prisma.clientAccessGrant.upsert({
+        where: { workspaceId_userId_clientId: { workspaceId: fixture.workspaceA, userId: invViewUser, clientId: fixture.clientAId } },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: invViewUser,
+          clientId: fixture.clientAId,
+          capabilities: ["invoice.view"],
+          status: "active",
+        },
+        update: {
+          capabilities: ["invoice.view"],
+          status: "active",
+        },
       });
 
-      expect([403, 404]).toContain(res.status);
+      const resolved = await assertClientCapability(
+        {
+          activeWorkspaceId: fixture.workspaceA,
+          actorUserId: invViewUser,
+          membershipRole: "client",
+        } as any,
+        {
+          clientId: fixture.clientAId,
+          capability: "invoice.view",
+        }
+      );
+      expect(resolved.capabilities).toContain("invoice.view");
+
+      // 4. Note: HTTP route GET /api/invoices/:id is NOT faked or invented in R02; route wiring is owned by R05
     });
 
     it("CLIENT-COLLABORATORS-MANAGE-01: Authorized client representative delegates, updates, and revokes collaborators", async () => {
@@ -1442,6 +1798,143 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       });
 
       expect(crossRes.status).toBe(403);
+    });
+
+    it("CLIENT-FOCUS-DEFAULT-DENY-01: Newly-created grant defaults to empty capabilities and cannot validate without explicit capability", async () => {
+      const defaultDenyUser = "71000000-0000-4000-8000-000000000096";
+      const defaultDenyAppUser = "71000000-0000-4000-8000-000000000196";
+      await prisma.user.upsert({
+        where: { id: defaultDenyUser },
+        create: { id: defaultDenyUser, email: "default-deny@client.com", fullName: "Default Deny User", role: "user", passwordHash: "x" },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: defaultDenyUser },
+        create: { id: defaultDenyAppUser, authUserId: defaultDenyUser, email: "default-deny@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: defaultDenyAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: defaultDenyAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+
+      // Create raw grant omitting capabilities to test Prisma default
+      await prisma.clientAccessGrant.deleteMany({
+        where: { workspaceId: fixture.workspaceA, userId: defaultDenyUser, clientId: fixture.clientAId },
+      });
+      const newGrant = await prisma.clientAccessGrant.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          userId: defaultDenyUser,
+          clientId: fixture.clientAId,
+          role: "validator", // legacy role name must NOT grant weeklog.validate
+          status: "active",
+        },
+      });
+
+      // Default in database MUST be empty array []
+      expect(newGrant.capabilities).toEqual([]);
+
+      // Attempting to validate weeklog with empty capabilities fails with 403
+      const wlId = "75000000-0000-4000-8000-000000000088";
+      const resVal = await request(`/api/weeklogs/${wlId}/validate`, {
+        method: "POST",
+        headers: headers(defaultDenyUser, fixture.workspaceA, "default-deny-val-key", "user"),
+        body: JSON.stringify({
+          validationMethod: "authenticated_confirmation",
+          approvedEntryIds: [],
+        }),
+      });
+      expect(resVal.status).toBe(403);
+      const valBody = await resVal.json();
+      expect(valBody.message || "").toMatch(/CAPABILITY_UNAUTHORIZED|permissão insuficiente/i);
+
+      // Delegation endpoint rejects omitted / empty capabilities
+      const resEmptyDelegation = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "delegation-empty-key", "owner"),
+        body: JSON.stringify({
+          userId: defaultDenyUser,
+          role: "collaborator",
+          capabilities: [],
+        }),
+      });
+      expect(resEmptyDelegation.status).toBe(422);
+
+      // Legacy grant with explicit weeklog.validate still functions
+      const legacyGrant = await prisma.clientAccessGrant.findFirst({
+        where: { userId: fixture.clientAUser, workspaceId: fixture.workspaceA, clientId: fixture.clientAId },
+      });
+      expect(legacyGrant?.capabilities).toContain("weeklog.validate");
+    });
+
+    it("CLIENT-COLLABORATOR-REINVITE-01: Revoked collaborator is reinvited/reactivated atomically without unique constraint failure", async () => {
+      const reinviteUser = "71000000-0000-4000-8000-000000000089";
+      const reinviteAppUser = "71000000-0000-4000-8000-000000000189";
+      await prisma.user.upsert({
+        where: { id: reinviteUser },
+        create: { id: reinviteUser, email: "reinvite@client.com", fullName: "Reinvite User", role: "user", passwordHash: "x" },
+        update: {},
+      });
+      await prisma.appUser.upsert({
+        where: { authUserId: reinviteUser },
+        create: { id: reinviteAppUser, authUserId: reinviteUser, email: "reinvite@client.com" },
+        update: {},
+      });
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: reinviteAppUser } },
+        create: { workspaceId: fixture.workspaceA, userId: reinviteAppUser, role: "client", status: "active" },
+        update: { status: "active" },
+      });
+
+      // Step 1: Initial invitation
+      const createRes = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "reinvite-create-key", "owner"),
+        body: JSON.stringify({
+          userId: reinviteUser,
+          role: "collaborator",
+          capabilities: ["weeklog.validate"],
+          siteKey: "site-lyon",
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { grantId } = await createRes.json();
+      expect(grantId).toBeDefined();
+
+      // Step 2: Soft revoke
+      const deleteRes = await request(`/api/clients/${fixture.clientAId}/collaborators/${grantId}`, {
+        method: "DELETE",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "reinvite-delete-key", "owner"),
+      });
+      expect(deleteRes.status).toBe(200);
+
+      const revokedDb = await prisma.clientAccessGrant.findUnique({ where: { id: grantId } });
+      expect(revokedDb?.status).toBe("revoked");
+      expect(revokedDb?.revokedAt).not.toBeNull();
+
+      // Step 3: Reinvite same user for same client with updated capabilities and site
+      const reinviteRes = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "reinvite-repost-key", "owner"),
+        body: JSON.stringify({
+          userId: reinviteUser,
+          role: "collaborator",
+          capabilities: ["weeklog.validate", "budget.approve"],
+          siteKey: "site-paris",
+        }),
+      });
+      expect(reinviteRes.status).toBe(201);
+      const reinviteBody = await reinviteRes.json();
+      expect(reinviteBody.grantId).toBe(grantId); // Same atomic grant reactivated
+
+      const reactivatedDb = await prisma.clientAccessGrant.findUnique({ where: { id: grantId } });
+      expect(reactivatedDb?.status).toBe("active");
+      expect(reactivatedDb?.revokedAt).toBeNull();
+      expect(reactivatedDb?.revokedBy).toBeNull();
+      expect(reactivatedDb?.capabilities).toEqual(["weeklog.validate", "budget.approve"]);
+      expect(reactivatedDb?.siteKey).toBe("site-paris");
     });
 
     it("CLIENT-SITE-SCOPE-DENIAL-01: Operational siteKey scope blocks out-of-scope validation", async () => {
