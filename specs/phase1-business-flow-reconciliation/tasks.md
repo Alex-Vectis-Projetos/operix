@@ -1,41 +1,56 @@
-# Task Tracking — Phase 1 Business Flow Reconciliation
+# Task Breakdown — Phase 1 Business Flow Reconciliation (R01B)
 
-## R00 / R01: Audit, Contract Freeze & Red Acceptance Tests (CURRENT)
-- [x] **T01-AUDIT**: Audit existing implementation of Weeklog lifecycle, boundaries, validation, PaymentList creation, claims, and invoice handoffs.
-- [x] **T02-CONTRACT**: Document exact deltas and architectural decisions in `spec.md`, `decisions.md`, `acceptance.md`, `plan.md`.
-- [x] **T03-RED-TESTS**: Add comprehensive RED acceptance test suite proving missing behavior without regressing existing green suites.
-- [ ] **T04-HANDOFF-APPROVAL**: Obtain user approval for the frozen contract before implementing product code.
+## Pre-Release Phase Checklist
 
----
+- [x] **R00: Audit & Diagnostics Baseline**
+  - [x] Verify Git baseline on `cf0b8a55` (tag: `v1.0.0-rc1`).
+  - [x] Verify PostgreSQL 16 connection and database migrations.
+  - [x] Complete domain comparison against Alex / VECTIS meetings.
 
-## R02: Week Boundary & Auto-Close Runner
-- [ ] **T05-AUTO-CLOSE-SERVICE**: Implement `reconcileExpiredWeeklogs` in `weeklogService.ts`.
-- [ ] **T06-RUNNER-SCHEDULE**: Implement idempotent background runner and server boot catch-up in `weekCloseRunner.ts` and `index.ts`.
-- [ ] **T07-ROLLFORWARD-GUARD**: Update `finalizeProductionOrder` to roll forward late deliveries to the next operational week.
-- [ ] **T08-VERIFY-R02**: Verify `WEEK-AUTO-CLOSE-01`, `WEEK-BOUNDARY-ROLLFORWARD-01`, `WEEK-NO-UNFINISHED-01`, `WEEK-CATCHUP-01`, `WEEK-CLOSE-IDEMPOTENT-01` pass.
+- [x] **R01 / R01B: Specification & RED Acceptance Baseline**
+  - [x] Write `spec.md` with full 23-delta classification matrix across Specs 002–005.
+  - [x] Write `decisions.md` with frozen ADR-001 through ADR-007.
+  - [x] Write `acceptance.md` defining all 38 normative acceptance scenarios.
+  - [x] Create comprehensive integration test suite covering all groups.
+  - [x] Verify intentional RED for absent behaviors and GREEN for preserved invariants.
 
----
+- [ ] **R02: Week Boundary Engine, Auto-Close Runner & Production Timeline**
+  - [ ] Implement `reconcileExpiredWeeklogs` in `backend/src/services/weeklogService.ts`.
+  - [ ] Implement `runStartupCatchup` in `backend/src/lib/weekCloseRunner.ts`.
+  - [ ] Register 60-second periodic interval runner in `backend/src/index.ts`.
+  - [ ] Prevent late finalization ingestion into expired weeklogs.
+  - [ ] Implement `GET /api/production-orders/:id/timeline`.
 
-## R03: Complete WEEKLOG Validation to Automatic Draft PaymentList
-- [ ] **T09-AUTO-LIST-CREATION**: Implement transactional auto-creation of draft `PaymentList` upon complete validation in `validateWeeklogBatch`.
-- [ ] **T10-AUTO-LIST-IDEMPOTENCY**: Implement idempotency guard preventing duplicate lists/items/claims on repeated validation calls.
-- [ ] **T11-PARTIAL-GUARD**: Ensure `rectification_pending` holds list creation.
-- [ ] **T12-ACTIVE-QUEUE-FILTER**: Update `listWeeklogs` to support default active queue (excluding validated) and history filter.
-- [ ] **T13-VERIFY-R03**: Verify `LIST-AUTO-01`, `LIST-AUTO-IDEMPOTENT-01`, `LIST-PARTIAL-NO-AUTO-01`, `LIST-WEEKLOG-PRESERVE-01`, `LIST-ACTIVE-QUEUE-01` pass.
+- [ ] **R03: Budget Client Authority & Client Governance Scope**
+  - [ ] Ban technician self-approval in `backend/src/routes/budgets.ts` (throw `403 TECH_SELF_APPROVAL_FORBIDDEN`).
+  - [ ] Validate `ClientAccessGrant` capability `budget.approve` matching `budget.clientId`.
+  - [ ] Enforce client siteKey/locationId scope restriction where present.
+  - [ ] Enforce strict re-approval for modified budget revisions.
 
----
+- [ ] **R04: Source-Aware Claim Architecture & Automatic Draft List Handoff (Atomic)**
+  - [ ] Add `sourceType`, `originWeeklogId`, and `supersededByPaymentListId` to `PaymentList`.
+  - [ ] Add `claimState` to `PaymentListEntryClaim` (`provisional_auto`, `locked_external`, `locked_internal`, `consumed`).
+  - [ ] Hook `createAuthoritativeDraftListFromWeeklog` inside `validateWeeklogBatch`.
+  - [ ] Implement ADR-002 claim absorption in confrontation service for external multiweek lists.
+  - [ ] Implement direct internal list approval (`POST /api/payment-lists/:id/approve` $\rightarrow$ `ready_for_billing`).
+  - [ ] Filter validated weeklogs from default `GET /api/weeklogs` active queue.
 
-## R04: Source-Aware Claims & External Import Reconciliation
-- [ ] **T14-SCHEMA-EXPAND**: Add `sourceType` and `originWeeklogId` to `PaymentList` via versioned migration.
-- [ ] **T15-CONFRONTATION-HARMONIZE**: Update confrontation engine to resolve external imports against auto-draft lists without claim collision.
-- [ ] **T16-CONCISE-PROJECTIONS**: Update WEEKLOG and PaymentList frontend projections to mirror the VECTIS sample.
-- [ ] **T17-VERIFY-R04**: Verify `WEEK-PROJECTION-01`, `LIST-PROJECTION-01`, `LIST-MANUAL-PRESERVED-01`, `LIST-IMPORT-PRESERVED-01`, `LIST-MULTIWEEK-PRESERVED-01` pass.
+- [ ] **R05: External WEEKLOG Intake & Importer UX Contract**
+  - [ ] Implement `POST /api/weeklogs/external-import/upload` and staging review table.
+  - [ ] Implement commit transition producing `status: 'validated'` with import audit evidence.
+  - [ ] Wire external validated weeklog to auto-draft list handoff.
+  - [ ] Connect interactive document controls (rotation, zoom, editable grid, bulk downward apply) in frontend importer.
 
----
+- [ ] **R06: Concise Operational Projections (WEEKLOG + List)**
+  - [ ] Implement `GET /api/weeklogs/:id/projection` with joined services summary.
+  - [ ] Format `PaymentList` items with canonical VECTIS field mapping.
+  - [ ] Update frontend tables to hide part-level damage trivia by default.
 
-## R05: Minimal Invoice Handoff Boundary
-- [ ] **T18-INVOICE-ROUTES**: Implement `POST /api/payment-lists/:id/invoice` and `POST /api/payment-lists/:id/associate-invoice`.
-- [ ] **T19-INVOICE-UI**: Add invoice generation/association modal and action buttons in `PaymentListDetail.tsx`.
-- [ ] **T20-FINANCE-VERIFICATION**: Verify draft list zero ledger impact and pending/paid transitions.
-- [ ] **T21-VERIFY-R05**: Verify `LIST-INVOICE-HANDOFF-01`, `FIN-AUTO-DRAFT-NO-EFFECT-01`, `FIN-PENDING-PAID-PRESERVED-01`, `CROSS-TENANT-RECONCILIATION-01` pass.
-- [ ] **T22-FINAL-HOMOLOGATION**: Complete full Phase 1 regression test suite and documentation sign-off.
+- [ ] **R07: Explicit Invoice Handoff & Contractual UI Release Gates**
+  - [ ] Implement `POST /api/payment-lists/:id/invoice/create`.
+  - [ ] Implement `POST /api/payment-lists/:id/invoice/associate`.
+  - [ ] Execute light mode contrast audit (WCAG 2.1 AA).
+  - [ ] Execute mobile ($\le 430\text{px}$) and tablet ($768\text{px} - 1024\text{px}$) responsiveness audit.
+  - [ ] Execute Operix brand hygiene audit (purge residual "Nexus" occurrences).
+  - [ ] Hide generic automation module from active navigation.
+  - [ ] Full quality gate verification (`vitest`, typecheck, lint).

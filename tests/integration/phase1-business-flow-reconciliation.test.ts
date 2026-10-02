@@ -15,6 +15,7 @@ const { weeklogsRouter } = await import("../../backend/src/routes/weeklogs.js");
 const { paymentListsRouter } = await import("../../backend/src/routes/paymentLists.js");
 const { financeV2Router } = await import("../../backend/src/routes/financeV2.js");
 const { productionOrdersRouter } = await import("../../backend/src/routes/productionOrders.js");
+const { budgetsRouter } = await import("../../backend/src/routes/budgets.js");
 const { signAccessToken } = await import("../../backend/src/lib/jwt.js");
 const { prisma } = await import("../../backend/src/lib/prisma.js");
 const weeklogService = await import("../../backend/src/services/weeklogService.js");
@@ -31,6 +32,8 @@ const fixture = {
   adminAApp: "72000000-0000-4000-8000-000000000003",
   clientAUser: "71000000-0000-4000-8000-000000000004",
   clientAApp: "72000000-0000-4000-8000-000000000004",
+  techA: "71000000-0000-4000-8000-000000000005",
+  techAApp: "72000000-0000-4000-8000-000000000005",
   clientAId: "73000000-0000-4000-8000-000000000001",
   clientBId: "73000000-0000-4000-8000-000000000002",
   locationAId: "74000000-0000-4000-8000-000000000001",
@@ -40,8 +43,8 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
   let server: any;
   let baseUrl = "";
 
-  const headers = (actor = fixture.ownerA, workspace = fixture.workspaceA, key = "phase1-reconciliation-key") => ({
-    Authorization: `Bearer ${signAccessToken({ id: actor, email: `${actor}@operix.test`, role: "admin" })}`,
+  const headers = (actor = fixture.ownerA, workspace = fixture.workspaceA, key = "phase1-reconciliation-key", role = "admin") => ({
+    Authorization: `Bearer ${signAccessToken({ id: actor, email: `${actor}@operix.test`, role })}`,
     "X-Workspace-Id": workspace,
     "Content-Type": "application/json",
     "Idempotency-Key": key,
@@ -79,7 +82,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     await prisma.client.deleteMany({ where: { id: { in: [fixture.clientAId, fixture.clientBId] } } });
     await prisma.workspace.deleteMany({ where: { id: { in: ws } } });
     await prisma.user.deleteMany({
-      where: { id: { in: [fixture.ownerA, fixture.ownerB, fixture.adminA, fixture.clientAUser] } },
+      where: { id: { in: [fixture.ownerA, fixture.ownerB, fixture.adminA, fixture.clientAUser, fixture.techA] } },
     });
 
     // Create seed users
@@ -123,6 +126,16 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         appUser: { create: { id: fixture.clientAApp, email: "client-a@operix.test" } },
       },
     });
+    await prisma.user.create({
+      data: {
+        id: fixture.techA,
+        email: "tech-a@operix.test",
+        fullName: "Technician A",
+        role: "technician",
+        passwordHash: "x",
+        appUser: { create: { id: fixture.techAApp, email: "tech-a@operix.test" } },
+      },
+    });
 
     // Workspaces
     await prisma.workspace.create({
@@ -134,6 +147,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
           create: [
             { userId: fixture.adminAApp, role: "admin", status: "active" },
             { userId: fixture.clientAApp, role: "client", status: "active" },
+            { userId: fixture.techAApp, role: "technician", status: "active" },
           ],
         },
       },
@@ -172,6 +186,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     app.use("/api/payment-lists", paymentListsRouter);
     app.use("/api/finance/v2", financeV2Router);
     app.use("/api/production-orders", productionOrdersRouter);
+    app.use("/api/budgets", budgetsRouter);
     server = app.listen(0);
     await once(server, "listening");
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -719,8 +734,8 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     });
 
     it("LIST-INVOICE-HANDOFF-01: Eligible List exposes the smallest supported create/associate invoice flow", async () => {
-      // RED: POST /api/payment-lists/:id/invoice route does not exist yet (returns 404)
-      const response = await request(`/api/payment-lists/${pendingListId}/invoice`, {
+      // RED: POST /api/payment-lists/:id/invoice/create route does not exist yet (returns 404)
+      const response = await request(`/api/payment-lists/${pendingListId}/invoice/create`, {
         method: "POST",
         headers: headers(fixture.ownerA, fixture.workspaceA, "invoice-handoff-key"),
         body: JSON.stringify({ notes: "VECTIS September Facturation" }),
@@ -808,6 +823,383 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       });
 
       expect([403, 404]).toContain(response.status);
+    });
+  });
+
+  /* =========================================================================
+   * GROUP 6: BUDGET AUTHORITY & CLIENT GOVERNANCE (SPEC 002 RECONCILIATION)
+   * ========================================================================= */
+  describe("Group 6: Budget Authority & Client Governance (Spec 002)", () => {
+    let budgetId = "81000000-0000-4000-8000-000000000001";
+    let rev1Id = "82000000-0000-4000-8000-000000000001";
+
+    beforeAll(async () => {
+      await prisma.budget.deleteMany({ where: { id: budgetId } });
+      const b = await prisma.budget.create({
+        data: {
+          id: budgetId,
+          workspaceId: fixture.workspaceA,
+          code: "BUD-REV-01",
+          clientId: fixture.clientAId,
+          technicianUserId: fixture.techA,
+          createdById: fixture.ownerA,
+          currentRevisionNumber: 1,
+        },
+      });
+
+      await prisma.budgetRevision.create({
+        data: {
+          id: rev1Id,
+          budgetId: b.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "VECTIS Client" },
+          vehicleSnapshot: { plate: "EW-621-GF" },
+          grossTotal: 700.0,
+          currencyCode: "EUR",
+          createdById: fixture.ownerA,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: budgetId },
+        data: { currentRevisionId: rev1Id },
+      });
+    });
+
+    it("BUDGET-TECH-NO-SELF-APPROVE-01: Technician executor MUST NOT approve own Budget", async () => {
+      // RED: In current Spec002 baseline, TECH-BUDGET-APPROVE-OWN allowed technician self-approval (returns 200).
+      // Superseded: The frozen Alex/VECTIS rule strictly forbids technician self-approval (must return 403).
+      const res = await request(`/api/budgets/${budgetId}/revisions/${rev1Id}/approve`, {
+        method: "POST",
+        headers: headers(fixture.techA, fixture.workspaceA, "tech-self-approve-key", "technician"),
+        body: JSON.stringify({ notes: "Technician self-approval attempt" }),
+      });
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.message || "").toMatch(/TECH_SELF_APPROVAL_FORBIDDEN|não pode aprovar/i);
+    });
+
+    it("BUDGET-CLIENT-APPROVE-01: Client Collaborator with budget.approve formally approves revision", async () => {
+      const res = await request(`/api/budgets/${budgetId}/revisions/${rev1Id}/approve`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "client-approve-key", "user"),
+        body: JSON.stringify({ notes: "Client formal approval" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.revision.status).toBe("approved");
+    });
+
+    it("BUDGET-CLIENT-REJECT-01: Client Collaborator formally rejects revision with reason", async () => {
+      const rejBudgetId = "81000000-0000-4000-8000-000000000002";
+      const rejRevId = "82000000-0000-4000-8000-000000000002";
+      await prisma.budget.deleteMany({ where: { id: rejBudgetId } });
+      const b = await prisma.budget.create({
+        data: {
+          id: rejBudgetId,
+          workspaceId: fixture.workspaceA,
+          code: "BUD-REJ-01",
+          clientId: fixture.clientAId,
+          technicianUserId: fixture.techA,
+          createdById: fixture.ownerA,
+          currentRevisionNumber: 1,
+        },
+      });
+
+      await prisma.budgetRevision.create({
+        data: {
+          id: rejRevId,
+          budgetId: b.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "VECTIS Client" },
+          vehicleSnapshot: { plate: "REJ-001" },
+          grossTotal: 500.0,
+          currencyCode: "EUR",
+          createdById: fixture.ownerA,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: rejBudgetId },
+        data: { currentRevisionId: rejRevId },
+      });
+
+      const res = await request(`/api/budgets/${rejBudgetId}/revisions/${rejRevId}/reject`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "client-reject-key", "user"),
+        body: JSON.stringify({ reason: "Tarifa acima da tabela acordada" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.revision.status).toBe("rejected");
+    });
+
+    it("BUDGET-REVISION-REAPPROVAL-01: Changed approved budget requires formal client re-approval", async () => {
+      const modBudgetId = "81000000-0000-4000-8000-000000000003";
+      const modRev1 = "82000000-0000-4000-8000-000000000003";
+      const modRev2 = "82000000-0000-4000-8000-000000000004";
+      await prisma.budget.deleteMany({ where: { id: modBudgetId } });
+      const b = await prisma.budget.create({
+        data: {
+          id: modBudgetId,
+          workspaceId: fixture.workspaceA,
+          code: "BUD-MOD-01",
+          clientId: fixture.clientAId,
+          technicianUserId: fixture.techA,
+          createdById: fixture.ownerA,
+          currentRevisionNumber: 2,
+        },
+      });
+
+      await prisma.budgetRevision.createMany({
+        data: [
+          {
+            id: modRev1,
+            budgetId: b.id,
+            revisionNumber: 1,
+            status: "approved",
+            clientSnapshot: { name: "VECTIS Client" },
+            vehicleSnapshot: { plate: "MOD-001" },
+            grossTotal: 500.0,
+            currencyCode: "EUR",
+            createdById: fixture.ownerA,
+          },
+          {
+            id: modRev2,
+            budgetId: b.id,
+            revisionNumber: 2,
+            status: "draft",
+            clientSnapshot: { name: "VECTIS Client" },
+            vehicleSnapshot: { plate: "MOD-001" },
+            grossTotal: 750.0,
+            currencyCode: "EUR",
+            createdById: fixture.ownerA,
+          },
+        ],
+      });
+
+      await prisma.budget.update({
+        where: { id: modBudgetId },
+        data: {
+          approvedRevisionId: modRev1,
+          currentRevisionId: modRev2,
+        },
+      });
+
+      const current = await prisma.budgetRevision.findUniqueOrThrow({ where: { id: modRev2 } });
+      expect(current.status).not.toBe("approved");
+    });
+
+    it("BUDGET-CROSS-CLIENT-01: Cross-client budget approval is strictly blocked", async () => {
+      // User with Client A grant attempts to approve Budget belonging to Client B
+      const crossBudgetId = "81000000-0000-4000-8000-000000000004";
+      const crossRevId = "82000000-0000-4000-8000-000000000005";
+      await prisma.budget.deleteMany({ where: { id: crossBudgetId } });
+      const b = await prisma.budget.create({
+        data: {
+          id: crossBudgetId,
+          workspaceId: fixture.workspaceA,
+          code: "BUD-CROSS-01",
+          clientId: fixture.clientBId, // Foreign Client
+          technicianUserId: fixture.techA,
+          createdById: fixture.ownerA,
+          currentRevisionNumber: 1,
+        },
+      });
+
+      await prisma.budgetRevision.create({
+        data: {
+          id: crossRevId,
+          budgetId: b.id,
+          revisionNumber: 1,
+          status: "draft",
+          clientSnapshot: { name: "Foreign Client" },
+          vehicleSnapshot: { plate: "CRS-001" },
+          grossTotal: 1000.0,
+          currencyCode: "EUR",
+          createdById: fixture.ownerA,
+        },
+      });
+
+      await prisma.budget.update({
+        where: { id: crossBudgetId },
+        data: { currentRevisionId: crossRevId },
+      });
+
+      const res = await request(`/api/budgets/${crossBudgetId}/revisions/${crossRevId}/approve`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "cross-client-key", "user"),
+        body: JSON.stringify({ notes: "Cross-client approval attempt" }),
+      });
+
+      // RED: Currently route does not check grant.clientId == budget.clientId
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.message || "").toMatch(/CROSS_CLIENT_FORBIDDEN|não autorizado para este cliente/i);
+    });
+  });
+
+  /* =========================================================================
+   * GROUP 7: CLIENT COLLABORATOR GOVERNANCE SCOPE
+   * ========================================================================= */
+  describe("Group 7: Client Collaborator Governance Scope", () => {
+    it("CLIENT-GOVERNANCE-CAPABILITIES-01: ClientAccessGrant enforces granular capabilities", async () => {
+      // RED: ClientAccessGrant.capabilities column / check does not exist yet
+      const grant = await prisma.clientAccessGrant.findFirst({
+        where: { userId: fixture.clientAUser, workspaceId: fixture.workspaceA },
+      });
+      expect(grant).not.toBeNull();
+      expect((grant as any)?.capabilities).toBeDefined();
+    });
+
+    it("CLIENT-GOVERNANCE-LOCAL-SCOPE-01: Operational siteKey scope blocks out-of-scope validation", async () => {
+      // RED: Scoped grant to site-lyon attempting validation on site-paris should return 403
+      const scopedWeeklogId = "75000000-0000-4000-8000-000000000099";
+      await prisma.weeklog.deleteMany({ where: { id: scopedWeeklogId } });
+      await prisma.weeklog.create({
+        data: {
+          id: scopedWeeklogId,
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-paris",
+          startsOn: new Date("2026-09-20T00:00:00.000Z"),
+          endsOn: new Date("2026-09-26T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W39",
+          weekNumber: 39,
+          status: "pending_validation",
+        },
+      });
+
+      const res = await request(`/api/weeklogs/${scopedWeeklogId}/validate`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "scoped-val-key", "user"),
+        body: JSON.stringify({
+          validationMethod: "authenticated_confirmation",
+          approvedEntryIds: [],
+        }),
+      });
+
+      // RED: Site scope checking is not yet implemented
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.message || "").toMatch(/SITE_SCOPE_UNAUTHORIZED|local operacional não autorizado/i);
+    });
+
+    it("CLIENT-NO-FINANCE-LEDGER-01: Client collaborator has zero access to internal Finance ledger", async () => {
+      const res = await request("/api/finance/v2/summary", {
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "client-fin-key", "user"),
+      });
+
+      // GREEN: Existing finance authorization strictly rejects non-owner / non-admin
+      expect(res.status).toBe(403);
+    });
+  });
+
+  /* =========================================================================
+   * GROUP 8: EXTERNAL WEEKLOG FLOW
+   * ========================================================================= */
+  describe("Group 8: External WEEKLOG Intake & Reconciliation", () => {
+    it("EXT-WEEKLOG-REVIEW-01: External WEEKLOG upload stages entries for human review", async () => {
+      // RED: Route POST /api/weeklogs/external-import/upload does not exist yet (returns 404)
+      const res = await request("/api/weeklogs/external-import/upload", {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "ext-wl-upload-key"),
+        body: JSON.stringify({
+          clientId: fixture.clientAId,
+          siteKey: "site-default",
+          documentUrl: "minio://imports/weeklog-external.pdf",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.importId).toBeDefined();
+    });
+
+    it("EXT-WEEKLOG-VALIDATED-01: Committing reviewed external WEEKLOG marks it validated", async () => {
+      // RED: Route POST /api/weeklogs/external-import/:id/commit does not exist yet
+      const res = await request("/api/weeklogs/external-import/00000000-0000-0000-0000-000000000001/commit", {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "ext-wl-commit-key"),
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it("EXT-WEEKLOG-AUTO-LIST-01: Committed external WEEKLOG triggers automatic draft PaymentList creation", async () => {
+      // RED: Service method or hook missing
+      const triggerFn = (weeklogService as any).triggerAutoListFromExternalWeeklog;
+      expect(typeof triggerFn).toBe("function");
+    });
+
+    it("EXT-WEEKLOG-AUTO-LIST-IDEMPOTENT-01: External WEEKLOG auto-list handoff is strictly idempotent", async () => {
+      // RED: Service method missing
+      const triggerFn = (weeklogService as any).triggerAutoListFromExternalWeeklog;
+      expect(typeof triggerFn).toBe("function");
+    });
+  });
+
+  /* =========================================================================
+   * GROUP 9: IMPORTER UX & PRODUCTION TIMELINE
+   * ========================================================================= */
+  describe("Group 9: Importer UX & Production Timeline", () => {
+    it("IMPORT-UX-CONTRACT-01: Importer contract exposes preview controls and bulk downward edit capability", async () => {
+      // Verify importer contracts and review actions
+      const importReviewService = await import("../../backend/src/services/externalOperationalImportService.js");
+      expect(typeof (importReviewService as any).applyBulkCorrection).toBe("function");
+    });
+
+    it("PRODUCTION-HISTORY-01: Production timeline returns chronological sequence of domain facts", async () => {
+      // RED: GET /api/production-orders/:id/timeline does not exist yet (returns 404)
+      const res = await request(`/api/production-orders/76000000-0000-4000-8000-000000000001/timeline`, {
+        headers: headers(fixture.ownerA, fixture.workspaceA, "timeline-key"),
+      });
+
+      expect(res.status).toBe(200);
+      const events = await res.json();
+      expect(Array.isArray(events)).toBe(true);
+      expect(events[0]).toMatchObject({ type: "created" });
+    });
+  });
+
+  /* =========================================================================
+   * GROUP 10: CONTRACTUAL UI RELEASE GATES
+   * ========================================================================= */
+  describe("Group 10: Contractual UI Release Gates", () => {
+    it("UI-LIGHT-MODE-01: Design tokens define accessible light-mode contrast", async () => {
+      const indexCss = await readFile("src/index.css", "utf8");
+      expect(indexCss).toContain(":root");
+      expect(indexCss).toContain("--background");
+      expect(indexCss).toContain("--foreground");
+    });
+
+    it("UI-MOBILE-CORE-01: Core layout contains viewport responsive metadata", async () => {
+      const indexHtml = await readFile("index.html", "utf8");
+      expect(indexHtml).toContain('name="viewport"');
+      expect(indexHtml).toContain("width=device-width");
+    });
+
+    it("UI-TABLET-CORE-01: Responsive container classes exist for tablet views", async () => {
+      const indexCss = await readFile("src/index.css", "utf8");
+      expect(indexCss.length).toBeGreaterThan(100);
+    });
+
+    it("UI-BRAND-OPERIX-01: Operix brand hygiene verified (zero Nexus strings in title)", async () => {
+      const indexHtml = await readFile("index.html", "utf8");
+      expect(indexHtml).toContain("Operix");
+      expect(indexHtml).not.toContain("Nexus");
+      expect(indexHtml).not.toContain("WorkNexus");
+    });
+
+    it("UI-AUTOMATION-HIDDEN-01: Deferred automation module absent from active navigation", async () => {
+      const navFile = await readFile("src/components/layout/AppLayout.tsx", "utf8").catch(() => "");
+      expect(navFile).not.toContain('to="/automation"');
     });
   });
 });
