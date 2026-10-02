@@ -731,6 +731,9 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     let validatedWlId = "75000000-0000-4000-8000-000000000010";
 
     beforeEach(async () => {
+      await prisma.paymentListEntryClaim.deleteMany({ where: { paymentList: { originWeeklogId: validatedWlId } } });
+      await prisma.paymentListItem.deleteMany({ where: { paymentList: { originWeeklogId: validatedWlId } } });
+      await prisma.paymentList.deleteMany({ where: { originWeeklogId: validatedWlId } });
       await prisma.weeklogValidation.deleteMany({ where: { weeklogId: validatedWlId } });
       await prisma.weeklogEntry.deleteMany({ where: { weeklogId: validatedWlId } });
       await prisma.weeklog.deleteMany({ where: { id: validatedWlId } });
@@ -1331,6 +1334,278 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       // RED: Source-aware multiweek claim absorption requires ADR-002 provisional claim status
       const schema = await readFile(new URL("../../backend/prisma/schema.prisma", import.meta.url), "utf8");
       expect(schema).toMatch(/provisional/);
+    });
+
+    it("LIST-PROVENANCE-IMMUTABLE-01: Commercial provenance foreign keys enforce ON DELETE RESTRICT on weeklog, validation, and superseding parent", async () => {
+      const provWlId = "75000000-0000-4000-8000-000000000091";
+      const provValId = "78000000-0000-4000-8000-000000000091";
+      const provPlAId = "74000000-0000-4000-8000-000000000091";
+      const provPlBId = "74000000-0000-4000-8000-000000000092";
+
+      // Cleanup
+      await prisma.paymentList.deleteMany({ where: { id: { in: [provPlBId, provPlAId] } } });
+      await prisma.weeklogValidation.deleteMany({ where: { id: provValId } });
+      await prisma.weeklog.deleteMany({ where: { id: provWlId } });
+
+      // Create Weeklog & Validation
+      await prisma.weeklog.create({
+        data: {
+          id: provWlId,
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-prov-immut",
+          startsOn: new Date("2026-11-01T00:00:00.000Z"),
+          endsOn: new Date("2026-11-07T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W45",
+          weekNumber: 45,
+          status: "validated",
+        },
+      });
+
+      await prisma.weeklogValidation.create({
+        data: {
+          id: provValId,
+          weeklogId: provWlId,
+          workspaceId: fixture.workspaceA,
+          validationSequence: 1,
+          status: "validated",
+          submittedAt: new Date(),
+          coverageSnapshot: [],
+        },
+      });
+
+      // Create PaymentList A originating from provWlId and provValId
+      await prisma.paymentList.create({
+        data: {
+          id: provPlAId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-PROV-001",
+          clientId: fixture.clientAId,
+          clientName: "Client A",
+          currencyCode: "EUR",
+          status: "draft",
+          sourceType: "weeklog_auto",
+          originWeeklogId: provWlId,
+          originWeeklogValidationId: provValId,
+          createdBy: fixture.ownerA,
+        },
+      });
+
+      // 1. Deleting referenced Weeklog MUST FAIL with foreign key violation (ON DELETE RESTRICT)
+      await expect(
+        prisma.weeklog.delete({ where: { id: provWlId } })
+      ).rejects.toThrow();
+
+      // 2. Deleting referenced WeeklogValidation MUST FAIL with foreign key violation (ON DELETE RESTRICT)
+      await expect(
+        prisma.weeklogValidation.delete({ where: { id: provValId } })
+      ).rejects.toThrow();
+
+      // Create PaymentList B superseded by PaymentList A
+      await prisma.paymentList.create({
+        data: {
+          id: provPlBId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-PROV-002",
+          clientId: fixture.clientAId,
+          clientName: "Client A",
+          currencyCode: "EUR",
+          status: "superseded",
+          sourceType: "weeklog_auto",
+          supersededByPaymentListId: provPlAId,
+          createdBy: fixture.ownerA,
+        },
+      });
+
+      // 3. Deleting parent PaymentList A MUST FAIL while PaymentList B references it (ON DELETE RESTRICT)
+      await expect(
+        prisma.paymentList.delete({ where: { id: provPlAId } })
+      ).rejects.toThrow();
+
+      // Teardown in correct order
+      await prisma.paymentList.delete({ where: { id: provPlBId } });
+      await prisma.paymentList.delete({ where: { id: provPlAId } });
+      await prisma.weeklogValidation.delete({ where: { id: provValId } });
+      await prisma.weeklog.delete({ where: { id: provWlId } });
+    });
+
+    it("LIST-INTERNAL-READY-FOR-BILLING-01: ready_for_billing transition requires internal operator authority, transitions provisional claims to reserved, is idempotent, and preserves zero finance impact", async () => {
+      const rfbListId = "74000000-0000-4000-8000-000000000095";
+      const rfbEntryId = "77000000-0000-4000-8000-000000000095";
+      const rfbPoId = "76000000-0000-4000-8000-000000000095";
+      const rfbWlId = "75000000-0000-4000-8000-000000000095";
+
+      // Cleanup
+      await prisma.paymentListEntryClaim.deleteMany({ where: { paymentListId: rfbListId } });
+      await prisma.paymentListItem.deleteMany({ where: { paymentListId: rfbListId } });
+      await prisma.paymentList.deleteMany({ where: { id: rfbListId } });
+      await prisma.weeklogEntry.deleteMany({ where: { id: rfbEntryId } });
+      await prisma.weeklog.deleteMany({ where: { id: rfbWlId } });
+      await prisma.productionOrder.deleteMany({ where: { id: rfbPoId } });
+
+      await prisma.productionOrder.create({
+        data: {
+          id: rfbPoId,
+          workspaceId: fixture.workspaceA,
+          code: "PO-RFB-01",
+          clientId: fixture.clientAId,
+          status: "delivered",
+        },
+      });
+
+      await prisma.weeklog.create({
+        data: {
+          id: rfbWlId,
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-rfb",
+          startsOn: new Date("2026-11-08T00:00:00.000Z"),
+          endsOn: new Date("2026-11-14T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W46",
+          weekNumber: 46,
+          status: "validated",
+          entries: {
+            create: {
+              id: rfbEntryId,
+              productionOrderId: rfbPoId,
+              technicianUserId: fixture.ownerA,
+              technicianName: "Tech A",
+              clientId: fixture.clientAId,
+              deliveredAt: new Date("2026-11-10T10:00:00.000Z"),
+              totalAmount: 1800.0,
+              currencyCode: "EUR",
+              brand: "Audi",
+              model: "A4",
+              validationStatus: "approved",
+            },
+          },
+        },
+      });
+
+      // Create draft auto payment list with provisional claim
+      await prisma.paymentList.create({
+        data: {
+          id: rfbListId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-RFB-001",
+          clientId: fixture.clientAId,
+          clientName: "Client A",
+          currencyCode: "EUR",
+          status: "draft",
+          sourceType: "weeklog_auto",
+          itemCount: 1,
+          sourceDocumentTotal: 1800.0,
+          recognizedTotal: 0,
+          createdBy: fixture.ownerA,
+          items: {
+            create: {
+              weeklogEntryId: rfbEntryId,
+              carName: "Audi A4",
+              vehicleDescription: "Audi A4",
+              serviceLocation: "site-rfb",
+              servicesSnapshot: [],
+              totalAmount: 1800.0,
+            },
+          },
+          claims: {
+            create: {
+              weeklogEntryId: rfbEntryId,
+              status: "provisional",
+            },
+          },
+        },
+      });
+
+      // 1. Client collaborator with payment_list.review CANNOT transition to ready_for_billing
+      await prisma.clientAccessGrant.updateMany({
+        where: { workspaceId: fixture.workspaceA, clientId: fixture.clientAId, userId: fixture.clientAUser },
+        data: {
+          capabilities: [
+            "budget.approve",
+            "weeklog.validate",
+            "payment_list.review",
+            "invoice.view",
+            "client.collaborators.manage",
+          ],
+        },
+      });
+
+      const clientRes = await request(`/api/payment-lists/${rfbListId}/status`, {
+        method: "PATCH",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "rfb-client-key", "user"),
+        body: JSON.stringify({ toStatus: "ready_for_billing" }),
+      });
+      expect(clientRes.status).toBe(403);
+      const clientBody = await clientRes.json();
+      expect(clientBody.message || "").toMatch(/FORBIDDEN_ROLE/);
+
+      // Verify claim remains provisional
+      let claim = await prisma.paymentListEntryClaim.findFirstOrThrow({
+        where: { paymentListId: rfbListId, weeklogEntryId: rfbEntryId },
+      });
+      expect(claim.status).toBe("provisional");
+
+      // 2. Authorized internal operator transitions to ready_for_billing
+      const opRes = await request(`/api/payment-lists/${rfbListId}/status`, {
+        method: "PATCH",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "rfb-op-key"),
+        body: JSON.stringify({ toStatus: "ready_for_billing" }),
+      });
+      expect(opRes.status).toBe(200);
+      const opBody = await opRes.json();
+      expect(opBody.status).toBe("ready_for_billing");
+
+      // Verify claim transitioned from provisional to reserved
+      claim = await prisma.paymentListEntryClaim.findFirstOrThrow({
+        where: { paymentListId: rfbListId, weeklogEntryId: rfbEntryId },
+      });
+      expect(claim.status).toBe("reserved");
+
+      // 3. Idempotency: repeating the transition returns 200 without error
+      const idempRes = await request(`/api/payment-lists/${rfbListId}/status`, {
+        method: "PATCH",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "rfb-idemp-key"),
+        body: JSON.stringify({ toStatus: "ready_for_billing" }),
+      });
+      expect(idempRes.status).toBe(200);
+
+      // 4. Finance remains strictly zero in ready_for_billing
+      const finRes = await request("/api/finance/v2/summary", {
+        headers: headers(fixture.ownerA, fixture.workspaceA, "rfb-fin-key"),
+      });
+      expect(finRes.status).toBe(200);
+      const finBody = await finRes.json();
+      const eurBucket = finBody.currencies.find((c: any) => c.currencyCode === "EUR");
+      if (eurBucket) {
+        expect(eurBucket.expected).toBe("0.00");
+        expect(eurBucket.received).toBe("0.00");
+      }
+
+      // 5. Pre-invoice cancellation from ready_for_billing is allowed and releases reserved claim
+      const cancelRes = await request(`/api/payment-lists/${rfbListId}/status`, {
+        method: "PATCH",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "rfb-cancel-key"),
+        body: JSON.stringify({ toStatus: "cancelled" }),
+      });
+      expect(cancelRes.status).toBe(200);
+      const cancelBody = await cancelRes.json();
+      expect(cancelBody.status).toBe("cancelled");
+
+      claim = await prisma.paymentListEntryClaim.findFirstOrThrow({
+        where: { paymentListId: rfbListId, weeklogEntryId: rfbEntryId },
+      });
+      expect(claim.status).toBe("released");
+      expect(claim.releasedReason).toBe("LIST_CANCELLED");
+
+      // Teardown
+      await prisma.paymentListEntryClaim.deleteMany({ where: { paymentListId: rfbListId } });
+      await prisma.paymentListItem.deleteMany({ where: { paymentListId: rfbListId } });
+      await prisma.paymentList.deleteMany({ where: { id: rfbListId } });
+      await prisma.weeklogEntry.deleteMany({ where: { id: rfbEntryId } });
+      await prisma.weeklog.deleteMany({ where: { id: rfbWlId } });
+      await prisma.productionOrder.deleteMany({ where: { id: rfbPoId } });
     });
   });
 

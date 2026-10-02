@@ -1384,9 +1384,9 @@ model PaymentList {
 
   workspace                 Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   client                    Client              @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  originWeeklog             Weeklog?            @relation(fields: [originWeeklogId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  originWeeklogValidation   WeeklogValidation?  @relation(fields: [originWeeklogValidationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  supersededBy              PaymentList?        @relation("PaymentListSuperseded", fields: [supersededByPaymentListId, workspaceId], references: [id, workspaceId], onDelete: SetNull)
+  originWeeklog             Weeklog?            @relation(fields: [originWeeklogId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  originWeeklogValidation   WeeklogValidation?  @relation(fields: [originWeeklogValidationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  supersededBy              PaymentList?        @relation("PaymentListSuperseded", fields: [supersededByPaymentListId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   superseding               PaymentList[]       @relation("PaymentListSuperseded")
   items                     PaymentListItem[]
   claims                    PaymentListEntryClaim[]

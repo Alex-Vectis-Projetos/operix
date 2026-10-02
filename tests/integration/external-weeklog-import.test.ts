@@ -201,6 +201,15 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
   });
 
   async function cleanOperationalData() {
+    await prisma.paymentListEntryClaim.deleteMany({
+      where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha },
+    });
+    await prisma.paymentListItem.deleteMany({
+      where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha },
+    });
+    await prisma.paymentList.deleteMany({
+      where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha },
+    });
     await prisma.weeklogValidation.deleteMany({
       where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha },
     });

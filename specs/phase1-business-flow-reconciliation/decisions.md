@@ -135,6 +135,18 @@ When an operator calls `POST /api/payment-lists` manually selecting `weeklogEntr
 - If confrontation aborts, transaction rollback preserves provisional claims completely.
 - If an entry is already `consumed` (invoiced), absorption is denied (409 Conflict: `ENTRY_ALREADY_BILLED`).
 
+#### 7. Commercial Provenance Immutability (`LIST-PROVENANCE-IMMUTABLE-01`)
+- All foreign keys linking `PaymentList` to provenance entities (`originWeeklogId`, `originWeeklogValidationId`, `supersededByPaymentListId`) enforce `ON DELETE RESTRICT`.
+- Operational records (Weeklogs, WeeklogValidations) and parent PaymentLists cannot be deleted while commercial payment lists or supersession chains depend on them.
+
+#### 8. Internal Operator Authority for Ready for Billing (`LIST-INTERNAL-READY-FOR-BILLING-01`)
+- Transition from `draft` to `ready_for_billing` is an internal financial gating action reserved strictly for internal managers (`platform_admin`, `owner`, `admin`).
+- Client collaborators possessing `payment_list.review` are explicitly denied (`403 FORBIDDEN_ROLE`).
+- Claims promote from `provisional` to `reserved` upon entering `ready_for_billing`.
+- Transition is strictly idempotent (repeating call returns 200).
+- Finance impact remains strictly zero (Expected = 0.00, Received = 0.00).
+- Pre-invoice cancellation from `ready_for_billing` releases claims with `releasedReason = 'LIST_CANCELLED'`.
+
 ---
 
 ## ADR-003: Concise Operational Projections for Business Views

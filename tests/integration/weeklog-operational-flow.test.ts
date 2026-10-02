@@ -271,6 +271,18 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
 
   beforeEach(async () => {
     // Isolamento estrito entre testes: limpa tabelas operacionais transacionais
+    await prisma.paymentOrder.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] } },
+    });
+    await prisma.paymentListEntryClaim.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] } },
+    });
+    await prisma.paymentListItem.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] } },
+    });
+    await prisma.paymentList.deleteMany({
+      where: { workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] } },
+    });
     await prisma.weeklogValidation.deleteMany({
       where: { workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] } },
     });
@@ -335,6 +347,26 @@ describe("Spec 003 — Test-First Acceptance & Regression Suite (T02)", () => {
   });
 
   async function cleanupTestData() {
+    await prisma.paymentOrder.deleteMany({
+      where: {
+        workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] },
+      },
+    });
+    await prisma.paymentListEntryClaim.deleteMany({
+      where: {
+        workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] },
+      },
+    });
+    await prisma.paymentListItem.deleteMany({
+      where: {
+        workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] },
+      },
+    });
+    await prisma.paymentList.deleteMany({
+      where: {
+        workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] },
+      },
+    });
     await prisma.weeklogValidation.deleteMany({
       where: {
         workspaceId: { in: [FIXTURES_003.wsAlpha, FIXTURES_003.wsBravo, FIXTURES_003.wsPersonal] },

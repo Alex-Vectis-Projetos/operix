@@ -140,7 +140,19 @@
 - **Given** an external client List spanning entries from multiple operational weeks currently held by auto-draft provisional claims,
 - **When** confrontation commits the external List,
 - **Then** provisional claims across the affected auto-draft lists are absorbed into authoritative external `reserved` claims, and fully absorbed auto-draft lists are marked `superseded`.
-- **Status**: `RED` (Proves missing provisional claim absorption architecture).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### LIST-PROVENANCE-IMMUTABLE-01: Commercial Provenance Relational Invariants (ON DELETE RESTRICT)
+- **Given** an originating draft PaymentList linked to Weeklog, WeeklogValidation, and superseding parent,
+- **When** attempting to delete the referenced Weeklog, WeeklogValidation, or parent PaymentList,
+- **Then** deletion is strictly rejected by PostgreSQL foreign key constraints (`ON DELETE RESTRICT`).
+- **Status**: `GREEN` (ALIGNED — Verified by integration test).
+
+### LIST-INTERNAL-READY-FOR-BILLING-01: Internal Operator Ready for Billing & Claims Transition
+- **Given** an auto-draft PaymentList with provisional claims,
+- **When** evaluated for `ready_for_billing`,
+- **Then** client review capability cannot perform it (`403 FORBIDDEN_ROLE`), internal manager authorization transitions status to `ready_for_billing` and claims from `provisional` to `reserved`, transition is idempotent, Finance impact remains zero, and pre-invoice cancellation correctly releases claims.
+- **Status**: `GREEN` (ALIGNED — Verified by integration test).
 
 ---
 
@@ -309,12 +321,12 @@
 ### EXT-WEEKLOG-AUTO-LIST-01: Automatic Draft List from External WEEKLOG Commit
 - **Given** a successfully committed external WEEKLOG via `POST /api/external-operational-imports/:id/commit`,
 - **Then** it triggers the same commercial handoff, creating a draft `PaymentList` with provisional claims for those entries.
-- **Status**: `RED` (Proves missing auto-draft handoff hook on external import commit).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### EXT-WEEKLOG-AUTO-LIST-IDEMPOTENT-01: External WEEKLOG Handoff Idempotency
 - **Given** a repeated or concurrent commit on the same external operational import,
 - **Then** exactly 1 draft `PaymentList` exists for those entries.
-- **Status**: `RED` (Proves missing idempotent auto-draft handoff).
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ---
 
@@ -337,15 +349,15 @@
 
 ### UI-LIGHT-MODE-01: Light Mode Usability Gate
 - **Then** light mode passes minimum WCAG 2.1 AA contrast requirements across all core tables and forms.
-- **Status**: `STATIC_CONTRACT_GREEN / RUNTIME_HOMOLOGATION_PENDING` (Automated CSS check passes; browser homologation in R07).
+- **Status**: `STATIC_GREEN / RUNTIME_PENDING` (Automated CSS check passes; browser homologation in R07).
 
 ### UI-MOBILE-CORE-01: Mobile Core Responsiveness Gate
 - **Then** technician vehicle inspection, photo upload, and budget creation render without clipping on viewport $\le 430\text{px}$.
-- **Status**: `STATIC_CONTRACT_GREEN / RUNTIME_HOMOLOGATION_PENDING` (Automated HTML viewport check passes; browser homologation in R07).
+- **Status**: `STATIC_GREEN / RUNTIME_PENDING` (Automated HTML viewport check passes; browser homologation in R07).
 
 ### UI-TABLET-CORE-01: Tablet Core Responsiveness Gate
 - **Then** manager WEEKLOG review and confrontation split-view render cleanly on viewport $768\text{px} - 1024\text{px}$.
-- **Status**: `STATIC_CONTRACT_GREEN / RUNTIME_HOMOLOGATION_PENDING` (Automated CSS responsive classes check passes; browser homologation in R07).
+- **Status**: `STATIC_GREEN / RUNTIME_PENDING` (Automated CSS responsive classes check passes; browser homologation in R07).
 
 ### UI-BRAND-OPERIX-01: Operix Brand Hygiene Gate
 - **Then** zero occurrences of "Nexus" or "WorkNexus" exist in active UI views, titles, and manifest.

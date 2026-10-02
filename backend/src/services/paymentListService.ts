@@ -413,7 +413,9 @@ export async function transitionPaymentList(
   const parsedStatus = z.enum(["ready_for_billing", "under_review", "confronted", "pending", "paid", "cancelled", "superseded"]).safeParse(target);
   if (!parsedStatus.success) throw new ConflictError("LIST_INVALID_STATE_TRANSITION");
   const toStatus = parsedStatus.data as PaymentListStatus;
-  if (!options?.isClientAuthorized) {
+  if (toStatus === "ready_for_billing") {
+    manager(ctx);
+  } else if (!options?.isClientAuthorized) {
     manager(ctx);
   }
   const workspaceId = ws(ctx);
@@ -421,6 +423,7 @@ export async function transitionPaymentList(
     const list = await tx.paymentList.findFirst({ where: { id, workspaceId }, include: { claims: true, items: true } });
     if (!list) throw new NotFoundError("LIST_NOT_FOUND");
     if (list.status === "paid" && toStatus === "paid") return presentList(list);
+    if (list.status === "ready_for_billing" && toStatus === "ready_for_billing") return presentList(list);
     const allowed: Record<string, string[]> = {
       draft: ["ready_for_billing", "under_review", "cancelled", "superseded"],
       ready_for_billing: ["pending", "cancelled"],
@@ -432,6 +435,12 @@ export async function transitionPaymentList(
       superseded: [],
     };
     if (!allowed[list.status]?.includes(toStatus)) throw new ConflictError("LIST_INVALID_STATE_TRANSITION");
+    if (toStatus === "ready_for_billing") {
+      await tx.paymentListEntryClaim.updateMany({
+        where: { paymentListId: list.id, workspaceId, status: "provisional" },
+        data: { status: "reserved" },
+      });
+    }
     if (toStatus === "pending") {
       const currentRun = await tx.paymentListConfrontationRun.findFirst({
         where: { paymentListId: list.id, workspaceId, status: "completed" },

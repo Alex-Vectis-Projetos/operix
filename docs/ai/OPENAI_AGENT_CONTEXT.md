@@ -566,12 +566,20 @@ R03 addressed:
 - hardening against manual submission race, multi-runner concurrency, sequence increment, and tenant/site scoping.
 - R03 approved.
 
+R04/R04.1 addressed:
+- source-aware provisional claims, multiweek absorption, and manual list coexistence;
+- authoritative draft list handoff from validation (`validateWeeklogBatch`) and external import commit;
+- forward-only migration for composite tenant-safe FKs and claim constraints;
+- forward-only migration `20261002180000_spec006_r04_1_provenance_restrict` enforcing `ON DELETE RESTRICT` on commercial provenance foreign keys (`originWeeklog`, `originWeeklogValidation`, `supersededBy`);
+- authorized internal manager transition to `ready_for_billing`, promoting claims `provisional -> reserved`, idempotent, zero Finance effect, and pre-invoice cancellation releasing claims;
+- acceptance `LIST-PROVENANCE-IMMUTABLE-01` and `LIST-INTERNAL-READY-FOR-BILLING-01` verified GREEN.
+
 Reviewed local checkpoint:
 
-`9512a092cbe924abc5adaf30109ab20a7b8c7aaa`
+`f838bf07350d852eeb895cfaf06b19d2f09a48b0`
 
 Commit:
-`feat(phase1): implement spec006 r03 week boundary`
+`feat(phase1): implement spec006 r04 auto payment lists and claims`
 
 Branch:
 `fix/phase1-business-flow-reconciliation`
@@ -584,16 +592,13 @@ Always verify Git; this SHA is a checkpoint, not a permanent assumption.
 
 Current approved phase:
 
-### Spec006 R04
-Spec 004 / ADR-002 — Source-Aware Provisional Claims, Multiweek Absorption, Manual List Coexistence & Auto-Draft PaymentList Handoff.
-
-Approved R03 preflight architectural foundation:
-- `originWeeklogId` remains provenance only;
-- exactly-once commercial handoff authority is `originWeeklogValidationId`;
-- `LIST-AUTO-IDEMPOTENT-01` is validation-cycle scoped;
-- auto-list is created from the exact approved coverage of that completed validation round, not from all current Weeklog entries;
-- composite tenant-safe FKs for origin and supersession;
-- claim status lifecycle: `provisional`, `reserved`, `consumed`, `released`.
+### Spec006 R05
+Spec 005 / ADR-004 — Explicit Invoice Commands & Direct Internal Billing.
+- `POST /api/payment-lists/:id/invoice/create`
+- `POST /api/payment-lists/:id/invoice/associate`
+- Strict state transition to `pending` upon invoice command
+- Claims transition from `reserved` to immutable `consumed`
+- Finance V2 revenue projections (`pending` -> `paid`)
 
 ---
 

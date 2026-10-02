@@ -222,8 +222,12 @@ paymentListsRouter.get("/:id", async (req: Request, res: Response) => {
 
 paymentListsRouter.patch("/:id/status", async (req: Request, res: Response) => {
   try {
+    const toStatus = req.body?.toStatus;
     const { isInternalManager } = await assertPaymentListAccess(req, routeParam(req, "id"), "payment_list.review");
-    return res.json(await transitionPaymentList(req.ctx!, routeParam(req, "id"), req.body?.toStatus, { isClientAuthorized: !isInternalManager }));
+    if (toStatus === "ready_for_billing" && !isInternalManager) {
+      throw new ForbiddenError("FORBIDDEN_ROLE: Apenas operadores internos possuem autoridade para aprovar faturamento.");
+    }
+    return res.json(await transitionPaymentList(req.ctx!, routeParam(req, "id"), toStatus, { isClientAuthorized: !isInternalManager }));
   } catch (error) {
     return sendError(res, error);
   }
