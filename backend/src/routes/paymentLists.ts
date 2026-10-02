@@ -165,13 +165,20 @@ async function assertPaymentListAccess(
     ctx.membershipRole === "admin";
 
   if (!isInternalManager) {
-    const siteKeys = [...new Set(list.items.map((i: any) => i.operationalSiteKey).filter(Boolean))];
-    const operationalSite = siteKeys.length === 1 ? (siteKeys[0] as string) : undefined;
-    await assertClientCapability(ctx, {
+    const grant = await assertClientCapability(ctx, {
       clientId: list.clientId,
       capability,
-      siteKey: operationalSite,
     });
+    if (grant.siteKey) {
+      const allBelong =
+        list.items.length > 0 &&
+        list.items.every((i: any) => i.operationalSiteKey === grant.siteKey);
+      if (!allBelong) {
+        throw new ForbiddenError(
+          "SITE_SCOPE_UNAUTHORIZED: Local operacional não autorizado para este validador."
+        );
+      }
+    }
   }
   return { list, isInternalManager };
 }

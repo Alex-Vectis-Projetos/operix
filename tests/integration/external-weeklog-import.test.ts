@@ -422,16 +422,22 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
         expect(entry.externalImportItemId).toBeDefined();
       }
 
-      // Zero efeitos em projeções produtivas, comerciais, legadas ou financeiras.
+      // Zero efeitos em ordens de produção fictícias, orçamentos ou registros financeiros (Spec 004),
+      // enquanto o commercial handoff cria o draft PaymentList canônico (Spec 006 EXT-WEEKLOG-AUTO-LIST-01).
       expect(await Promise.all([
         prisma.productionOrder.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
         prisma.budget.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
-        prisma.paymentList.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
-        prisma.paymentListItem.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
-        prisma.paymentListEntryClaim.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
-        prisma.paymentOrder.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
         prisma.financialRecord.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } }),
-      ])).toEqual(forbiddenSideEffectsBefore);
+      ])).toEqual([
+        forbiddenSideEffectsBefore[0],
+        forbiddenSideEffectsBefore[1],
+        forbiddenSideEffectsBefore[6],
+      ]);
+
+      const autoList = await prisma.paymentList.findFirst({
+        where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha, sourceType: "weeklog_auto", status: "draft" },
+      });
+      expect(autoList).not.toBeNull();
     });
 
     it("IMPORT-WEEKLOG-COMMIT-IDEMPOTENT-01: Idempotência de Retry no Commit de Importação Operacional Externa", async () => {

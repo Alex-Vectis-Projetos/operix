@@ -689,6 +689,7 @@ model Weeklog {
   client      Client              @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   entries     WeeklogEntry[]
   validations WeeklogValidation[]
+  paymentLists PaymentList[]
 
   @@unique([workspaceId, startsOn, clientId, siteKey])
   @@unique([id, workspaceId])
@@ -774,8 +775,10 @@ model WeeklogValidation {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   validator User?     @relation("UserWeeklogValidations", fields: [validatorUserId], references: [id], onDelete: Restrict)
   submitter User?     @relation("UserWeeklogSubmissions", fields: [submittedBy], references: [id], onDelete: Restrict)
+  paymentLists PaymentList[]
 
   @@unique([weeklogId, validationSequence])
+  @@unique([id, workspaceId])
   @@index([workspaceId, weeklogId])
   @@map("weeklog_validations")
 }
@@ -1308,11 +1311,13 @@ model CountryDocumentRequirement {
 
 enum PaymentListStatus {
   draft
+  ready_for_billing
   under_review
   confronted
   pending
   paid
   cancelled
+  superseded
 }
 
 enum ConfrontationStatus {
@@ -1345,13 +1350,17 @@ enum ImportStatus {
 }
 
 model PaymentList {
-  id                  String            @id @default(uuid())
-  workspaceId         String            @map("workspace_id")
-  listNumber          String            @map("list_number")
-  clientId            String            @map("client_id")
-  clientName          String            @map("client_name")
-  currencyCode        String            @map("currency_code")
-  status              PaymentListStatus @default(draft)
+  id                        String            @id @default(uuid())
+  workspaceId               String            @map("workspace_id")
+  listNumber                String            @map("list_number")
+  clientId                  String            @map("client_id")
+  clientName                String            @map("client_name")
+  currencyCode              String            @map("currency_code")
+  status                    PaymentListStatus @default(draft)
+  sourceType                String            @default("manual") @map("source_type")
+  originWeeklogId           String?           @map("origin_weeklog_id")
+  originWeeklogValidationId String?           @map("origin_weeklog_validation_id")
+  supersededByPaymentListId String?           @map("superseded_by_payment_list_id")
   
   itemCount           Int               @default(0) @map("item_count")
   sourceDocumentTotal Decimal           @default(0.00) @map("source_document_total") @db.Decimal(12, 2)
@@ -1373,17 +1382,22 @@ model PaymentList {
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
 
-  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  client              Client            @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  items               PaymentListItem[]
-  claims              PaymentListEntryClaim[]
-  confrontationRuns   PaymentListConfrontationRun[]
-  confrontationResults PaymentListConfrontationResult[]
-  externalImports     ExternalListImport[]
+  workspace                 Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client                    Client              @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  originWeeklog             Weeklog?            @relation(fields: [originWeeklogId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  originWeeklogValidation   WeeklogValidation?  @relation(fields: [originWeeklogValidationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  supersededBy              PaymentList?        @relation("PaymentListSuperseded", fields: [supersededByPaymentListId, workspaceId], references: [id, workspaceId], onDelete: SetNull)
+  superseding               PaymentList[]       @relation("PaymentListSuperseded")
+  items                     PaymentListItem[]
+  claims                    PaymentListEntryClaim[]
+  confrontationRuns         PaymentListConfrontationRun[]
+  confrontationResults      PaymentListConfrontationResult[]
+  externalImports           ExternalListImport[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, listNumber])
   @@index([workspaceId, status])
+  @@index([workspaceId, originWeeklogValidationId])
   @@index([clientId, status])
   @@map("payment_lists")
 }
@@ -1403,6 +1417,9 @@ model PaymentListItem {
   technicianUserId      String?               @map("technician_user_id")
   technicianName        String?               @map("technician_name")
   operationalSiteKey    String?               @map("operational_site_key")
+  
+  vehicleDescription    String?               @map("vehicle_description")
+  serviceLocation       String?               @map("service_location")
   
   servicesSnapshot      Json                  @map("services_snapshot")
   totalAmount           Decimal               @map("total_amount") @db.Decimal(12, 2)
@@ -1426,7 +1443,7 @@ model PaymentListEntryClaim {
   workspaceId     String       @map("workspace_id")
   paymentListId   String       @map("payment_list_id")
   weeklogEntryId  String       @map("weeklog_entry_id")
-  status          String       @default("reserved")
+  status          String       @default("reserved") // provisional | reserved | consumed | released
   claimedAt       DateTime     @default(now()) @map("claimed_at")
   consumedAt      DateTime?    @map("consumed_at")
   releasedAt      DateTime?    @map("released_at")

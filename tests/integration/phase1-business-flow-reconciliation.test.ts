@@ -966,18 +966,42 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
 
   describe("Group 3: Projections, Multiweek & External Import Reconciliation", () => {
     it("LIST-PROJECTION-01: Generated List carries correct vehicle, completion date, site, services and amount semantics", async () => {
-      // RED: Verify auto-generated list carries the VECTIS projection attributes
-      const list = await prisma.paymentList.findFirst({
+      let list = await prisma.paymentList.findFirst({
         where: { workspaceId: fixture.workspaceA, status: "draft" },
         include: { items: true },
       });
 
-      // RED: Auto-generated list not present yet
-      expect(list).not.toBeNull();
-      expect(list?.items[0]).toMatchObject({
-        vehicleDescription: expect.any(String),
-        serviceLocation: expect.any(String),
-      });
+      let createdForTest = false;
+      if (!list) {
+        createdForTest = true;
+        await request(`/api/weeklogs/75000000-0000-4000-8000-000000000010/validate`, {
+          method: "POST",
+          headers: headers(fixture.clientAUser, fixture.workspaceA, "val-proj-key"),
+          body: JSON.stringify({
+            validationMethod: "authenticated_confirmation",
+            approvedEntryIds: ["77000000-0000-4000-8000-000000000010"],
+          }),
+        });
+        list = await prisma.paymentList.findFirst({
+          where: { workspaceId: fixture.workspaceA, status: "draft" },
+          include: { items: true },
+        });
+      }
+
+      try {
+        // RED: Auto-generated list not present yet
+        expect(list).not.toBeNull();
+        expect(list?.items[0]).toMatchObject({
+          vehicleDescription: expect.any(String),
+          serviceLocation: expect.any(String),
+        });
+      } finally {
+        if (createdForTest && list) {
+          await prisma.paymentListEntryClaim.deleteMany({ where: { paymentListId: list.id } });
+          await prisma.paymentListItem.deleteMany({ where: { paymentListId: list.id } });
+          await prisma.paymentList.deleteMany({ where: { id: list.id } });
+        }
+      }
     });
 
     it("LIST-MANUAL-PRESERVED-01: Manual List flow remains supported", async () => {
@@ -1024,14 +1048,31 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         },
       });
 
+      const manualPoId = "76000000-0000-4000-8000-000000000077";
+      await prisma.productionOrder.deleteMany({ where: { id: manualPoId } });
+      await prisma.productionOrder.create({
+        data: {
+          id: manualPoId,
+          workspaceId: fixture.workspaceA,
+          code: "PO-MANUAL-COEXIST",
+          clientId: fixture.clientAId,
+          status: "delivered",
+        },
+      });
+
       await prisma.weeklogEntry.create({
         data: {
           id: manualEntryId,
           workspaceId: fixture.workspaceA,
           weeklogId: manualWlId,
+          productionOrderId: manualPoId,
+          clientId: fixture.clientAId,
+          technicianUserId: fixture.ownerA,
+          technicianName: "Owner A",
+          currencyCode: "EUR",
           sourceType: "production_order",
           licensePlate: "ABS-001-FR",
-          carName: "Peugeot 208",
+          model: "Peugeot 208",
           totalAmount: 350.0,
           deliveredAt: new Date("2026-10-20T10:00:00.000Z"),
           validationStatus: "approved",
@@ -1076,6 +1117,186 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.status).toBe("draft");
+    });
+
+    it("LIST-PARTIAL-ABSORB-HARDENING-01: Partial absorption releases only selected entries, keeps remaining entries billable, and recalculates auto-draft totals", async () => {
+      const autoListId = "74000000-0000-4000-8000-000000000088";
+      const entry1Id = "75000000-0000-4000-8000-000000000081";
+      const entry2Id = "75000000-0000-4000-8000-000000000082";
+      const wlId = "75000000-0000-4000-8000-000000000080";
+      const po1Id = "76000000-0000-4000-8000-000000000081";
+      const po2Id = "76000000-0000-4000-8000-000000000082";
+
+      await prisma.paymentListEntryClaim.deleteMany({ where: { weeklogEntryId: { in: [entry1Id, entry2Id] } } });
+      await prisma.paymentListItem.deleteMany({ where: { weeklogEntryId: { in: [entry1Id, entry2Id] } } });
+      await prisma.paymentList.deleteMany({ where: { id: autoListId } });
+      await prisma.weeklogEntry.deleteMany({ where: { id: { in: [entry1Id, entry2Id] } } });
+      await prisma.productionOrder.deleteMany({ where: { id: { in: [po1Id, po2Id] } } });
+      await prisma.weeklog.deleteMany({ where: { id: wlId } });
+
+      await prisma.productionOrder.createMany({
+        data: [
+          { id: po1Id, workspaceId: fixture.workspaceA, code: "PO-PARTIAL-1", clientId: fixture.clientAId, status: "delivered" },
+          { id: po2Id, workspaceId: fixture.workspaceA, code: "PO-PARTIAL-2", clientId: fixture.clientAId, status: "delivered" },
+        ],
+      });
+
+      await prisma.weeklog.create({
+        data: {
+          id: wlId,
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-partial-absorb",
+          startsOn: new Date("2026-10-25T00:00:00.000Z"),
+          endsOn: new Date("2026-10-31T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W44",
+          weekNumber: 44,
+          status: "validated",
+        },
+      });
+
+      await prisma.weeklogEntry.createMany({
+        data: [
+          {
+            id: entry1Id,
+            workspaceId: fixture.workspaceA,
+            weeklogId: wlId,
+            productionOrderId: po1Id,
+            clientId: fixture.clientAId,
+            technicianUserId: fixture.ownerA,
+            technicianName: "Owner A",
+            currencyCode: "EUR",
+            sourceType: "production_order",
+            licensePlate: "PAR-001-AA",
+            totalAmount: 200.0,
+            deliveredAt: new Date("2026-10-26T10:00:00.000Z"),
+            validationStatus: "approved",
+          },
+          {
+            id: entry2Id,
+            workspaceId: fixture.workspaceA,
+            weeklogId: wlId,
+            productionOrderId: po2Id,
+            clientId: fixture.clientAId,
+            technicianUserId: fixture.ownerA,
+            technicianName: "Owner A",
+            currencyCode: "EUR",
+            sourceType: "production_order",
+            licensePlate: "PAR-002-BB",
+            totalAmount: 300.0,
+            deliveredAt: new Date("2026-10-27T10:00:00.000Z"),
+            validationStatus: "approved",
+          },
+        ],
+      });
+
+      const autoList = await prisma.paymentList.create({
+        data: {
+          id: autoListId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-AUTO-PARTIAL-TEST",
+          clientId: fixture.clientAId,
+          clientName: "VECTIS Client",
+          currencyCode: "EUR",
+          status: "draft",
+          sourceType: "weeklog_auto",
+          itemCount: 2,
+          sourceDocumentTotal: 500.0,
+          recognizedTotal: 0.0,
+          createdBy: fixture.ownerA,
+        },
+      });
+
+      await prisma.paymentListItem.createMany({
+        data: [
+          {
+            workspaceId: fixture.workspaceA,
+            paymentListId: autoList.id,
+            weeklogEntryId: entry1Id,
+            vehicleDescription: "Entry 1 Car",
+            totalAmount: 200.0,
+            servicesSnapshot: [],
+          },
+          {
+            workspaceId: fixture.workspaceA,
+            paymentListId: autoList.id,
+            weeklogEntryId: entry2Id,
+            vehicleDescription: "Entry 2 Car",
+            totalAmount: 300.0,
+            servicesSnapshot: [],
+          },
+        ],
+      });
+
+      await prisma.paymentListEntryClaim.createMany({
+        data: [
+          { workspaceId: fixture.workspaceA, paymentListId: autoList.id, weeklogEntryId: entry1Id, status: "provisional" },
+          { workspaceId: fixture.workspaceA, paymentListId: autoList.id, weeklogEntryId: entry2Id, status: "provisional" },
+        ],
+      });
+
+      // Operator creates a manual list absorbing only entry1Id
+      const res = await request("/api/payment-lists", {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "partial-absorb-key"),
+        body: JSON.stringify({
+          clientId: fixture.clientAId,
+          currencyCode: "EUR",
+          entryIds: [entry1Id],
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const manualList = await res.json();
+      expect(manualList.status).toBe("draft");
+
+      // Verify the manual list received a reserved claim
+      const manualClaim = await prisma.paymentListEntryClaim.findFirst({
+        where: { paymentListId: manualList.id, weeklogEntryId: entry1Id },
+      });
+      expect(manualClaim?.status).toBe("reserved");
+
+      // Verify auto-draft state:
+      // 1. auto-draft remains draft (NOT superseded)
+      const updatedAutoList = await prisma.paymentList.findUniqueOrThrow({
+        where: { id: autoListId },
+        include: { items: true, claims: true },
+      });
+      expect(updatedAutoList.status).toBe("draft");
+      expect(updatedAutoList.itemCount).toBe(1);
+      expect(Number(updatedAutoList.sourceDocumentTotal)).toBe(300.0);
+
+      // 2. entry1 absorbed item is no longer in auto-draft items
+      expect(updatedAutoList.items).toHaveLength(1);
+      expect(updatedAutoList.items[0]?.weeklogEntryId).toBe(entry2Id);
+
+      // 3. entry1 claim is released with explicit reason
+      const entry1Claim = updatedAutoList.claims.find((c) => c.weeklogEntryId === entry1Id);
+      expect(entry1Claim?.status).toBe("released");
+      expect(entry1Claim?.releasedReason).toBe(`absorbed_by_manual_list:${manualList.id}`);
+
+      // 4. entry2 claim remains provisional in auto-draft
+      const entry2Claim = updatedAutoList.claims.find((c) => c.weeklogEntryId === entry2Id);
+      expect(entry2Claim?.status).toBe("provisional");
+
+      // 5. entry2 remains billable: create another manual list with entry2Id
+      const res2 = await request("/api/payment-lists", {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "partial-absorb-key-2"),
+        body: JSON.stringify({
+          clientId: fixture.clientAId,
+          currencyCode: "EUR",
+          entryIds: [entry2Id],
+        }),
+      });
+      expect(res2.status).toBe(201);
+
+      // Now all entries of autoList were absorbed -> auto-draft becomes superseded
+      const finalizedAutoList = await prisma.paymentList.findUniqueOrThrow({
+        where: { id: autoListId },
+      });
+      expect(finalizedAutoList.status).toBe("superseded");
     });
 
     it("LIST-IMPORT-PRESERVED-01: External import/OCR/confrontation remains possible and anti-double-billing semantics remain coherent after automatic List introduction", async () => {

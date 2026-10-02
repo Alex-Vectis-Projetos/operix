@@ -33,7 +33,12 @@ function presentList(list: any) {
     ...list,
     sourceDocumentTotal: asMoney(list.sourceDocumentTotal),
     recognizedTotal: asMoney(list.recognizedTotal),
-    items: (list.items ?? []).map((item: any) => ({ ...item, totalAmount: asMoney(item.totalAmount) })),
+    items: (list.items ?? []).map((item: any) => ({
+      ...item,
+      vehicleDescription: item.vehicleDescription || item.carName || "Véhicule non spécifié",
+      serviceLocation: item.serviceLocation || item.operationalSiteKey || "",
+      totalAmount: asMoney(item.totalAmount),
+    })),
   };
 }
 
@@ -64,6 +69,219 @@ function sanitize(ctx: RequestContext, list: any) {
   return { ...safe, items };
 }
 
+export async function absorbProvisionalClaimsInTransaction(
+  tx: Prisma.TransactionClient,
+  params: {
+    workspaceId: string;
+    targetPaymentListId: string;
+    entryIds: string[];
+    absorbedByReason: string;
+  }
+) {
+  if (!params.entryIds.length) return;
+
+  const existingClaims = await tx.paymentListEntryClaim.findMany({
+    where: {
+      workspaceId: params.workspaceId,
+      weeklogEntryId: { in: params.entryIds },
+      status: { in: ["provisional", "reserved", "consumed"] },
+    },
+    include: { paymentList: { select: { id: true, status: true, sourceType: true } } },
+  });
+
+  const affectedAutoListIds = new Set<string>();
+
+  for (const claim of existingClaims) {
+    if (claim.paymentListId === params.targetPaymentListId) continue;
+    if (claim.status === "consumed") {
+      throw new ConflictError("WEEKLOG_ENTRY_ALREADY_CLAIMED");
+    }
+    // Reserved claim on a non-draft list cannot be absorbed
+    if (claim.status === "reserved" && claim.paymentList.status !== "draft") {
+      throw new ConflictError("WEEKLOG_ENTRY_ALREADY_CLAIMED");
+    }
+
+    // Absorb claim
+    await tx.paymentListEntryClaim.update({
+      where: { id: claim.id },
+      data: {
+        status: "released",
+        releasedAt: new Date(),
+        releasedReason: params.absorbedByReason,
+      },
+    });
+
+    // Remove item from source draft list
+    await tx.paymentListItem.deleteMany({
+      where: {
+        workspaceId: params.workspaceId,
+        paymentListId: claim.paymentListId,
+        weeklogEntryId: claim.weeklogEntryId,
+      },
+    });
+
+    affectedAutoListIds.add(claim.paymentListId);
+  }
+
+  // Update totals / status for affected source lists
+  for (const autoListId of affectedAutoListIds) {
+    const remainingItems = await tx.paymentListItem.findMany({
+      where: { workspaceId: params.workspaceId, paymentListId: autoListId },
+    });
+    if (remainingItems.length === 0) {
+      await tx.paymentList.update({
+        where: { id: autoListId },
+        data: {
+          status: "superseded",
+          supersededByPaymentListId: params.targetPaymentListId,
+          itemCount: 0,
+          sourceDocumentTotal: new Prisma.Decimal(0),
+        },
+      });
+    } else {
+      const remainingTotal = remainingItems.reduce(
+        (sum, it) => sum.plus(it.totalAmount),
+        new Prisma.Decimal(0)
+      );
+      await tx.paymentList.update({
+        where: { id: autoListId },
+        data: {
+          itemCount: remainingItems.length,
+          sourceDocumentTotal: remainingTotal,
+        },
+      });
+    }
+  }
+}
+
+export async function createAutoDraftPaymentListInTransaction(
+  tx: Prisma.TransactionClient,
+  params: {
+    workspaceId: string;
+    weeklogId: string;
+    validationId: string;
+    actorUserId: string;
+  }
+) {
+  // Idempotency: exactly-once commercial handoff authority is originWeeklogValidationId
+  const existing = await tx.paymentList.findFirst({
+    where: {
+      workspaceId: params.workspaceId,
+      originWeeklogValidationId: params.validationId,
+      sourceType: "weeklog_auto",
+      status: { notIn: ["cancelled", "superseded"] },
+    },
+    include: { items: true, claims: true },
+  });
+  if (existing) {
+    return existing;
+  }
+
+  const validation = await tx.weeklogValidation.findFirst({
+    where: { id: params.validationId, workspaceId: params.workspaceId },
+  });
+  if (!validation || validation.status !== "validated") {
+    return null;
+  }
+
+  const weeklog = await tx.weeklog.findFirst({
+    where: { id: params.weeklogId, workspaceId: params.workspaceId },
+    include: { client: { select: { id: true, name: true } } },
+  });
+  if (!weeklog) return null;
+
+  // Extract frozen approved entries from coverageSnapshot
+  const snapshot = validation.coverageSnapshot;
+  let candidateEntryIds: string[] = [];
+  if (Array.isArray(snapshot)) {
+    candidateEntryIds = snapshot.map((c: any) => c.weeklogEntryId || c.entryId || c.id).filter(Boolean);
+  } else if (snapshot && typeof snapshot === "object" && Array.isArray((snapshot as any).entries)) {
+    candidateEntryIds = (snapshot as any).entries.map((e: any) => e.entryId || e.weeklogEntryId || e.id).filter(Boolean);
+  }
+  if (!candidateEntryIds.length) return null;
+
+  const entries = await tx.weeklogEntry.findMany({
+    where: {
+      id: { in: candidateEntryIds },
+      workspaceId: params.workspaceId,
+      validationStatus: "approved",
+    },
+    include: { productionOrder: { select: { operationalSiteKey: true } } },
+    orderBy: [{ deliveredAt: "asc" }, { id: "asc" }],
+  });
+
+  if (!entries.length) return null;
+
+  const currencies = [...new Set(entries.map((e) => e.currencyCode).filter(Boolean))];
+  if (currencies.length > 1) {
+    throw new ConflictError("CANNOT_CREATE_AUTO_LIST_MULTIPLE_CURRENCIES");
+  }
+  const currencyCode = currencies[0] || "EUR";
+
+  const total = entries.reduce((sum, entry) => sum.plus(entry.totalAmount), new Prisma.Decimal(0));
+  const clientName = weeklog.client?.name || entries[0]?.clientName || "VECTIS Client";
+  const listNumber = await allocateNumber(tx, params.workspaceId);
+
+  const list = await tx.paymentList.create({
+    data: {
+      workspaceId: params.workspaceId,
+      listNumber,
+      clientId: weeklog.clientId,
+      clientName,
+      currencyCode,
+      status: "draft",
+      sourceType: "weeklog_auto",
+      originWeeklogId: weeklog.id,
+      originWeeklogValidationId: validation.id,
+      itemCount: entries.length,
+      sourceDocumentTotal: total,
+      recognizedTotal: new Prisma.Decimal(0),
+      createdBy: params.actorUserId,
+    },
+  });
+
+  await tx.paymentListItem.createMany({
+    data: entries.map((entry) => {
+      const vehicleDesc = [entry.brand, entry.model].filter(Boolean).join(" ") || "Véhicule non spécifié";
+      const siteLoc = entry.productionOrder?.operationalSiteKey || weeklog.siteKey || "";
+      return {
+        workspaceId: params.workspaceId,
+        paymentListId: list.id,
+        weeklogEntryId: entry.id,
+        carName: vehicleDesc,
+        vehicleDescription: vehicleDesc,
+        licensePlate: entry.licensePlate,
+        vin: entry.vin,
+        technicianUserId: entry.technicianUserId,
+        technicianName: entry.technicianName,
+        operationalSiteKey: siteLoc,
+        serviceLocation: siteLoc,
+        servicesSnapshot: entry.servicesSnapshot as Prisma.InputJsonValue,
+        totalAmount: entry.totalAmount,
+      };
+    }),
+  });
+
+  await tx.paymentListEntryClaim.createMany({
+    data: entries.map((entry) => ({
+      workspaceId: params.workspaceId,
+      paymentListId: list.id,
+      weeklogEntryId: entry.id,
+      status: "provisional",
+    })),
+  });
+
+  const createdItems = await tx.paymentListItem.findMany({
+    where: { paymentListId: list.id, workspaceId: params.workspaceId },
+    select: { id: true },
+  });
+  for (const item of createdItems) {
+    await projectPaymentListItemInTransaction(tx, params.workspaceId, item.id);
+  }
+
+  return list;
+}
+
 export async function createPaymentList(ctx: RequestContext, raw: unknown) {
   manager(ctx);
   const input = createSchema.parse(raw);
@@ -86,13 +304,27 @@ export async function createPaymentList(ctx: RequestContext, raw: unknown) {
         workspaceId, listNumber: number, clientId: client.id, clientName: client.name, currencyCode: input.currencyCode,
         itemCount: entries.length, sourceDocumentTotal: total, recognizedTotal: new Prisma.Decimal(0), createdBy: ctx.actorUserId,
         issueDate: input.issueDate, dueDate: input.dueDate, notes: input.notes,
+        sourceType: "manual",
       } });
       if (entries.length) {
-        await tx.paymentListItem.createMany({ data: entries.map((entry) => ({
-          workspaceId, paymentListId: list.id, weeklogEntryId: entry.id, carName: [entry.brand, entry.model].filter(Boolean).join(" ") || null,
-          licensePlate: entry.licensePlate, vin: entry.vin, technicianUserId: entry.technicianUserId, technicianName: entry.technicianName,
-          operationalSiteKey: entry.weeklog.siteKey, servicesSnapshot: entry.servicesSnapshot as Prisma.InputJsonValue, totalAmount: entry.totalAmount,
-        })) });
+        await absorbProvisionalClaimsInTransaction(tx, {
+          workspaceId,
+          targetPaymentListId: list.id,
+          entryIds: entries.map((e) => e.id),
+          absorbedByReason: `absorbed_by_manual_list:${list.id}`,
+        });
+        await tx.paymentListItem.createMany({ data: entries.map((entry) => {
+          const vehicleDesc = [entry.brand, entry.model].filter(Boolean).join(" ") || "Véhicule non spécifié";
+          const siteLoc = entry.weeklog?.siteKey || "";
+          return {
+            workspaceId, paymentListId: list.id, weeklogEntryId: entry.id,
+            carName: vehicleDesc, vehicleDescription: vehicleDesc,
+            licensePlate: entry.licensePlate, vin: entry.vin,
+            technicianUserId: entry.technicianUserId, technicianName: entry.technicianName,
+            operationalSiteKey: siteLoc, serviceLocation: siteLoc,
+            servicesSnapshot: entry.servicesSnapshot as Prisma.InputJsonValue, totalAmount: entry.totalAmount,
+          };
+        }) });
         await tx.paymentListEntryClaim.createMany({ data: entries.map((entry) => ({ workspaceId, paymentListId: list.id, weeklogEntryId: entry.id, status: "reserved" })) });
       }
       const createdItems = await tx.paymentListItem.findMany({ where: { paymentListId: list.id, workspaceId }, select: { id: true } });
@@ -109,7 +341,7 @@ export async function commitReviewedImport(ctx: RequestContext, importId: string
   manager(ctx);
   const workspaceId = ws(ctx);
   return prisma.$transaction(async (tx) => {
-    // The import is the idempotency key for materialisation.  Locking it makes
+    // The import is the idempotency key for materialisation. Locking it makes
     // concurrent retries observe the first committed paymentListId instead of
     // allocating a second commercial list.
     const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -142,7 +374,22 @@ export async function commitReviewedImport(ctx: RequestContext, importId: string
     const list = await tx.paymentList.create({ data: {
       workspaceId, listNumber: number, clientId: imported.reviewedClientId, clientName: imported.reviewedClient.name, currencyCode: imported.reviewedCurrencyCode,
       itemCount: imported.items.length, sourceDocumentTotal: total, recognizedTotal: new Prisma.Decimal(0), createdBy: ctx.actorUserId, documentId: imported.id,
-      items: { create: imported.items.map((item) => ({ carName: item.reviewedCarName, licensePlate: item.reviewedLicensePlate, vin: item.reviewedVin, technicianUserId: item.reviewedTechnicianUserId, servicesSnapshot: item.reviewedServices as Prisma.InputJsonValue, totalAmount: item.reviewedTotal! })) },
+      sourceType: "external_import",
+      items: { create: imported.items.map((item) => {
+        const vehicleDesc = item.reviewedCarName || "Véhicule non spécifié";
+        const siteLoc = item.rawPlatform || "";
+        return {
+          carName: vehicleDesc,
+          vehicleDescription: vehicleDesc,
+          licensePlate: item.reviewedLicensePlate,
+          vin: item.reviewedVin,
+          technicianUserId: item.reviewedTechnicianUserId,
+          operationalSiteKey: siteLoc,
+          serviceLocation: siteLoc,
+          servicesSnapshot: item.reviewedServices as Prisma.InputJsonValue,
+          totalAmount: item.reviewedTotal!,
+        };
+      }) },
     } });
     await tx.externalListImport.update({ where: { id: imported.id }, data: { paymentListId: list.id, status: "committed" } });
     const createdItems = await tx.paymentListItem.findMany({ where: { paymentListId: list.id, workspaceId }, select: { id: true } });
@@ -163,7 +410,7 @@ export async function transitionPaymentList(
   target: unknown,
   options?: { isClientAuthorized?: boolean }
 ) {
-  const parsedStatus = z.enum(["under_review", "confronted", "pending", "paid", "cancelled"]).safeParse(target);
+  const parsedStatus = z.enum(["ready_for_billing", "under_review", "confronted", "pending", "paid", "cancelled", "superseded"]).safeParse(target);
   if (!parsedStatus.success) throw new ConflictError("LIST_INVALID_STATE_TRANSITION");
   const toStatus = parsedStatus.data as PaymentListStatus;
   if (!options?.isClientAuthorized) {
@@ -174,28 +421,41 @@ export async function transitionPaymentList(
     const list = await tx.paymentList.findFirst({ where: { id, workspaceId }, include: { claims: true, items: true } });
     if (!list) throw new NotFoundError("LIST_NOT_FOUND");
     if (list.status === "paid" && toStatus === "paid") return presentList(list);
-    const allowed: Record<string, string[]> = { draft: ["under_review", "cancelled"], under_review: ["confronted", "cancelled"], confronted: ["pending"], pending: ["paid"], paid: [], cancelled: [] };
-    if (!allowed[list.status].includes(toStatus)) throw new ConflictError("LIST_INVALID_STATE_TRANSITION");
+    const allowed: Record<string, string[]> = {
+      draft: ["ready_for_billing", "under_review", "cancelled", "superseded"],
+      ready_for_billing: ["pending", "cancelled"],
+      under_review: ["confronted", "cancelled"],
+      confronted: ["pending", "cancelled"],
+      pending: ["paid"],
+      paid: [],
+      cancelled: [],
+      superseded: [],
+    };
+    if (!allowed[list.status]?.includes(toStatus)) throw new ConflictError("LIST_INVALID_STATE_TRANSITION");
     if (toStatus === "pending") {
       const currentRun = await tx.paymentListConfrontationRun.findFirst({
         where: { paymentListId: list.id, workspaceId, status: "completed" },
         orderBy: { sequence: "desc" },
         include: { results: { select: { paymentListItemId: true, status: true, decision: true } } },
       });
-      if (!currentRun) {
+      if (!currentRun && list.sourceType !== "manual" && list.sourceType !== "weeklog_auto") {
         throw new ConflictError("LIST_CONFRONTATION_REQUIRED");
       }
-      const itemResults = currentRun.results.filter((result) => result.paymentListItemId !== null);
-      const evaluatedItems = new Set(itemResults.map((result) => result.paymentListItemId));
-      if (evaluatedItems.size !== list.itemCount || currentRun.results.some((result) => result.status === "ambiguous_match" || result.status === "unmatched_weeklog" || (result.status !== "exact_match" && result.decision === "none"))) {
-        throw new ConflictError("LIST_CONFRONTATION_REQUIRED");
-      }
-      if (currentRun.results.some((result) => result.decision === "contest" || result.decision === "request_rectification")) {
-        throw new ConflictError("UNRESOLVED_DISPUTES_BLOCK_PENDING");
+      if (currentRun) {
+        const itemResults = currentRun.results.filter((result) => result.paymentListItemId !== null);
+        const evaluatedItems = new Set(itemResults.map((result) => result.paymentListItemId));
+        if (evaluatedItems.size !== list.itemCount || currentRun.results.some((result) => result.status === "ambiguous_match" || result.status === "unmatched_weeklog" || (result.status !== "exact_match" && result.decision === "none"))) {
+          throw new ConflictError("LIST_CONFRONTATION_REQUIRED");
+        }
+        if (currentRun.results.some((result) => result.decision === "contest" || result.decision === "request_rectification")) {
+          throw new ConflictError("UNRESOLVED_DISPUTES_BLOCK_PENDING");
+        }
       }
       await tx.paymentListEntryClaim.updateMany({ where: { paymentListId: list.id, workspaceId, status: "reserved" }, data: { status: "consumed", consumedAt: new Date() } });
     }
-    if (toStatus === "cancelled") await tx.paymentListEntryClaim.updateMany({ where: { paymentListId: list.id, workspaceId, status: "reserved" }, data: { status: "released", releasedAt: new Date(), releasedReason: "LIST_CANCELLED" } });
+    if (toStatus === "cancelled") {
+      await tx.paymentListEntryClaim.updateMany({ where: { paymentListId: list.id, workspaceId, status: { in: ["reserved", "provisional"] } }, data: { status: "released", releasedAt: new Date(), releasedReason: "LIST_CANCELLED" } });
+    }
     await tx.paymentList.update({ where: { id: list.id }, data: toStatus === "paid" ? { status: toStatus, paidAt: new Date(), paidBy: ctx.actorUserId } : { status: toStatus } });
     const items = await tx.paymentListItem.findMany({ where: { paymentListId: list.id, workspaceId }, select: { id: true } });
     for (const item of items) await projectPaymentListItemInTransaction(tx, workspaceId, item.id);

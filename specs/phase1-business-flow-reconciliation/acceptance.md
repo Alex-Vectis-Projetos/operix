@@ -80,12 +80,12 @@
 ### LIST-AUTO-01: Automatic Draft PaymentList Creation
 - **Given** a Weeklog in `pending_validation` with all entries approved,
 - **When** the authorized client signs/validates the batch,
-- **Then** exactly one draft `PaymentList` is automatically created with `sourceType = 'weeklog_auto'`, and its entries receive `status = 'provisional'`.
+- **Then** exactly one draft `PaymentList` is automatically created with `sourceType = 'weeklog_auto'`, bound to `originWeeklogValidationId` (and `originWeeklogId`), and its entries receive `status = 'provisional'`.
 - **Status**: `RED` (Proves missing auto-draft trigger).
 
-### LIST-AUTO-IDEMPOTENT-01: Concurrency & Retry Idempotency
-- **Given** concurrent or repeated calls to validate a Weeklog batch,
-- **Then** exactly one `PaymentList` is generated without duplicate claims or items.
+### LIST-AUTO-IDEMPOTENT-01: Concurrency & Validation-Cycle Idempotency
+- **Given** concurrent or repeated calls to validate a Weeklog batch for the same validation round,
+- **Then** exactly one `PaymentList` is generated for that validation cycle without duplicate claims or items.
 - **Status**: `RED` (Proves missing auto-draft idempotency).
 
 ### LIST-PARTIAL-NO-AUTO-01: Incomplete / Rectification Validation

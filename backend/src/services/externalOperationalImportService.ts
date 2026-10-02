@@ -15,6 +15,7 @@ import {
 } from "./externalImportAdapters.js";
 import { ImportPipelineError, parseReviewedDecimal } from "./externalListImportService.js";
 import { operationalWeekOf } from "../lib/weekUtils.js";
+import { createAutoDraftPaymentListInTransaction } from "./paymentListService.js";
 
 type ServiceDependencies = { storage?: ImportDocumentStorage; extraction?: ImportExtractionProvider };
 
@@ -538,6 +539,12 @@ export async function commitReviewedExternalOperationalImport(ctx: RequestContex
         data: { validationStatus: "approved", reviewedAt: now, reviewerUserId: ctx.actorUserId },
       });
       const finalizedWeeklog = await tx.weeklog.update({ where: { id: weeklog.id }, data: { status: "validated" }, select: { id: true, startsOn: true, endsOn: true, clientId: true, siteKey: true, status: true } });
+      await createAutoDraftPaymentListInTransaction(tx, {
+        workspaceId: ws,
+        weeklogId: weeklog.id,
+        validationId: validation.id,
+        actorUserId: ctx.actorUserId,
+      });
       materializedWeeklogs.push(finalizedWeeklog);
       materializedEntries.push(...createdEntries.map((entry) => externalEntryDto({ ...entry, validationStatus: "approved" })));
       materializedValidations.push(externalValidationDto(validation));

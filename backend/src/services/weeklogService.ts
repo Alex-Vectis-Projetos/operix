@@ -15,6 +15,7 @@ import {
   assertClientCapability,
 } from "../lib/objectAuth.js";
 import { operationalWeekOf } from "../lib/weekUtils.js";
+import { createAutoDraftPaymentListInTransaction } from "./paymentListService.js";
 
 export interface FinalizeProductionOrderOptions {
   /**
@@ -697,7 +698,11 @@ export async function listWeeklogs(
     where.clientId = filters.clientId;
   }
   if (filters.status) {
-    where.status = filters.status;
+    if (filters.status !== "all") {
+      where.status = filters.status;
+    }
+  } else {
+    where.status = { not: "validated" };
   }
   if (filters.siteKey) {
     where.siteKey = filters.siteKey;
@@ -1452,6 +1457,15 @@ export async function validateWeeklogBatch(
         where: { id: weeklogId },
         data: { status: finalHeaderStatus },
       });
+
+      if (finalHeaderStatus === "validated") {
+        await createAutoDraftPaymentListInTransaction(tx, {
+          workspaceId,
+          weeklogId,
+          validationId: completedRound.id,
+          actorUserId,
+        });
+      }
 
       return {
         weeklog: updatedWeeklog,

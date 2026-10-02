@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma.js";
 import { ConflictError, ForbiddenError, NotFoundError, UnprocessableEntityError } from "../lib/objectAuth.js";
 import type { RequestContext } from "../middleware/requestContext.js";
 import { rectifyWeeklogEntryInTransaction } from "./weeklogService.js";
+import { absorbProvisionalClaimsInTransaction } from "./paymentListService.js";
 
 const modeSchema = z.enum(["current", "new_round"]);
 const decisionSchema = z.object({
@@ -196,6 +197,19 @@ async function buildPlan(tx: Prisma.TransactionClient, list: any, workspace: str
 }
 
 async function reserveMatchedClaims(tx: Prisma.TransactionClient, workspace: string, listId: string, results: PlanResult[]) {
+  const matchedEntryIds = results
+    .filter((r) => r.weeklogEntryId && r.status !== "ambiguous_match" && r.status !== "unmatched_weeklog")
+    .map((r) => r.weeklogEntryId as string);
+
+  if (matchedEntryIds.length) {
+    await absorbProvisionalClaimsInTransaction(tx, {
+      workspaceId: workspace,
+      targetPaymentListId: listId,
+      entryIds: matchedEntryIds,
+      absorbedByReason: `absorbed_by_external_list:${listId}`,
+    });
+  }
+
   for (const result of results) {
     if (!result.weeklogEntryId || result.status === "ambiguous_match" || result.status === "unmatched_weeklog") continue;
     const claim = await tx.paymentListEntryClaim.findFirst({ where: { workspaceId: workspace, weeklogEntryId: result.weeklogEntryId, status: { in: ["reserved", "consumed"] } } });

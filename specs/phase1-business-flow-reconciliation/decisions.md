@@ -91,20 +91,22 @@ WHERE "status" = 'provisional';
 #### 3. PaymentList Schema Requirements
 To support auto-draft handoff, provenance, and idempotency, `PaymentList` schema requires:
 - `sourceType`: enum `weeklog_auto`, `external_import`, `manual`.
-- `originWeeklogId`: nullable UUID referencing `Weeklog(id)`.
+- `originWeeklogId`: nullable UUID referencing `Weeklog(id)` (provenance lineage only).
+- `originWeeklogValidationId`: nullable UUID referencing `WeeklogValidation(id)` (exact validation-cycle commercial handoff authority).
 - `supersededByPaymentListId`: nullable UUID referencing `PaymentList(id)`.
 - `status`: enum preserving `draft`, `under_review`, `confronted`, `pending`, `paid`, `cancelled` and adding `ready_for_billing`, `superseded`.
-- **R04 Pre-Flight Note A (Tenant-Safe Composite FKs)**:
-  `originWeeklogId` and `supersededByPaymentListId` must strictly preserve Spec004 composite tenant FK architecture:
+- **Tenant-Safe Composite FKs**:
+  `originWeeklogId`, `originWeeklogValidationId`, and `supersededByPaymentListId` strictly preserve Spec004 composite tenant FK architecture:
   - `FOREIGN KEY (origin_weeklog_id, workspace_id) REFERENCES weeklogs(id, workspace_id)`
+  - `FOREIGN KEY (origin_weeklog_validation_id, workspace_id) REFERENCES weeklog_validations(id, workspace_id)`
   - `FOREIGN KEY (superseded_by_payment_list_id, workspace_id) REFERENCES payment_lists(id, workspace_id)`
   Never introduce simple cross-workspace FK linkage.
-- **R04 Pre-Flight Note B (Auto-List Idempotency Authority Audit)**:
-  Before migration, audit whether one Weeklog can produce multiple valid `WeeklogValidation` rounds due to rectification/re-finalization. If yes, `originWeeklogId` alone is too coarse as exactly-once authority. Evaluate `originWeeklogValidationId` / `validationSequence` as the handoff idempotency identity. Do NOT implement the partial unique index until this is proven against Spec003 validation-round semantics.
-- **Deterministic Auto-Draft Idempotency Constraint** (`LIST-AUTO-IDEMPOTENT-01`):
+- **Auto-List Idempotency Authority (Approved R03 Preflight Decision)**:
+  A single Weeklog can legitimately produce multiple completed Validation Rounds after rectification/re-finalization. Therefore, `originWeeklogId` remains provenance only, and the exactly-once handoff authority is `originWeeklogValidationId`. Auto-draft lists are created from the exact approved coverage of that completed validation round.
+- **Deterministic Auto-Draft Validation-Cycle Idempotency Constraint** (`LIST-AUTO-IDEMPOTENT-01`):
   ```sql
-  CREATE UNIQUE INDEX "unique_active_auto_payment_list_origin_weeklog"
-  ON "payment_lists" ("workspace_id", "origin_weeklog_id")
+  CREATE UNIQUE INDEX "unique_active_auto_payment_list_origin_validation"
+  ON "payment_lists" ("workspace_id", "origin_weeklog_validation_id")
   WHERE "source_type" = 'weeklog_auto' AND "status" NOT IN ('cancelled', 'superseded');
   ```
 
