@@ -1,4 +1,4 @@
-# Architecture Decisions — Phase 1 Business Flow Reconciliation (R01B Frozen)
+# Architecture Decisions — Phase 1 Business Flow Reconciliation (R01C Frozen)
 
 ## ADR-001: Week Boundary Auto-Closure & Startup Catch-Up Engine
 
@@ -16,11 +16,11 @@ In Operix brownfield, week boundaries are computed Sunday 00:00:00.000 to Saturd
 2. **Three-Tier Trigger Hierarchy**:
    - **Boot Catch-Up**: Executed in `backend/src/index.ts` before HTTP listener starts (`runStartupCatchup`).
    - **Periodic Background Cron**: Runs every 60 seconds across all active workspaces.
-   - **Just-in-Time Ingestion Guard**: If `finalizeProductionOrder` receives an order whose `deliveredAt > weeklog.endsOn`, the expired week is immediately closed, and the vehicle is assigned to the current active operational week.
+   - **Just-in-Time Ingestion Guard**: If `finalizeProductionOrder` receives an order whose `deliveredAt > weeklog.endsOn`, the expired week is immediately closed, and the vehicle is assigned to the current active operational week (already validated as GREEN by `WEEK-BOUNDARY-ROLLFORWARD-01`).
 
 ---
 
-## ADR-002: Deterministic Provisional Claim Absorption for External & Multiweek Lists
+## ADR-002: Source-Aware Provisional Claims & Deterministic Multiweek / Manual Absorption
 
 ### Context & Problem
 Spec 004 enforces anti-double-billing using `PaymentListEntryClaim` with a unique index:
@@ -29,50 +29,64 @@ CREATE UNIQUE INDEX "unique_active_or_consumed_weeklog_entry_claim"
 ON "payment_list_entry_claims" ("workspace_id", "weeklog_entry_id")
 WHERE "status" IN ('reserved', 'consumed');
 ```
-If auto-list creation upon WEEKLOG validation immediately issues non-provisional claims, any external client spreadsheet (e.g. VECTIS monthly PDF spanning 4 weeks) will fail during confrontation or import due to unique claim conflicts.
+If auto-list creation upon WEEKLOG validation immediately issues a `reserved` claim, any external client spreadsheet (e.g., VECTIS monthly PDF spanning 3–4 weeks) or manual list creation will fail due to active unique claim collisions.
 
-### Decision (FROZEN ARCHITECTURE: Provisional Claim Absorption)
-We choose ONE deterministic architecture: **Source-Aware Provisional Claims with Multiweek Auto-Draft Absorption**.
+### Decision (FROZEN ARCHITECTURE: Reconciled Claims & State Machine)
 
-#### 1. Entity Attributes & Claim States
-- `PaymentList.sourceType`: `"weeklog_auto" | "external_import" | "manual"`
-- `PaymentList.status`: `"draft" | "under_review" | "confronted" | "ready_for_billing" | "pending" | "paid" | "superseded"`
-- `PaymentList.originWeeklogId`: Foreign key to `Weeklog` (for `weeklog_auto`)
-- `PaymentList.supersededByPaymentListId`: Traceability link when absorbed
-- `PaymentListEntryClaim.claimState`:
-  - `provisional_auto`: Held by a `weeklog_auto` list while in `draft`. Does not block confrontation.
-  - `locked_external`: Held by an external import during confrontation or approval.
-  - `locked_internal`: Confirmed by user in direct internal billing path.
-  - `consumed`: Finalized once the associated List is marked `pending` or `paid`.
+We choose ONE deterministic architecture that integrates seamlessly with the existing database schema:
 
-#### 2. Deterministic State Transitions
-```text
-[WEEKLOG Validated]
-       │
-       ▼ (Atomic Trigger)
-[Create PaymentList: sourceType=weeklog_auto, status=draft]
-[Issue PaymentListEntryClaim: claimState=provisional_auto]
-       │
-       ├─────────────────────────────────────────┐
-       │ (Path A: Direct Internal Billing)      │ (Path B: External Multiweek List Arrives)
-       ▼                                         ▼
-[User Approves List: ready_for_billing]   [Confrontation Matches Provisional Entries]
-[claimState -> locked_internal]           [Provisional Claims Absorbed -> locked_external]
-       │                                  [Auto-Draft List -> status=superseded]
-       ▼                                         │
-[POST /api/payment-lists/:id/invoice/create]      ▼
-       │                                  [Confronted List -> ready_for_billing]
-       ▼                                         │
-[PaymentList: status=pending]                    ▼
-[claimState -> consumed (Immutable)]       [Invoice Command & status=pending]
-```
+#### 1. Claim Lifecycle and Complete Status Values
+`PaymentListEntryClaim.status` lifecycle values:
+- **`provisional`**: Held by an auto-draft list (`sourceType: "weeklog_auto"`). Non-blocking for external confrontation and manual list absorption, but mutually unique among provisional claims per entry.
+- **`reserved`**: Held by an active definitive list (`sourceType: "manual"` or `"external_import"` or internally approved `"ready_for_billing"` list). Strictly blocks any other list from claiming the entry.
+- **`consumed`**: Finalized once the associated `PaymentList` transitions to `pending` (invoiced) or `paid`. **100% immutable**.
+- **`released`**: Released when a list is cancelled, or when a provisional claim is absorbed by an external/manual list.
 
-#### 3. Multiweek & Cross-Draft Absorption Rules
-- An external List may span entries from multiple auto-draft Lists (e.g. Weeks 36, 37, 38).
-- Upon confrontation commit:
-  - If **all** entries of an auto-draft list are absorbed, that auto-draft list transitions to `superseded` with `supersededByPaymentListId = externalList.id`.
-  - If only **some** entries are absorbed (partial confrontation), the auto-draft list retains its unabsorbed items, reducing its total.
-- **Rollback & Inviolability**: If confrontation commit fails, transaction rollback restores provisional claims. If an entry is already in `pending` or `paid` (`claimState = consumed`), external absorption is strictly rejected (409 Conflict: `ENTRY_ALREADY_BILLED`).
+#### 2. Database Constraints & Partial Unique Indexes
+- **Existing Constraint**:
+  ```sql
+  CREATE UNIQUE INDEX "unique_active_or_consumed_weeklog_entry_claim"
+  ON "payment_list_entry_claims" ("workspace_id", "weeklog_entry_id")
+  WHERE "status" IN ('reserved', 'consumed');
+  ```
+- **Additive Index for Provisional Claims**:
+  ```sql
+  CREATE UNIQUE INDEX "unique_provisional_weeklog_entry_claim"
+  ON "payment_list_entry_claims" ("workspace_id", "weeklog_entry_id")
+  WHERE "status" = 'provisional';
+  ```
+- **Check Constraint**:
+  ```sql
+  ALTER TABLE "payment_list_entry_claims"
+  ADD CONSTRAINT "payment_list_entry_claims_status_check"
+  CHECK ("status" IN ('provisional', 'reserved', 'consumed', 'released'));
+  ```
+- **Execution Lineage Authority**:
+  We **DO NOT** introduce the report-only invariant `UNIQUE(workspace_id, production_order_id, billing_cycle_id)`. The physical execution authority is `WeeklogEntry` / execution lineage, which correctly supports external WEEKLOG entries that do not possess a `production_order_id`.
+
+#### 3. Canonical PaymentList Full State Machine
+Preserving all historical states (`cancelled`, `draft`, `under_review`, `confronted`, `pending`, `paid`) and adding explicit readiness:
+- **Internal / Manual Flow**:
+  `draft` $\rightarrow$ `ready_for_billing` $\rightarrow$ `invoice/create` OR `invoice/associate` $\rightarrow$ `pending` $\rightarrow$ `paid`
+  - Cancellation: `draft` $\rightarrow$ `cancelled`; `ready_for_billing` $\rightarrow$ `cancelled`; `pending` $\rightarrow$ `cancelled` (with Finance reversal).
+  - Superseded: `draft` $\rightarrow$ `superseded` (when absorbed).
+- **External Import Flow**:
+  `under_review` $\rightarrow$ `confronted` $\rightarrow$ `invoice/create` OR `invoice/associate` $\rightarrow$ `pending` $\rightarrow$ `paid`
+  - Cancellation: `under_review` $\rightarrow$ `cancelled`; `confronted` $\rightarrow$ `cancelled`.
+
+#### 4. Coexistence with Manual Lists (`LIST-MANUAL-AUTO-COEXIST-01`)
+When an operator calls `POST /api/payment-lists` manually selecting `weeklogEntryIds` currently held as `provisional`:
+- Within a single transaction:
+  1. The provisional claims on the auto-draft are updated to `status = 'released'` with `released_reason = 'absorbed_by_manual_list:<manualListId>'`.
+  2. If all entries of the auto-draft list were absorbed, the auto-draft list transitions to `status = 'superseded'`.
+  3. The manual list acquires `status = 'reserved'` claims.
+- **Guarantees**: Zero double billing, no 409 conflict, full provenance tracking.
+
+#### 5. External Multiweek Absorption & Rollback
+- External lists spanning multiple weeks match against entries across multiple auto-drafts.
+- On confrontation commit: provisional claims are marked `released` (`released_reason: "absorbed_by_external_list:<id>"`), and definitive `reserved` claims are issued to the external list.
+- If confrontation aborts, transaction rollback preserves provisional claims completely.
+- If an entry is already `consumed` (invoiced), absorption is denied (409 Conflict: `ENTRY_ALREADY_BILLED`).
 
 ---
 
@@ -98,87 +112,83 @@ We choose ONE deterministic architecture: **Source-Aware Provisional Claims with
        licensePlate: string; // "EW-621-GF"
        vin: string; // "WBA1V710305G06196"
        servicesSummary: string; // "Dégarnissage + T1"
-       totalAmount: string; // "810.00"
-       currencyCode: string; // "EUR"
-       validationStatus: string; // "approved" | "rejected"
+       amount: number; // 810.00
      }>;
-     grandTotal: string;
-     currencyCode: string;
+     totalAmount: number;
    }
    ```
-3. Full inspection details remain available in modal audit endpoints (`GET /api/weeklogs/:id/entries/:entryId`).
 
 ---
 
-## ADR-004: Explicit Invoice Handoff Commands & Direct Billing
+## ADR-004: Explicit Invoicing Commands & Direct Billing Order
 
 ### Context
-`PaymentList` had nullable `invoiceId` and `documentId` without explicit API command contracts. Additionally, the system must support businesses that bill directly from internal validated lists without importing an external client statement.
+Previous drafts conflicted between a single `/invoice` endpoint with a `mode=create|associate` parameter versus dedicated command endpoints. Furthermore, some diagrams incorrectly showed transitions to `pending` before invoice creation.
 
-### Decision (FROZEN API CONTRACT: Explicit Commands)
-We standardize on two explicit command endpoints in `backend/src/routes/paymentLists.ts`:
-
-1. **Create Invoice Command**:
-   - Route: `POST /api/payment-lists/:id/invoice/create`
-   - Precondition: `paymentList.status` must be `ready_for_billing` or `confronted`.
-   - Behavior: Creates an `Invoice` record in `invoices` table, populates items, updates `paymentList.invoiceId = invoice.id`, transitions `paymentList.status = 'pending'`, and moves entry claims to `consumed`.
-2. **Associate Invoice Command**:
-   - Route: `POST /api/payment-lists/:id/invoice/associate`
-   - Payload: `{ invoiceId: string }`
-   - Behavior: Verifies tenant access and client match, links `paymentList.invoiceId`, transitions list to `pending`.
-
-#### Direct Internal Billing Path (Zero External Import Needed)
-1. WEEKLOG validates $\rightarrow$ auto-draft `PaymentList` created (`status: 'draft'`).
-2. Workshop manager reviews internal items $\rightarrow$ executes `POST /api/payment-lists/:id/approve`.
-3. List transitions to `ready_for_billing`.
-4. User invokes `POST /api/payment-lists/:id/invoice/create`.
-5. Invoice generated; list moves to `pending` (feeding Expected Revenue). No external confrontation required.
+### Decision (FROZEN API & ORDER)
+1. **Explicit Command Endpoints**:
+   - `POST /api/payment-lists/:id/invoice/create`: Emits a new invoice in the billing engine and links `invoiceId`.
+   - `POST /api/payment-lists/:id/invoice/associate`: Links an externally provided invoice identifier or fiscal number.
+2. **Strict Transition Order**:
+   - **PaymentList MUST NOT transition to `pending` before invoice handoff.**
+   - Handoff from `ready_for_billing` (or `confronted`) executes the invoice command, atomically transitioning `PaymentList.status` to `pending`.
+   - Claims transition from `reserved` to `consumed` (immutable).
+3. **Finance Revenue Boundaries**:
+   - `draft`, `ready_for_billing`, `under_review`, `confronted`, `superseded`, `cancelled`: **Expected = 0.00, Received = 0.00** (Zero ledger impact).
+   - `pending`: **Expected = recognizedTotal, Received = 0.00**.
+   - `paid`: **Expected = recognizedTotal, Received = recognizedTotal**.
+4. **Internal Direct Review Actor**:
+   - The actor who reviews the auto-draft list into `ready_for_billing` is the **authorized workspace billing operator** (an engineering safety/control checkpoint to verify client billing profile and fiscal metadata, not a redundant workshop manager signature).
 
 ---
 
-## ADR-005: Client Governance Scope & Strict Technician Self-Approval Ban
+## ADR-005: Budget Client Authority, Rejection Refinement & Delegation Scope
 
 ### Context
-Spec 002 permitted technicians to approve their own budgets (`TECH-BUDGET-APPROVE-OWN`). In commercial reality (Alex / VECTIS), technicians are contractors/service providers and must **never** approve financial obligations for the client. Approval must belong exclusively to client company collaborators.
+In brownfield Spec 002, `TECH-BUDGET-APPROVE-OWN` permitted technicians to approve their own budgets. Alex/VECTIS confirmed that technicians create/revise budgets, but approval/rejection belongs strictly to the client.
 
 ### Decision
-1. **Technician Self-Approval Superseded**:
-   - `TECH-BUDGET-APPROVE-OWN` is classified as **superseded and prohibited**.
-   - If `actorUserId === budget.technicianUserId` or actor is a technician without an active client grant, `POST /api/budgets/:id/revisions/:revisionId/approve` and `/reject` return **403 Forbidden (`TECH_SELF_APPROVAL_FORBIDDEN`)**.
-2. **ClientAccessGrant Capability Governance**:
-   - Enforce explicit capability: `budget.approve`.
-   - Must match `budget.clientId`. Cross-client approvals return **403 Forbidden (`CROSS_CLIENT_FORBIDDEN`)**.
-   - Optional `siteKey` / `locationId`: If specified on grant, the collaborator can only approve budgets belonging to that operational site.
-3. **Budget Revisions**:
-   - Any modification to an approved budget creates a new revision in `status = 'pending_approval'`. The budget must be re-approved by the client before production changes can be finalized.
+1. **Technician Self-Approval Banned**:
+   - Executor technicians calling `/approve` or `/reject` on their assigned budgets receive `403 Forbidden` (`TECH_SELF_APPROVAL_FORBIDDEN`).
+2. **Client Authority & Granular Capabilities**:
+   - Approval/rejection requires active `ClientAccessGrant` matching `budget.clientId` with capability `budget.approve`. Cross-client access receives `403 Forbidden` (`CROSS_CLIENT_FORBIDDEN`).
+   - Granular capabilities: `budget.approve`, `weeklog.validate`, `payment_list.review`, `invoice.view`.
+   - Optional `siteKey` restriction: `null` = client-wide; `value` = platform-specific.
+3. **Rejection Reason**:
+   - Rejection accepts a `reason` payload. Documented explicitly as an **engineering audit refinement** for traceability rather than a mandatory meeting rule.
+4. **Client Collaborator Delegation (`CLIENT-COLLABORATOR-DELEGATION-01`)**:
+   - Authorized client representative can delegate/revoke collaborators within their `clientId` via `POST /api/clients/:clientId/collaborators`. Cannot grant internal Finance ledger permissions; cannot escape client boundary.
+5. **Direct Production Orders Preserved (`DIRECT-PO-PRESERVED-01`)**:
+   - Canonical flow continues to support direct `POST /api/production-orders` without budget approval.
 
 ---
 
-## ADR-006: External WEEKLOG Intake & Review Staging
+## ADR-006: External WEEKLOG Intake via Canonical Imports Router
 
 ### Context
-In addition to internal vehicle finalization, clients or remote workshops may submit an external WEEKLOG file (spreadsheet or PDF).
+Spec 004 already implements operational intake via `externalOperationalImportService` and router `POST /api/external-operational-imports`. Inventing parallel paths like `/api/external-import/upload` violates architectural consistency.
 
 ### Decision
-1. Staging workflow mirrors external list imports:
-   - `POST /api/weeklogs/external-import/upload` $\rightarrow$ parses document, extracts rows to staging table.
-   - `PUT /api/weeklogs/external-import/:importId/rows/:rowId` $\rightarrow$ allows manual correction.
-   - `POST /api/weeklogs/external-import/:importId/commit` $\rightarrow$ commits rows into a canonical `Weeklog` with `status: 'validated'`.
-2. Validated external weeklogs trigger the exact same idempotent commercial handoff as internal weeklogs, producing a draft `PaymentList` without fake `ProductionOrder` records.
+1. **Preserve Canonical Router**:
+   - Staging, review, and commit remain anchored at `POST /api/external-operational-imports`.
+2. **Delta Formalization**:
+   - The **ONLY** new behavior is: upon commit (`POST /api/external-operational-imports/:id/commit`), when weeklogs are marked `validated`, the service atomically triggers the **same automatic draft PaymentList handoff** as a signed internal WEEKLOG, creating a `draft` list with `provisional` claims.
 
 ---
 
-## ADR-007: Production Minimum History Timeline
+## ADR-007: Production Chronological History Timeline
 
 ### Context
-The production view lacked a canonical timeline of events.
+The production timeline in the UI was previously empty or mocked. We require a minimal chronological fact history.
 
 ### Decision
-A read-only timeline endpoint `GET /api/production-orders/:id/timeline` returns a deterministic sequence synthesized from immutable relational events:
-1. `created`: Timestamp from `ProductionOrder.createdAt`.
-2. `started`: First status transition to `in_production`.
-3. `paused` / `resumed`: History from status transition logs.
-4. `finalized`: Timestamp of finalization (`deliveredAt`).
-5. `weeklog_enrolled`: Linked `WeeklogEntry.createdAt`.
-6. `rectification_requested`: If entry status transitioned to `rectification_requested`.
-7. `re_finalized`: If order was re-delivered after rectification.
+1. **Timeline Derivation from Canonical Facts**:
+   - `GET /api/production-orders/:id/timeline` returns:
+     - `created`: from `ProductionOrder.createdAt` and `createdBy`
+     - `in_production`: from `ProductionOrder.startedAt`
+     - `finalized`: from `ProductionOrder.finishedAt`
+     - `weeklog_entry`: from associated `WeeklogEntry.createdAt`
+     - `rectification_requested` / `reopened`: from `rectificationOriginId` and `executionSequence > 1`
+2. **Prospective Persistence Audit**:
+   - Immutable `paused`/`resumed` transition facts do not currently exist in the database schema.
+   - We will **never fabricate** historical events. We define prospective persistence (an additive `statusAuditTrail` JSON array or event model on `ProductionOrder`) to record future pauses/resumptions when introduced.

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 
@@ -16,6 +16,8 @@ const { paymentListsRouter } = await import("../../backend/src/routes/paymentLis
 const { financeV2Router } = await import("../../backend/src/routes/financeV2.js");
 const { productionOrdersRouter } = await import("../../backend/src/routes/productionOrders.js");
 const { budgetsRouter } = await import("../../backend/src/routes/budgets.js");
+const { externalOperationalImportsRouter } = await import("../../backend/src/routes/externalOperationalImports.js");
+const { minioImportDocumentStorage, aiImportExtractionProvider } = await import("../../backend/src/services/externalImportAdapters.js");
 const { signAccessToken } = await import("../../backend/src/lib/jwt.js");
 const { prisma } = await import("../../backend/src/lib/prisma.js");
 const weeklogService = await import("../../backend/src/services/weeklogService.js");
@@ -63,6 +65,8 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       "external_list_import_items",
       "external_list_imports",
       "weeklog_entries",
+      "external_operational_import_items",
+      "external_operational_imports",
       "weeklog_validations",
       "weeklogs",
       "production_photos",
@@ -180,6 +184,25 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
 
   beforeAll(async () => {
     await resetDb();
+    vi.spyOn(minioImportDocumentStorage, "put").mockResolvedValue(undefined as any);
+    vi.spyOn(aiImportExtractionProvider, "extractOperationalDocument").mockResolvedValue({
+      raw: { provider: "synthetic-test" },
+      rows: [
+        {
+          rawLicensePlate: "EXT-888-ZZ",
+          rawVin: "VF312345678901234",
+          rawCarName: "Renault Clio",
+          rawClientName: "VECTIS Client",
+          rawCurrencyCode: "EUR",
+          rawOperationalSiteKey: "SITE-EXT-01",
+          rawTechnician: "Technician A",
+          rawDeliveredAtText: "2026-09-18T12:00:00Z",
+          rawServices: [{ code: "PDR" }],
+          rawTotalText: "200.00",
+        },
+      ],
+    });
+
     const app = express();
     app.use(express.json());
     app.use("/api/weeklogs", weeklogsRouter);
@@ -187,6 +210,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     app.use("/api/finance/v2", financeV2Router);
     app.use("/api/production-orders", productionOrdersRouter);
     app.use("/api/budgets", budgetsRouter);
+    app.use("/api/external-operational-imports", externalOperationalImportsRouter);
     server = app.listen(0);
     await once(server, "listening");
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -680,6 +704,86 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       expect(created.currencyCode).toBe("EUR");
     });
 
+    it("LIST-MANUAL-AUTO-COEXIST-01: Manual list creation absorbs provisional auto-draft claims without 409 collision", async () => {
+      // Setup a weeklog entry claimed provisionally by an auto-draft list
+      const autoListId = "74000000-0000-4000-8000-000000000077";
+      const manualEntryId = "75000000-0000-4000-8000-000000000077";
+      const manualWlId = "75000000-0000-4000-8000-000000000076";
+      await prisma.paymentListEntryClaim.deleteMany({ where: { weeklogEntryId: manualEntryId } });
+      await prisma.paymentListItem.deleteMany({ where: { weeklogEntryId: manualEntryId } });
+      await prisma.paymentList.deleteMany({ where: { id: autoListId } });
+      await prisma.weeklogEntry.deleteMany({ where: { id: manualEntryId } });
+      await prisma.weeklog.deleteMany({ where: { id: manualWlId } });
+
+      await prisma.weeklog.create({
+        data: {
+          id: manualWlId,
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-default",
+          startsOn: new Date("2026-09-13T00:00:00.000Z"),
+          endsOn: new Date("2026-09-19T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W38",
+          weekNumber: 38,
+          status: "validated",
+        },
+      });
+
+      await prisma.weeklogEntry.create({
+        data: {
+          id: manualEntryId,
+          workspaceId: fixture.workspaceA,
+          weeklogId: manualWlId,
+          sourceType: "production_order",
+          licensePlate: "ABS-001-FR",
+          carName: "Peugeot 208",
+          totalAmount: 350.0,
+          deliveredAt: new Date("2026-09-18T10:00:00.000Z"),
+          validationStatus: "approved",
+        },
+      });
+
+      const pl = await prisma.paymentList.create({
+        data: {
+          id: autoListId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-AUTO-ABSORB-TEST",
+          clientId: fixture.clientAId,
+          clientName: "VECTIS Client",
+          currencyCode: "EUR",
+          status: "draft",
+          createdBy: fixture.ownerA,
+        },
+      });
+
+      // Active claim held by auto-draft list (provisional in ADR-002; reserved in current DB)
+      await prisma.paymentListEntryClaim.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          paymentListId: pl.id,
+          weeklogEntryId: manualEntryId,
+          status: "reserved",
+        },
+      });
+
+      // Operator manually creates a list selecting that entry
+      const res = await request("/api/payment-lists", {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "manual-absorb-key"),
+        body: JSON.stringify({
+          clientId: fixture.clientAId,
+          currencyCode: "EUR",
+          entryIds: [manualEntryId],
+        }),
+      });
+
+      // RED: Currently manual list creation does not absorb provisional claims (returns 409 ENTRY_ALREADY_CLAIMED)
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.status).toBe("draft");
+    });
+
     it("LIST-IMPORT-PRESERVED-01: External import/OCR/confrontation remains possible and anti-double-billing semantics remain coherent after automatic List introduction", async () => {
       // Invariant: Importing external list can reconcile against entries without throwing unique constraint collision on claims
       // RED: Requires source-aware claim reconciliation architecture
@@ -714,19 +818,19 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
    * ========================================================================= */
 
   describe("Group 4: Invoice Handoff & Finance Boundaries", () => {
-    let pendingListId = "74000000-0000-4000-8000-000000000099";
+    let readyListId = "74000000-0000-4000-8000-000000000099";
 
     beforeEach(async () => {
-      await prisma.paymentList.deleteMany({ where: { id: pendingListId } });
+      await prisma.paymentList.deleteMany({ where: { id: readyListId } });
       await prisma.paymentList.create({
         data: {
-          id: pendingListId,
+          id: readyListId,
           workspaceId: fixture.workspaceA,
           listNumber: "PL-INV-001",
           clientId: fixture.clientAId,
           clientName: "VECTIS Client",
           currencyCode: "EUR",
-          status: "pending",
+          status: "draft",
           recognizedTotal: "2500.00",
           createdBy: fixture.ownerA,
         },
@@ -735,7 +839,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
 
     it("LIST-INVOICE-HANDOFF-01: Eligible List exposes the smallest supported create/associate invoice flow", async () => {
       // RED: POST /api/payment-lists/:id/invoice/create route does not exist yet (returns 404)
-      const response = await request(`/api/payment-lists/${pendingListId}/invoice/create`, {
+      const response = await request(`/api/payment-lists/${readyListId}/invoice/create`, {
         method: "POST",
         headers: headers(fixture.ownerA, fixture.workspaceA, "invoice-handoff-key"),
         body: JSON.stringify({ notes: "VECTIS September Facturation" }),
@@ -745,7 +849,8 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       const body = await response.json();
       expect(body.invoiceId).toBeDefined();
 
-      const updatedList = await prisma.paymentList.findUniqueOrThrow({ where: { id: pendingListId } });
+      const updatedList = await prisma.paymentList.findUniqueOrThrow({ where: { id: readyListId } });
+      expect(updatedList.status).toBe("pending");
       expect(updatedList.invoiceId).toBe(body.invoiceId);
     });
 
@@ -1042,6 +1147,24 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       const body = await res.json();
       expect(body.message || "").toMatch(/CROSS_CLIENT_FORBIDDEN|não autorizado para este cliente/i);
     });
+
+    it("DIRECT-PO-PRESERVED-01: Direct ProductionOrder creation preserved without budget approval", async () => {
+      const res = await request("/api/production-orders", {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "direct-po-key"),
+        body: JSON.stringify({
+          code: "PO-DIR-999",
+          clientId: fixture.clientAId,
+          licensePlate: "DIR-999-FR",
+          platform: "Platform Lyon",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.code).toBe("PO-DIR-999");
+      expect(body.budgetId).toBeNull();
+    });
   });
 
   /* =========================================================================
@@ -1099,49 +1222,140 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       // GREEN: Existing finance authorization strictly rejects non-owner / non-admin
       expect(res.status).toBe(403);
     });
-  });
 
-  /* =========================================================================
-   * GROUP 8: EXTERNAL WEEKLOG FLOW
-   * ========================================================================= */
-  describe("Group 8: External WEEKLOG Intake & Reconciliation", () => {
-    it("EXT-WEEKLOG-REVIEW-01: External WEEKLOG upload stages entries for human review", async () => {
-      // RED: Route POST /api/weeklogs/external-import/upload does not exist yet (returns 404)
-      const res = await request("/api/weeklogs/external-import/upload", {
+    it("CLIENT-COLLABORATOR-DELEGATION-01: Authorized client representative delegates collaborator within client boundary", async () => {
+      // Representative delegates new collaborator for Client A
+      const res = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
         method: "POST",
-        headers: headers(fixture.ownerA, fixture.workspaceA, "ext-wl-upload-key"),
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "delegate-key", "user"),
         body: JSON.stringify({
-          clientId: fixture.clientAId,
-          siteKey: "site-default",
-          documentUrl: "minio://imports/weeklog-external.pdf",
+          userId: fixture.techA,
+          role: "collaborator",
+          capabilities: ["weeklog.validate", "budget.approve"],
+          siteKey: "site-lyon",
         }),
       });
 
+      // RED: Endpoint does not exist yet (404)
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.grantId).toBeDefined();
+
+      // Cross-client delegation attempt returns 403
+      const crossRes = await request(`/api/clients/${fixture.clientBId}/collaborators`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "cross-delegate-key", "user"),
+        body: JSON.stringify({
+          userId: fixture.techA,
+          role: "collaborator",
+          capabilities: ["weeklog.validate"],
+        }),
+      });
+
+      expect(crossRes.status).toBe(403);
+    });
+  });
+
+  /* =========================================================================
+   * GROUP 8: EXTERNAL WEEKLOG INTAKE VIA CANONICAL IMPORTS ROUTER
+   * ========================================================================= */
+  describe("Group 8: External WEEKLOG Intake & Reconciliation", () => {
+    let externalImportId = "";
+    let externalWeeklogId = "";
+
+    it("EXT-WEEKLOG-REVIEW-01: External WEEKLOG upload stages entries for human review", async () => {
+      const res = await request("/api/external-operational-imports", {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "ext-wl-upload-key"),
+        body: JSON.stringify({
+          fileName: "external-weeklog.pdf",
+          mimeType: "application/pdf",
+          contentBase64: Buffer.from("%PDF-1.7\nexternal operational weeklog content").toString("base64"),
+        }),
+      });
+
+      // GREEN: Canonical route stages import rows
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.importId).toBeDefined();
+      expect(body.status).toBe("extracted");
+      externalImportId = body.importId;
     });
 
     it("EXT-WEEKLOG-VALIDATED-01: Committing reviewed external WEEKLOG marks it validated", async () => {
-      // RED: Route POST /api/weeklogs/external-import/:id/commit does not exist yet
-      const res = await request("/api/weeklogs/external-import/00000000-0000-0000-0000-000000000001/commit", {
+      // Patch staged row with reviewed fields
+      const detailRes = await request(`/api/external-operational-imports/${externalImportId}`, { headers: headers() });
+      const detail = await detailRes.json();
+      const firstItemId = detail.items[0]?.id;
+
+      if (firstItemId) {
+        await request(`/api/external-operational-imports/${externalImportId}/rows`, {
+          method: "PATCH",
+          headers: headers(fixture.ownerA, fixture.workspaceA, "ext-wl-patch-key"),
+          body: JSON.stringify({
+            rows: [
+              {
+                id: firstItemId,
+                patch: {
+                  reviewedLicensePlate: "EXT-888-ZZ",
+                  reviewedCarName: "Renault Clio",
+                  reviewedClientId: fixture.clientAId,
+                  reviewedCurrencyCode: "EUR",
+                  reviewedOperationalSiteKey: "SITE-EXT-01",
+                  reviewedTechnicianUserId: fixture.techA,
+                  reviewedDeliveredAt: "2026-09-18T12:00:00.000Z",
+                  reviewedServices: [{ code: "PDR", quantity: "1", amount: "200.00" }],
+                  reviewedTotal: "200.00",
+                },
+              },
+            ],
+          }),
+        });
+      }
+
+      // Commit the external import
+      const commitRes = await request(`/api/external-operational-imports/${externalImportId}/commit`, {
         method: "POST",
         headers: headers(fixture.ownerA, fixture.workspaceA, "ext-wl-commit-key"),
+        body: JSON.stringify({}),
       });
 
-      expect(res.status).toBe(200);
+      // GREEN: Existing canonical route commits to status validated
+      expect([200, 201]).toContain(commitRes.status);
+      const commitBody = await commitRes.json();
+      expect(commitBody.status).toBe("committed");
+      externalWeeklogId = commitBody.weeklogId;
+      expect(externalWeeklogId).toBeDefined();
+
+      const wl = await prisma.weeklog.findUniqueOrThrow({ where: { id: externalWeeklogId } });
+      expect(wl.status).toBe("validated");
     });
 
     it("EXT-WEEKLOG-AUTO-LIST-01: Committed external WEEKLOG triggers automatic draft PaymentList creation", async () => {
-      // RED: Service method or hook missing
-      const triggerFn = (weeklogService as any).triggerAutoListFromExternalWeeklog;
-      expect(typeof triggerFn).toBe("function");
+      // RED: In current code, commit does not trigger draft PaymentList creation
+      const autoList = await prisma.paymentList.findFirst({
+        where: {
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          items: { some: { operationalSiteKey: "SITE-EXT-01" } },
+        },
+      });
+
+      expect(autoList).not.toBeNull();
+      expect(autoList?.status).toBe("draft");
     });
 
     it("EXT-WEEKLOG-AUTO-LIST-IDEMPOTENT-01: External WEEKLOG auto-list handoff is strictly idempotent", async () => {
-      // RED: Service method missing
-      const triggerFn = (weeklogService as any).triggerAutoListFromExternalWeeklog;
-      expect(typeof triggerFn).toBe("function");
+      // RED: In current code, auto list count is 0
+      const count = await prisma.paymentList.count({
+        where: {
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          items: { some: { operationalSiteKey: "SITE-EXT-01" } },
+        },
+      });
+
+      expect(count).toBe(1);
     });
   });
 
@@ -1150,9 +1364,20 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
    * ========================================================================= */
   describe("Group 9: Importer UX & Production Timeline", () => {
     it("IMPORT-UX-CONTRACT-01: Importer contract exposes preview controls and bulk downward edit capability", async () => {
-      // Verify importer contracts and review actions
-      const importReviewService = await import("../../backend/src/services/externalOperationalImportService.js");
-      expect(typeof (importReviewService as any).applyBulkCorrection).toBe("function");
+      const importId = "76000000-0000-4000-8000-000000000099";
+      // RED: POST /api/external-operational-imports/:id/apply-downward endpoint does not exist yet (returns 404)
+      const res = await request(`/api/external-operational-imports/${importId}/apply-downward`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "bulk-downward-key"),
+        body: JSON.stringify({
+          field: "reviewedTechnicianUserId",
+          value: fixture.techA,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.appliedCount).toBeGreaterThan(0);
     });
 
     it("PRODUCTION-HISTORY-01: Production timeline returns chronological sequence of domain facts", async () => {
