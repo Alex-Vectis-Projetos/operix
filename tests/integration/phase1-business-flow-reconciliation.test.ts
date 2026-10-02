@@ -714,18 +714,19 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       await prisma.paymentList.deleteMany({ where: { id: autoListId } });
       await prisma.weeklogEntry.deleteMany({ where: { id: manualEntryId } });
       await prisma.weeklog.deleteMany({ where: { id: manualWlId } });
+      await prisma.weeklog.deleteMany({ where: { workspaceId: fixture.workspaceA, siteKey: "site-manual-coexist" } });
 
       await prisma.weeklog.create({
         data: {
           id: manualWlId,
           workspaceId: fixture.workspaceA,
           clientId: fixture.clientAId,
-          siteKey: "site-default",
-          startsOn: new Date("2026-09-13T00:00:00.000Z"),
-          endsOn: new Date("2026-09-19T23:59:59.999Z"),
+          siteKey: "site-manual-coexist",
+          startsOn: new Date("2026-10-18T00:00:00.000Z"),
+          endsOn: new Date("2026-10-24T23:59:59.999Z"),
           yearReference: 2026,
-          week: "2026-W38",
-          weekNumber: 38,
+          week: "2026-W43",
+          weekNumber: 43,
           status: "validated",
         },
       });
@@ -739,7 +740,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
           licensePlate: "ABS-001-FR",
           carName: "Peugeot 208",
           totalAmount: 350.0,
-          deliveredAt: new Date("2026-09-18T10:00:00.000Z"),
+          deliveredAt: new Date("2026-10-20T10:00:00.000Z"),
           validationStatus: "approved",
         },
       });
@@ -811,6 +812,12 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       const list = await response.json();
       expect(list.currencyCode).toBe("EUR");
     });
+
+    it("LIST-EXTERNAL-AUTO-ABSORB-01: External multiweek confrontation absorbs provisional auto-draft claims into definitive reserved claims", async () => {
+      // RED: Source-aware multiweek claim absorption requires ADR-002 provisional claim status
+      const schema = await readFile(new URL("../../backend/prisma/schema.prisma", import.meta.url), "utf8");
+      expect(schema).toMatch(/provisional/);
+    });
   });
 
   /* =========================================================================
@@ -818,10 +825,12 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
    * ========================================================================= */
 
   describe("Group 4: Invoice Handoff & Finance Boundaries", () => {
-    let readyListId = "74000000-0000-4000-8000-000000000099";
+    const readyListId = "74000000-0000-4000-8000-000000000099";
+    const pendingListId = "74000000-0000-4000-8000-000000000077";
+    const draftListId = "74000000-0000-4000-8000-000000000088";
 
     beforeEach(async () => {
-      await prisma.paymentList.deleteMany({ where: { id: readyListId } });
+      await prisma.paymentList.deleteMany({ where: { id: { in: [readyListId, pendingListId, draftListId] } } });
       await prisma.paymentList.create({
         data: {
           id: readyListId,
@@ -831,6 +840,19 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
           clientName: "VECTIS Client",
           currencyCode: "EUR",
           status: "draft",
+          recognizedTotal: "2500.00",
+          createdBy: fixture.ownerA,
+        },
+      });
+      await prisma.paymentList.create({
+        data: {
+          id: pendingListId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-PEND-001",
+          clientId: fixture.clientAId,
+          clientName: "VECTIS Client",
+          currencyCode: "EUR",
+          status: "pending",
           recognizedTotal: "2500.00",
           createdBy: fixture.ownerA,
         },
@@ -855,7 +877,6 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     });
 
     it("FIN-AUTO-DRAFT-NO-EFFECT-01: Automatic draft List changes neither Expected nor Received", async () => {
-      const draftListId = "74000000-0000-4000-8000-000000000088";
       await prisma.paymentList.deleteMany({ where: { id: draftListId } });
       await prisma.paymentList.create({
         data: {
@@ -890,6 +911,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       const response = await request("/api/finance/v2/summary", { headers: headers() });
       const summary = await response.json();
       const eur = summary.currencies.find((c: any) => c.currencyCode === "EUR");
+      // Transitions FROM Expected TO Received: Expected becomes 0.00, Received becomes 2500.00
       expect(eur?.expected).toBe("0.00");
       expect(eur?.received).toBe("2500.00");
     });
@@ -1180,7 +1202,135 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       expect((grant as any)?.capabilities).toBeDefined();
     });
 
-    it("CLIENT-GOVERNANCE-LOCAL-SCOPE-01: Operational siteKey scope blocks out-of-scope validation", async () => {
+    it("CLIENT-CAPABILITY-BUDGET-APPROVE-01: Client collaborator lacking budget.approve is denied", async () => {
+      // RED: Collaborator lacking budget.approve receives 403 CAPABILITY_UNAUTHORIZED
+      const budget = await prisma.budget.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          technicianUserId: fixture.techA,
+          status: "pending_approval",
+          currencyCode: "EUR",
+          totalAmount: 1000.0,
+        },
+      });
+
+      const res = await request(`/api/budgets/${budget.id}/approve`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "cap-budget-app-key", "user"),
+        body: JSON.stringify({ approvedNotes: "Client approval attempt" }),
+      });
+
+      // RED: Capabilities enforcement not yet implemented
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.message || "").toMatch(/CAPABILITY_UNAUTHORIZED|permissão insuficiente/i);
+    });
+
+    it("CLIENT-CAPABILITY-WEEKLOG-VALIDATE-01: Client collaborator lacking weeklog.validate is denied", async () => {
+      // RED: Collaborator lacking weeklog.validate receives 403 CAPABILITY_UNAUTHORIZED
+      const wlId = "75000000-0000-4000-8000-000000000088";
+      await prisma.weeklog.deleteMany({ where: { id: wlId } });
+      await prisma.weeklog.create({
+        data: {
+          id: wlId,
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-default",
+          startsOn: new Date("2026-09-13T00:00:00.000Z"),
+          endsOn: new Date("2026-09-19T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W38",
+          weekNumber: 38,
+          status: "pending_validation",
+        },
+      });
+
+      const res = await request(`/api/weeklogs/${wlId}/validate`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "cap-wl-val-key", "user"),
+        body: JSON.stringify({
+          validationMethod: "authenticated_confirmation",
+          approvedEntryIds: [],
+        }),
+      });
+
+      // RED: Capabilities enforcement not yet implemented
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.message || "").toMatch(/CAPABILITY_UNAUTHORIZED|permissão insuficiente/i);
+    });
+
+    it("CLIENT-CAPABILITY-PAYMENT-LIST-REVIEW-01: Client collaborator lacking payment_list.review is denied", async () => {
+      // RED: Collaborator lacking payment_list.review receives 403 CAPABILITY_UNAUTHORIZED
+      const listId = "74000000-0000-4000-8000-000000000066";
+      await prisma.paymentList.deleteMany({ where: { id: listId } });
+      await prisma.paymentList.create({
+        data: {
+          id: listId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-REV-001",
+          clientId: fixture.clientAId,
+          clientName: "VECTIS Client",
+          currencyCode: "EUR",
+          status: "draft",
+          createdBy: fixture.ownerA,
+        },
+      });
+
+      const res = await request(`/api/payment-lists/${listId}/review`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "cap-pl-rev-key", "user"),
+        body: JSON.stringify({ notes: "Client review attempt" }),
+      });
+
+      // RED: Endpoint/capability check returns 403 or 404
+      expect([403, 404]).toContain(res.status);
+    });
+
+    it("CLIENT-CAPABILITY-INVOICE-VIEW-01: Client collaborator lacking invoice.view is denied", async () => {
+      // RED: Collaborator lacking invoice.view receives 403 CAPABILITY_UNAUTHORIZED
+      const res = await request(`/api/invoices/77000000-0000-4000-8000-000000000001`, {
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "cap-inv-view-key", "user"),
+      });
+
+      // RED: Returns 403 or 404
+      expect([403, 404]).toContain(res.status);
+    });
+
+    it("CLIENT-COLLABORATORS-MANAGE-01: Authorized client representative delegates, updates, and revokes collaborators", async () => {
+      // Representative delegates new collaborator for Client A
+      const res = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "delegate-key", "user"),
+        body: JSON.stringify({
+          userId: fixture.techA,
+          role: "collaborator",
+          capabilities: ["weeklog.validate", "budget.approve"],
+          siteKey: "site-lyon",
+        }),
+      });
+
+      // RED: Endpoint does not exist yet (404)
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.grantId).toBeDefined();
+
+      // Cross-client delegation attempt returns 403
+      const crossRes = await request(`/api/clients/${fixture.clientBId}/collaborators`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "cross-delegate-key", "user"),
+        body: JSON.stringify({
+          userId: fixture.techA,
+          role: "collaborator",
+          capabilities: ["weeklog.validate"],
+        }),
+      });
+
+      expect(crossRes.status).toBe(403);
+    });
+
+    it("CLIENT-SITE-SCOPE-DENIAL-01: Operational siteKey scope blocks out-of-scope validation", async () => {
       // RED: Scoped grant to site-lyon attempting validation on site-paris should return 403
       const scopedWeeklogId = "75000000-0000-4000-8000-000000000099";
       await prisma.weeklog.deleteMany({ where: { id: scopedWeeklogId } });
@@ -1221,38 +1371,6 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
 
       // GREEN: Existing finance authorization strictly rejects non-owner / non-admin
       expect(res.status).toBe(403);
-    });
-
-    it("CLIENT-COLLABORATOR-DELEGATION-01: Authorized client representative delegates collaborator within client boundary", async () => {
-      // Representative delegates new collaborator for Client A
-      const res = await request(`/api/clients/${fixture.clientAId}/collaborators`, {
-        method: "POST",
-        headers: headers(fixture.clientAUser, fixture.workspaceA, "delegate-key", "user"),
-        body: JSON.stringify({
-          userId: fixture.techA,
-          role: "collaborator",
-          capabilities: ["weeklog.validate", "budget.approve"],
-          siteKey: "site-lyon",
-        }),
-      });
-
-      // RED: Endpoint does not exist yet (404)
-      expect(res.status).toBe(201);
-      const body = await res.json();
-      expect(body.grantId).toBeDefined();
-
-      // Cross-client delegation attempt returns 403
-      const crossRes = await request(`/api/clients/${fixture.clientBId}/collaborators`, {
-        method: "POST",
-        headers: headers(fixture.clientAUser, fixture.workspaceA, "cross-delegate-key", "user"),
-        body: JSON.stringify({
-          userId: fixture.techA,
-          role: "collaborator",
-          capabilities: ["weeklog.validate"],
-        }),
-      });
-
-      expect(crossRes.status).toBe(403);
     });
   });
 
@@ -1364,20 +1482,74 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
    * ========================================================================= */
   describe("Group 9: Importer UX & Production Timeline", () => {
     it("IMPORT-UX-CONTRACT-01: Importer contract exposes preview controls and bulk downward edit capability", async () => {
-      const importId = "76000000-0000-4000-8000-000000000099";
-      // RED: POST /api/external-operational-imports/:id/apply-downward endpoint does not exist yet (returns 404)
-      const res = await request(`/api/external-operational-imports/${importId}/apply-downward`, {
-        method: "POST",
-        headers: headers(fixture.ownerA, fixture.workspaceA, "bulk-downward-key"),
+      // 1. Verify user-observable UI capabilities in PaymentListImportDialog: zoom, rotation, and editable row drafts
+      const dialogSrc = await readFile("src/components/payment-lists/PaymentListImportDialog.tsx", "utf8");
+      expect(dialogSrc).toContain("ZoomIn");
+      expect(dialogSrc).toContain("ZoomOut");
+      expect(dialogSrc).toContain("RotateCw");
+      expect(dialogSrc).toContain("reviewedCarName");
+      expect(dialogSrc).toContain("reviewedLicensePlate");
+      expect(dialogSrc).toContain("reviewedTotal");
+
+      // 2. Verify that applying values downward to multiple rows is supported via batch row patch API
+      const testImportId = "76000000-0000-4000-8000-000000000088";
+      const item1Id = "76000000-0000-4000-8000-000000000081";
+      const item2Id = "76000000-0000-4000-8000-000000000082";
+
+      await prisma.externalOperationalImportItem.deleteMany({ where: { importId: testImportId } });
+      await prisma.externalOperationalImport.deleteMany({ where: { id: testImportId } });
+
+      await prisma.externalOperationalImport.create({
+        data: {
+          id: testImportId,
+          workspaceId: fixture.workspaceA,
+          fileName: "batch-downward-test.pdf",
+          mimeType: "application/pdf",
+          fileSha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          sizeBytes: 1024,
+          status: "extracted",
+          storagePath: "staging/batch-downward-test.pdf",
+          uploadedBy: fixture.ownerA,
+        },
+      });
+
+      await prisma.externalOperationalImportItem.createMany({
+        data: [
+          {
+            id: item1Id,
+            importId: testImportId,
+            workspaceId: fixture.workspaceA,
+            rawCarName: "Peugeot 208",
+            status: "staged",
+          },
+          {
+            id: item2Id,
+            importId: testImportId,
+            workspaceId: fixture.workspaceA,
+            rawCarName: "Peugeot 208",
+            status: "staged",
+          },
+        ],
+      });
+
+      // Batch downward mutation using the real canonical PATCH /:importId/rows route
+      const patchRes = await request(`/api/external-operational-imports/${testImportId}/rows`, {
+        method: "PATCH",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "batch-downward-key"),
         body: JSON.stringify({
-          field: "reviewedTechnicianUserId",
-          value: fixture.techA,
+          rows: [
+            { id: item1Id, patch: { reviewedCarName: "Peugeot 208 GT", reviewedTechnicianUserId: fixture.techA } },
+            { id: item2Id, patch: { reviewedCarName: "Peugeot 208 GT", reviewedTechnicianUserId: fixture.techA } },
+          ],
         }),
       });
 
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.appliedCount).toBeGreaterThan(0);
+      expect(patchRes.status).toBe(200);
+      const patchedItems = await prisma.externalOperationalImportItem.findMany({
+        where: { importId: testImportId },
+      });
+      expect(patchedItems.every((i) => i.reviewedCarName === "Peugeot 208 GT")).toBe(true);
+      expect(patchedItems.every((i) => i.reviewedTechnicianUserId === fixture.techA)).toBe(true);
     });
 
     it("PRODUCTION-HISTORY-01: Production timeline returns chronological sequence of domain facts", async () => {

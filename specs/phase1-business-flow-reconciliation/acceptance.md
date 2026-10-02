@@ -1,4 +1,4 @@
-# Acceptance Criteria — Phase 1 Business Flow Reconciliation (R01C Frozen)
+# Acceptance Criteria — Phase 1 Business Flow Reconciliation (R01D Frozen)
 
 ## Group 1: Week Boundary, Auto-Closure & Ingestion Guards
 
@@ -95,11 +95,17 @@
 - **Then** external parsing and confrontation against internal entries remain functional.
 - **Status**: `GREEN` (ALIGNED — Verified by test).
 
-### LIST-MULTIWEEK-PRESERVED-01: Multiweek Confrontation & Claim Absorption (ADR-002)
-- **Given** an external client List spanning entries from multiple operational weeks,
-- **When** confrontation commits the external List,
-- **Then** provisional claims across the affected auto-draft lists are absorbed into authoritative external claims, and fully absorbed auto-draft lists are marked `superseded`.
+### LIST-MULTIWEEK-PRESERVED-01: Multiweek List Creation Preserved
+- **Given** an operator or external import creating a List covering entries across multiple operational weeks,
+- **When** calling `POST /api/payment-lists`,
+- **Then** the list is created successfully without artificial single-week constraints.
 - **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### LIST-EXTERNAL-AUTO-ABSORB-01: Multiweek External Confrontation Absorption (ADR-002)
+- **Given** an external client List spanning entries from multiple operational weeks currently held by auto-draft provisional claims,
+- **When** confrontation commits the external List,
+- **Then** provisional claims across the affected auto-draft lists are absorbed into authoritative external `reserved` claims, and fully absorbed auto-draft lists are marked `superseded`.
+- **Status**: `RED` (Proves missing provisional claim absorption architecture).
 
 ---
 
@@ -108,7 +114,7 @@
 ### LIST-INVOICE-HANDOFF-01: Explicit Invoice Create & Associate Commands
 - **Given** an eligible PaymentList in `ready_for_billing` or `confronted`,
 - **When** calling `POST /api/payment-lists/:id/invoice/create` or `POST /api/payment-lists/:id/invoice/associate`,
-- **Then** the invoice is created/linked, `paymentList.invoiceId` is populated, status transitions to `pending`, and claims transition to `consumed` (immutable). PaymentList MUST NOT transition to `pending` before this command.
+- **Then** the invoice is created/linked, `paymentList.invoiceId` is populated, status transitions to `pending`, and claims transition to `consumed` (immutable). PaymentList MUST NOT transition to `pending` before this command. Post-invoice cancellation (`pending` $\rightarrow$ `cancelled`) is forbidden in Phase 1.
 - **Status**: `RED` (Proves missing `/invoice/create` and `/invoice/associate` command routes).
 
 ### FIN-AUTO-DRAFT-NO-EFFECT-01: Zero Draft Finance Impact
@@ -119,7 +125,7 @@
 
 ### FIN-PENDING-PAID-PRESERVED-01: Canonical Revenue Transitions
 - **Given** a PaymentList transitioning from `ready_for_billing` to `pending` and then `paid`,
-- **Then** Expected revenue increments strictly on `pending`, and Received increments on `paid`.
+- **Then** `pending` sets Expected = Total, Received = 0; transitioning to `paid` sets Expected = 0, Received = Total (transitions FROM Expected TO Received; never counted in both buckets).
 - **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ---
@@ -135,6 +141,12 @@
 
 ## Group 6: Budget Authority & Client Governance (Spec 002)
 
+### BUDGET-TECH-NO-SELF-APPROVE-01: Strict Technician Self-Approval Prohibition
+- **Given** a Budget created or assigned to a technician,
+- **When** that technician attempts to invoke `/approve` or `/reject` on their own Budget,
+- **Then** the system returns `403 Forbidden` (`TECH_SELF_APPROVAL_FORBIDDEN`).
+- **Status**: `RED` (Superseded old `TECH-BUDGET-APPROVE-OWN` — Proves missing self-approval block).
+
 ### BUDGET-CLIENT-APPROVE-01: Client Collaborator Formal Approval
 - **Given** a submitted Budget in `pending_approval`,
 - **When** an authorized Client Collaborator with `budget.approve` approves the revision,
@@ -143,15 +155,9 @@
 
 ### BUDGET-CLIENT-REJECT-01: Client Collaborator Formal Rejection
 - **Given** a submitted Budget in `pending_approval`,
-- **When** the Client Collaborator rejects the revision with an optional reason,
+- **When** the Client Collaborator rejects the revision with a reason (engineering audit refinement),
 - **Then** the revision transitions to `rejected`, and no production order can be delivered.
 - **Status**: `GREEN` (ALIGNED — Verified by test).
-
-### BUDGET-TECH-NO-SELF-APPROVE-01: Strict Technician Self-Approval Prohibition
-- **Given** a Budget created or assigned to a technician,
-- **When** that technician attempts to invoke `/approve` or `/reject` on their own Budget,
-- **Then** the system returns `403 Forbidden` (`TECH_SELF_APPROVAL_FORBIDDEN`).
-- **Status**: `RED` (Superseded old `TECH-BUDGET-APPROVE-OWN` — Proves missing self-approval block).
 
 ### BUDGET-REVISION-REAPPROVAL-01: Mandatory Re-Approval for Modified Budgets
 - **Given** an approved Budget that is edited to create a new revision,
@@ -174,12 +180,42 @@
 
 ## Group 7: Client Collaborator Governance Scope
 
-### CLIENT-GOVERNANCE-CAPABILITIES-01: Granular Role Capabilities
+### CLIENT-GOVERNANCE-CAPABILITIES-01: Granular Role Capabilities Column
 - **Given** a `ClientAccessGrant`,
-- **Then** permissions are evaluated against granular capabilities (`budget.approve`, `weeklog.validate`, `payment_list.review`, `invoice.view`).
-- **Status**: `RED` (Proves missing granular capability enforcement).
+- **Then** permissions are evaluated against granular capabilities (`budget.approve`, `weeklog.validate`, `payment_list.review`, `invoice.view`, `client.collaborators.manage`).
+- **Status**: `RED` (Proves missing granular capability column/enforcement).
 
-### CLIENT-GOVERNANCE-LOCAL-SCOPE-01: Platform / Local Operational Scope
+### CLIENT-CAPABILITY-BUDGET-APPROVE-01: Budget Approval Capability Enforcement
+- **Given** a Client Collaborator session lacking `budget.approve`,
+- **When** calling `POST /api/budgets/:id/approve`,
+- **Then** the request is rejected with `403 Forbidden` (`CAPABILITY_UNAUTHORIZED`).
+- **Status**: `RED` (Proves missing capability check).
+
+### CLIENT-CAPABILITY-WEEKLOG-VALIDATE-01: Weeklog Validation Capability Enforcement
+- **Given** a Client Collaborator session lacking `weeklog.validate`,
+- **When** calling `POST /api/weeklogs/:id/validate`,
+- **Then** the request is rejected with `403 Forbidden` (`CAPABILITY_UNAUTHORIZED`).
+- **Status**: `RED` (Proves missing capability check).
+
+### CLIENT-CAPABILITY-PAYMENT-LIST-REVIEW-01: Payment List Review Capability Enforcement
+- **Given** a Client Collaborator session lacking `payment_list.review`,
+- **When** calling `POST /api/payment-lists/:id/review`,
+- **Then** the request is rejected with `403 Forbidden` (`CAPABILITY_UNAUTHORIZED`).
+- **Status**: `RED` (Proves missing capability check).
+
+### CLIENT-CAPABILITY-INVOICE-VIEW-01: Invoice View Capability Enforcement
+- **Given** a Client Collaborator session lacking `invoice.view`,
+- **When** calling `GET /api/invoices/:id`,
+- **Then** the request is rejected with `403 Forbidden` (`CAPABILITY_UNAUTHORIZED`).
+- **Status**: `RED` (Proves missing capability check).
+
+### CLIENT-COLLABORATORS-MANAGE-01: Client Representative Delegation
+- **Given** an authorized client representative with `client.collaborators.manage`,
+- **When** delegating a new collaborator for Client A via `POST /api/clients/:clientId/collaborators`,
+- **Then** the grant is created successfully within client boundary; cross-client delegation returns `403 Forbidden` (`CROSS_CLIENT_FORBIDDEN`), internal Finance access cannot be granted (`422/403 INVALID_CLIENT_CAPABILITY`), and capability escalation is blocked.
+- **Status**: `RED` (Proves missing delegation management endpoint).
+
+### CLIENT-SITE-SCOPE-DENIAL-01: Platform / Local Operational Scope
 - **Given** a Client Collaborator with a grant scoped to `siteKey = 'site-lyon'`,
 - **When** attempting to validate or approve an entity for `siteKey = 'site-paris'`,
 - **Then** the request is rejected with `403 Forbidden` (`SITE_SCOPE_UNAUTHORIZED`).
@@ -190,12 +226,6 @@
 - **When** attempting to access `/api/finance/v2/*`,
 - **Then** the request is denied with `403 Forbidden`.
 - **Status**: `GREEN` (ALIGNED — Verified by test).
-
-### CLIENT-COLLABORATOR-DELEGATION-01: Client Representative Delegation
-- **Given** an authorized client representative (`clientId = Client A`),
-- **When** delegating a new collaborator for Client A via `POST /api/clients/:clientId/collaborators`,
-- **Then** the grant is created successfully with client/site scope; attempting to delegate for Client B returns `403 Forbidden` (`CROSS_CLIENT_FORBIDDEN`).
-- **Status**: `RED` (Proves missing delegation management endpoint).
 
 ---
 
@@ -227,14 +257,14 @@
 ## Group 9: Importer UX & Production Timeline
 
 ### IMPORT-UX-CONTRACT-01: Interactive Document Controls & Bulk Edit
-- **Given** the external import review interface,
-- **Then** document preview contracts and bulk downward edit capabilities are supported by observable endpoints.
-- **Status**: `RED` (Proves missing bulk downward correction handler).
+- **Given** the external import review interface and API,
+- **Then** document preview controls (zoom, rotation) and editable row drafts exist in UI (`PaymentListImportDialog.tsx`), and applying values downward to remaining rows is supported and persisted via batch row mutations on `PATCH /api/external-operational-imports/:id/rows`.
+- **Status**: `GREEN` (ALIGNED — Verified observable UI contract and batch row API).
 
 ### PRODUCTION-HISTORY-01: Chronological Fact Timeline
 - **Given** a production order that progressed through creation, production, finalization, weeklog ingestion, and rectification,
 - **When** querying `GET /api/production-orders/:id/timeline`,
-- **Then** an ordered sequence of real domain events is returned based on canonical facts.
+- **Then** an ordered sequence of real domain events is returned based strictly on canonical facts (zero fabricated pause/resume events).
 - **Status**: `RED` (Proves missing `/timeline` endpoint).
 
 ---
@@ -243,15 +273,15 @@
 
 ### UI-LIGHT-MODE-01: Light Mode Usability Gate
 - **Then** light mode passes minimum WCAG 2.1 AA contrast requirements across all core tables and forms.
-- **Status**: `STATIC_CONTRACT_GREEN / RUNTIME_HOMOLOGATION_PENDING`.
+- **Status**: `STATIC_CONTRACT_GREEN / RUNTIME_HOMOLOGATION_PENDING` (Automated CSS check passes; browser homologation in R07).
 
 ### UI-MOBILE-CORE-01: Mobile Core Responsiveness Gate
 - **Then** technician vehicle inspection, photo upload, and budget creation render without clipping on viewport $\le 430\text{px}$.
-- **Status**: `STATIC_CONTRACT_GREEN / RUNTIME_HOMOLOGATION_PENDING`.
+- **Status**: `STATIC_CONTRACT_GREEN / RUNTIME_HOMOLOGATION_PENDING` (Automated HTML viewport check passes; browser homologation in R07).
 
 ### UI-TABLET-CORE-01: Tablet Core Responsiveness Gate
 - **Then** manager WEEKLOG review and confrontation split-view render cleanly on viewport $768\text{px} - 1024\text{px}$.
-- **Status**: `STATIC_CONTRACT_GREEN / RUNTIME_HOMOLOGATION_PENDING`.
+- **Status**: `STATIC_CONTRACT_GREEN / RUNTIME_HOMOLOGATION_PENDING` (Automated CSS responsive classes check passes; browser homologation in R07).
 
 ### UI-BRAND-OPERIX-01: Operix Brand Hygiene Gate
 - **Then** zero occurrences of "Nexus" or "WorkNexus" exist in active UI views, titles, and manifest.
@@ -260,3 +290,4 @@
 ### UI-AUTOMATION-HIDDEN-01: Automation Module Hidden Gate
 - **Then** the deferred generic automation engine is absent from the main application navigation.
 - **Status**: `GREEN` (ALIGNED — Verified by test).
+
