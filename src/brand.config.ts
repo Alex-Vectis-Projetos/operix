@@ -5,7 +5,7 @@ import logo from "@/assets/brand-logo.svg";
  * Synchronous import — no fetch, no state, no async.
  */
 export const brandConfig = {
-  appName: "QWork Nexus",
-  shortName: "QWork",
+  appName: "Operix",
+  shortName: "Operix",
   logo,
 } as const;

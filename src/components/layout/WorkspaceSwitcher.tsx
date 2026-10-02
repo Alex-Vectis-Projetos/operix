@@ -39,14 +39,14 @@ export function WorkspaceSwitcher() {
     [availableWorkspaces],
   );
 
-  // ── 👑 QWork Nexus — GLOBAL IDENTITY pill (always rendered for owner) ──
+  // ── 👑 Operix — GLOBAL IDENTITY pill (always rendered for owner) ──
   const OwnerPill = isPlatformOwner ? (
     <div
       className="hidden md:flex items-center gap-1.5 px-2 h-8 rounded-md text-xs border border-amber-300/40 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-amber-400/10 text-amber-100"
-      title="QWork Nexus"
+      title="Operix"
     >
       <Crown className="h-3.5 w-3.5 shrink-0" />
-      <span className="truncate font-semibold max-w-[180px]">QWork Nexus</span>
+      <span className="truncate font-semibold max-w-[180px]">Operix</span>
     </div>
   ) : null;
 

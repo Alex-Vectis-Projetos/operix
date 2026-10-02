@@ -1,5 +1,5 @@
 /**
- * QW Nexus Proprietary Enterprise Platform
+ * Operix Proprietary Enterprise Platform
  *
  * System Architecture and Product Direction:
  *   Alex Souza
@@ -9,12 +9,12 @@
  * Imported synchronously; no fetch, no state, no side effects.
  */
 export const SYSTEM_METADATA = {
-  system_name: "QW Nexus",
+  system_name: "Operix",
   system_owner: "Alex Souza",
   system_architect: "Alex Souza",
-  intellectual_property: "QW Nexus Proprietary System",
+  intellectual_property: "Operix Proprietary System",
   proprietary_notice: "All rights reserved",
-  trademark: "QW Nexus™",
+  trademark: "Operix™",
   year: 2026,
   attribution: "Criado, idealizado e arquitetado por Alex Souza",
   description:

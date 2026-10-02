@@ -25,7 +25,7 @@ function layout(params: { title: string; preview?: string; body: string }) {
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#0f172a;border:1px solid rgba(148,163,184,0.2);border-radius:14px;overflow:hidden">
           <tr>
             <td style="padding:22px 24px;border-bottom:1px solid rgba(148,163,184,0.18)">
-              <div style="font-weight:700;letter-spacing:0.3px;font-size:16px">QWork Nexus</div>
+              <div style="font-weight:700;letter-spacing:0.3px;font-size:16px">Operix</div>
               <div style="font-size:12px;color:#94a3b8;margin-top:4px">${title}</div>
             </td>
           </tr>
@@ -49,7 +49,7 @@ function layout(params: { title: string; preview?: string; body: string }) {
 
 export function welcomeEmail(params: { fullName: string }) {
   const name = escapeHtml(params.fullName.trim() || "utilizador");
-  const subject = "Bem-vindo ao QWork Nexus";
+  const subject = "Bem-vindo ao Operix";
   const body = `
     <p style="margin:0 0 12px;font-size:14px;line-height:1.6">Olá, <strong>${name}</strong>.</p>
     <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#cbd5e1">
@@ -62,7 +62,7 @@ export function welcomeEmail(params: { fullName: string }) {
   return {
     subject,
     html: layout({ title: subject, preview: "Conta criada com sucesso.", body }),
-    text: `Olá, ${params.fullName}.\n\nA tua conta foi criada com sucesso.\n\nQWork Nexus`,
+    text: `Olá, ${params.fullName}.\n\nA tua conta foi criada com sucesso.\n\nOperix`,
   };
 }
 
@@ -89,7 +89,7 @@ export function passwordResetEmail(params: { fullName?: string | null; resetUrl:
   return {
     subject,
     html: layout({ title: subject, preview: "Link seguro para redefinir a senha.", body }),
-    text: `Olá, ${params.fullName ?? ""}.\n\nRedefine a tua senha: ${url}\n\nQWork Nexus`,
+    text: `Olá, ${params.fullName ?? ""}.\n\nRedefine a tua senha: ${url}\n\nOperix`,
   };
 }
 

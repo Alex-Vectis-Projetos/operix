@@ -32,7 +32,7 @@ const ROUTE_LABELS: Record<string, { module: string; label: string }> = {
 function resolveRoute(pathname: string) {
   if (ROUTE_LABELS[pathname]) return ROUTE_LABELS[pathname];
   const base = "/" + pathname.split("/").filter(Boolean)[0];
-  return ROUTE_LABELS[base] ?? { module: "app", label: "QWork Nexus" };
+  return ROUTE_LABELS[base] ?? { module: "app", label: "Operix" };
 }
 
 export interface AgentContext {

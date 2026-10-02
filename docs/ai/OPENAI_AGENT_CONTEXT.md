@@ -697,4 +697,11 @@ At phase boundaries, update:
 - `Current Spec006 reconciliation`
 - `Current next phase`
 
+### Current Spec006 Reconciliation
+- Approved R05 Checkpoint: `d20f955bdcf38ebe860a85be482c097cd5957c4d`
+- Completed R06 Phase: UI Release Gates, Operix Brand Hygiene, Importer UX downward apply, Light/Mobile/Tablet static contracts.
+- Intentional functional RED: 0
+- Runtime Homologation Pending: 3 (`UI-LIGHT-MODE-01`, `UI-MOBILE-CORE-01`, `UI-TABLET-CORE-01`)
+- Current Next Phase: R07 (Homologation & Release Verification per `specs/phase1-business-flow-reconciliation/r07-homologation-manifest.md`)
+
 If this file conflicts with current approved spec/ADR, the current approved spec/ADR wins.

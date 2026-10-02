@@ -113,42 +113,118 @@ function ImportDocumentPreview({ storagePath, mimeType }: { storagePath: string 
   );
 }
 
-function ReviewRows({ items, drafts, onChange }: { items: ExternalListImportItem[]; drafts: Record<string, RowDraft>; onChange: (id: string, draft: RowDraft) => void }) {
-  return <div className="space-y-3">{items.map((item) => {
-    const draft = drafts[item.id] ?? draftFrom(item);
-    const confidence = confidenceGuidance(item.fieldConfidence);
-    return <section key={item.id} className="rounded-md border p-3">
-      <div className="mb-2 flex items-center justify-between gap-2"><strong className="text-sm">Linha extraída</strong><span className="text-xs text-muted-foreground">{item.status}</span></div>
-      <p className="mb-3 text-xs text-muted-foreground">Original: {item.rawCarName ?? "veículo não identificado"} · {item.rawLicensePlate ?? item.rawVin ?? "sem placa/VIN"} · {item.rawTotalText ?? "valor não extraído"}</p>
-      {confidence && <p className="mb-3 rounded bg-amber-500/10 p-2 text-xs text-amber-200">{confidence}</p>}
-      <div className="grid gap-2 sm:grid-cols-2">
-        <Input aria-label="Veículo revisado" value={draft.reviewedCarName} placeholder="Veículo" onChange={(event) => onChange(item.id, { ...draft, reviewedCarName: event.target.value })} />
-        <Input aria-label="Placa revisada" value={draft.reviewedLicensePlate} placeholder="Placa" onChange={(event) => onChange(item.id, { ...draft, reviewedLicensePlate: event.target.value })} />
-        <Input aria-label="VIN revisado" value={draft.reviewedVin} placeholder="VIN" onChange={(event) => onChange(item.id, { ...draft, reviewedVin: event.target.value })} />
-        <Input aria-label="Valor revisado" value={draft.reviewedTotal} placeholder="Valor, ex.: 1200,00" onChange={(event) => onChange(item.id, { ...draft, reviewedTotal: event.target.value })} />
-      </div>
-      <Label className="mt-3 block text-xs">Serviços revisados</Label>
-      <div className="mt-1 space-y-2">{draft.reviewedServices.map((service, index) => <div key={index} className="grid gap-2 sm:grid-cols-3">
-        <Input aria-label={`Serviço ${index + 1}`} value={service.description ?? service.code ?? ""} placeholder="Serviço" onChange={(event) => {
-          const services = draft.reviewedServices.map((current, position) => position === index ? { ...current, description: event.target.value } : current);
-          onChange(item.id, { ...draft, reviewedServices: services });
-        }} />
-        <Input aria-label={`Quantidade ${index + 1}`} value={String(service.quantity ?? "1")} placeholder="Quantidade" onChange={(event) => {
-          const services = draft.reviewedServices.map((current, position) => position === index ? { ...current, quantity: event.target.value } : current);
-          onChange(item.id, { ...draft, reviewedServices: services });
-        }} />
-        <Input aria-label={`Valor do serviço ${index + 1}`} value={String(service.amount ?? service.unitPrice ?? "")} placeholder="Valor" onChange={(event) => {
-          const services = draft.reviewedServices.map((current, position) => position === index ? { ...current, amount: event.target.value } : current);
-          onChange(item.id, { ...draft, reviewedServices: services });
-        }} />
-      </div>)}</div>
-      <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => onChange(item.id, { ...draft, reviewedServices: [...draft.reviewedServices, { description: "", quantity: "1", amount: "" }] })}>Adicionar serviço</Button>
-    </section>;
-  })}</div>;
+function ReviewRows({
+  items,
+  drafts,
+  onChange,
+  onApplyDownward,
+}: {
+  items: ExternalListImportItem[];
+  drafts: Record<string, RowDraft>;
+  onChange: (id: string, draft: RowDraft) => void;
+  onApplyDownward: (sourceIndex: number) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {items.map((item, index) => {
+        const draft = drafts[item.id] ?? draftFrom(item);
+        const confidence = confidenceGuidance(item.fieldConfidence);
+        return (
+          <section key={item.id} className="rounded-md border p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <strong className="text-sm">Linha extraída {index + 1}</strong>
+              <div className="flex items-center gap-2">
+                {index < items.length - 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    title="Copiar dados desta linha para as linhas abaixo"
+                    onClick={() => onApplyDownward(index)}
+                  >
+                    Aplicar para baixo
+                  </Button>
+                )}
+                <span className="text-xs text-muted-foreground">{item.status}</span>
+              </div>
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Original: {item.rawCarName ?? "veículo não identificado"} · {item.rawLicensePlate ?? item.rawVin ?? "sem placa/VIN"} · {item.rawTotalText ?? "valor não extraído"}
+            </p>
+            {confidence && <p className="mb-3 rounded bg-amber-500/10 p-2 text-xs text-amber-200">{confidence}</p>}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input aria-label="Veículo revisado" value={draft.reviewedCarName} placeholder="Veículo" onChange={(event) => onChange(item.id, { ...draft, reviewedCarName: event.target.value })} />
+              <Input aria-label="Placa revisada" value={draft.reviewedLicensePlate} placeholder="Placa" onChange={(event) => onChange(item.id, { ...draft, reviewedLicensePlate: event.target.value })} />
+              <Input aria-label="VIN revisado" value={draft.reviewedVin} placeholder="VIN" onChange={(event) => onChange(item.id, { ...draft, reviewedVin: event.target.value })} />
+              <Input aria-label="Valor revisado" value={draft.reviewedTotal} placeholder="Valor, ex.: 1200,00" onChange={(event) => onChange(item.id, { ...draft, reviewedTotal: event.target.value })} />
+            </div>
+            <Label className="mt-3 block text-xs">Serviços revisados</Label>
+            <div className="mt-1 space-y-2">
+              {draft.reviewedServices.map((service, sIndex) => (
+                <div key={sIndex} className="grid gap-2 sm:grid-cols-3">
+                  <Input aria-label={`Serviço ${sIndex + 1}`} value={service.description ?? service.code ?? ""} placeholder="Serviço" onChange={(event) => {
+                    const services = draft.reviewedServices.map((current, position) => position === sIndex ? { ...current, description: event.target.value } : current);
+                    onChange(item.id, { ...draft, reviewedServices: services });
+                  }} />
+                  <Input aria-label={`Quantidade ${sIndex + 1}`} value={String(service.quantity ?? "1")} placeholder="Quantidade" onChange={(event) => {
+                    const services = draft.reviewedServices.map((current, position) => position === sIndex ? { ...current, quantity: event.target.value } : current);
+                    onChange(item.id, { ...draft, reviewedServices: services });
+                  }} />
+                  <Input aria-label={`Valor do serviço ${sIndex + 1}`} value={String(service.amount ?? service.unitPrice ?? "")} placeholder="Valor" onChange={(event) => {
+                    const services = draft.reviewedServices.map((current, position) => position === sIndex ? { ...current, amount: event.target.value } : current);
+                    onChange(item.id, { ...draft, reviewedServices: services });
+                  }} />
+                </div>
+              ))}
+            </div>
+            <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => onChange(item.id, { ...draft, reviewedServices: [...draft.reviewedServices, { description: "", quantity: "1", amount: "" }] })}>Adicionar serviço</Button>
+          </section>
+        );
+      })}
+    </div>
+  );
 }
 
 function ReviewContent({ clients, clientId, currencyCode, setClientId, setCurrencyCode, items, drafts, setDrafts }: { clients: Array<{ id: string; name: string }>; clientId: string; currencyCode: string; setClientId: (value: string) => void; setCurrencyCode: (value: string) => void; items: ExternalListImportItem[]; drafts: Record<string, RowDraft>; setDrafts: Dispatch<SetStateAction<Record<string, RowDraft>>> }) {
-  return <div className="space-y-3"><div className="grid gap-3 sm:grid-cols-2"><div><Label>Cliente revisado</Label><Select value={clientId} onValueChange={setClientId}><SelectTrigger><SelectValue placeholder="Selecione o cliente" /></SelectTrigger><SelectContent>{clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}</SelectContent></Select></div><div><Label>Moeda revisada</Label><Input value={currencyCode} maxLength={3} placeholder="EUR" onChange={(event) => setCurrencyCode(event.target.value.toUpperCase())} /></div></div><ReviewRows items={items} drafts={drafts} onChange={(id, draft) => setDrafts((current) => ({ ...current, [id]: draft }))} /></div>;
+  const handleApplyDownward = (sourceIndex: number) => {
+    const sourceItem = items[sourceIndex];
+    if (!sourceItem) return;
+    const sourceDraft = drafts[sourceItem.id] ?? draftFrom(sourceItem);
+    setDrafts((current) => {
+      const next = { ...current };
+      for (let i = sourceIndex + 1; i < items.length; i++) {
+        const targetItem = items[i];
+        const targetDraft = next[targetItem.id] ?? draftFrom(targetItem);
+        next[targetItem.id] = {
+          ...targetDraft,
+          reviewedCarName: sourceDraft.reviewedCarName || targetDraft.reviewedCarName,
+          reviewedTotal: sourceDraft.reviewedTotal || targetDraft.reviewedTotal,
+          reviewedServices: sourceDraft.reviewedServices.length > 0 ? sourceDraft.reviewedServices : targetDraft.reviewedServices,
+        };
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label>Cliente revisado</Label>
+          <Select value={clientId} onValueChange={setClientId}>
+            <SelectTrigger><SelectValue placeholder="Selecione o cliente" /></SelectTrigger>
+            <SelectContent>{clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Moeda revisada</Label>
+          <Input value={currencyCode} maxLength={3} placeholder="EUR" onChange={(event) => setCurrencyCode(event.target.value.toUpperCase())} />
+        </div>
+      </div>
+      <ReviewRows items={items} drafts={drafts} onChange={(id, draft) => setDrafts((current) => ({ ...current, [id]: draft }))} onApplyDownward={handleApplyDownward} />
+    </div>
+  );
 }
 
 export function PaymentListImportDialog({ importId, onImportReady, onCommitted, onClose }: { importId: string | null; onImportReady: (id: string) => void; onCommitted: (list: PaymentList) => void; onClose: () => void }) {

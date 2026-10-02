@@ -1237,7 +1237,7 @@ operationalBillingRouter.post("/admin/ops/invoices/:invoiceId/send", async (req:
       const html = `<!doctype html><html><body style="font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#111827">
 <h2 style="margin:0 0 12px">${escapeHtml(subject)}</h2>
 ${body ? `<p style="margin:0 0 12px;white-space:pre-wrap">${escapeHtml(body)}</p>` : ""}
-<p style="margin:12px 0 0;font-size:12px;color:#6b7280">QWork Nexus · Fatura ${escapeHtml(invoice.invoiceNumber)}</p>
+<p style="margin:12px 0 0;font-size:12px;color:#6b7280">Operix · Fatura ${escapeHtml(invoice.invoiceNumber)}</p>
 </body></html>`;
 
       const attachments =

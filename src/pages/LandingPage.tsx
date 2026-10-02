@@ -15,7 +15,7 @@ export default function LandingPage() {
             Q
           </div>
           <h1 className="text-4xl md:text-5xl font-semibold tracking-tight">
-            QW Nexus
+            Operix
           </h1>
           <p className="text-base md:text-lg text-muted-foreground max-w-xl mx-auto">
             Plataforma operacional para equipas de serviço.

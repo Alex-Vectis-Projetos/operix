@@ -210,7 +210,7 @@ export function buildPrintableBudget(b: Budget, lang: "pt" | "fr" = "pt"): strin
   <div style="background:#d6d8dc;height:10px;border:1px solid #c2c5cb;border-top:none;margin-bottom:14px"></div>
   <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px;padding:0 4px">
     <div>
-      <div style="font-size:9px;color:#4b5563;letter-spacing:0.1em;text-transform:uppercase">QW-Nexus</div>
+      <div style="font-size:9px;color:#4b5563;letter-spacing:0.1em;text-transform:uppercase">Operix</div>
       <div style="font-size:12px;font-weight:600;color:#111827">${lang === "fr" ? "Atelier de réparation automobile" : "Oficina de reparação automotiva"}</div>
     </div>
     <div style="text-align:right">
@@ -487,7 +487,7 @@ export function buildPrintableBudget(b: Budget, lang: "pt" | "fr" = "pt"): strin
       <div style="text-align:center">
         <div style="font-size:10px;color:#111827;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;margin-bottom:4px">${lang === "fr" ? "Atelier (Responsable)" : "Oficina (Responsável)"}</div>
         <div style="height:56px;border-bottom:1px solid #111827"></div>
-        <div style="font-size:9px;color:#4b5563;margin-top:3px">QW-Nexus · ${esc(b.dossier_garage_name || "")}</div>
+        <div style="font-size:9px;color:#4b5563;margin-top:3px">Operix · ${esc(b.dossier_garage_name || "")}</div>
       </div>
     </div>
   </div>`);
@@ -497,7 +497,7 @@ export function buildPrintableBudget(b: Budget, lang: "pt" | "fr" = "pt"): strin
 
   // Rodapé final
   sections.push(`<div style="margin-top:22px;padding-top:10px;border-top:1px dashed #9ca3af;text-align:center;font-size:9px;color:#6b7280;letter-spacing:0.03em">
-    ${lang === "fr" ? "Document généré par QW-Nexus · Devis valable 15 jours à compter de l'émission · Merci de votre confiance." : "Documento gerado por QW-Nexus · Orçamento válido 15 dias a partir da emissão · Obrigado pela confiança."}
+    ${lang === "fr" ? "Document généré par Operix · Devis valable 15 jours à compter de l'émission · Merci de votre confiance." : "Documento gerado por Operix · Orçamento válido 15 dias a partir da emissão · Obrigado pela confiança."}
     <br/>
     ${new Date().toLocaleString("pt-BR")}
   </div>`);
@@ -547,7 +547,7 @@ export function buildPrintableBudget(b: Budget, lang: "pt" | "fr" = "pt"): strin
 <html lang="${lang === "fr" ? "fr" : "pt"}">
 <head>
   <meta charset="utf-8" />
-  <title>Orçamento ${esc(b.number || "(rascunho)")} — QW-Nexus</title>
+  <title>Orçamento ${esc(b.number || "(rascunho)")} — Operix</title>
   <style>${pageStyle}</style>
 </head>
 <body>

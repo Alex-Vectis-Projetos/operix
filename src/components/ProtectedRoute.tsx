@@ -71,7 +71,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
           Q
         </div>
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">{t("common.loading", "A carregar…")} QWork Nexus…</p>
+        <p className="text-sm text-muted-foreground">{t("common.loading", "A carregar…")} Operix…</p>
       </div>
     );
   }

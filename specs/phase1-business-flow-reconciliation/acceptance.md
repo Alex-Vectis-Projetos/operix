@@ -383,7 +383,7 @@
 
 ### UI-BRAND-OPERIX-01: Operix Brand Hygiene Gate
 - **Then** zero occurrences of "Nexus" or "WorkNexus" exist in active UI views, titles, and manifest.
-- **Status**: `RED` (Proves residual Nexus strings in `index.html`).
+- **Status**: `GREEN` (ALIGNED — Verified by test and residual branding scrubbed across all active surfaces).
 
 ### UI-AUTOMATION-HIDDEN-01: Automation Module Hidden Gate
 - **Then** the deferred generic automation engine is absent from the main application navigation.

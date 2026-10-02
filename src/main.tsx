@@ -155,7 +155,7 @@ if (sentryDsn && typeof sentryDsn === "string") {
     tunnel: tunnelUrl,
     debug: isDev,
     environment: import.meta.env.MODE,
-    release: `qwork-nexus@${import.meta.env.MODE}`,
+    release: `operix@${import.meta.env.MODE}`,
     integrations: [
       Sentry.browserTracingIntegration(),
       Sentry.replayIntegration(),

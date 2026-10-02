@@ -1,5 +1,5 @@
 /**
- * QW Nexus — Legal & compliance configuration.
+ * Operix — Legal & compliance configuration.
  * Single source of truth for the current terms version.
  * Bump TERMS_VERSION to force every user to re-consent.
  */

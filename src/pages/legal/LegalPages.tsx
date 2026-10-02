@@ -10,14 +10,14 @@ function Placeholder({ topic }: { topic: string }) {
   return (
     <>
       <p>
-        Este documento descreve as práticas oficiais do QW Nexus relacionadas a
+        Este documento descreve as práticas oficiais do Operix relacionadas a
         <strong> {topic}</strong>. O conteúdo final será publicado pelo time
         jurídico responsável.
       </p>
       <h2>1. Escopo</h2>
       <p>
         Define o alcance das obrigações, partes envolvidas e contexto de uso da
-        plataforma proprietária QW Nexus™.
+        plataforma proprietária Operix™.
       </p>
       <h2>2. Responsabilidades</h2>
       <p>
@@ -37,7 +37,7 @@ function Placeholder({ topic }: { topic: string }) {
       <h2>5. Contato</h2>
       <p>
         Solicitações jurídicas devem ser direcionadas ao responsável legal
-        designado pela operação do QW Nexus.
+        designado pela operação do Operix.
       </p>
     </>
   );

@@ -50,11 +50,12 @@
   - [x] Transition claims from `reserved` to immutable `consumed`.
   - [x] Verify Finance V2 revenue projections: `pending` (Expected = Total, Received = 0) $\rightarrow$ `paid` (Expected = 0, Received = Total).
 
-- [ ] **R06: Importer UX Preservation & Contractual UI Release Gates**
-  - [ ] Connect interactive document controls (rotation, zoom, editable grid, bulk downward apply) in frontend importer using existing `PATCH /api/external-operational-imports/:id/rows`.
-  - [ ] Execute Operix brand hygiene audit: purge residual "Nexus" and "WorkNexus" strings (`UI-BRAND-OPERIX-01`).
-  - [ ] Verify light mode contrast and mobile/tablet responsive layouts.
-  - [ ] Hide generic automation engine from active navigation.
+- [x] **R06: Importer UX Preservation & Contractual UI Release Gates**
+  - [x] Connect interactive document controls (rotation, zoom, editable grid, bulk downward apply) in frontend importer using existing `PATCH /api/external-operational-imports/:id/rows`.
+  - [x] Execute Operix brand hygiene audit: purge residual "Nexus" and "WorkNexus" strings (`UI-BRAND-OPERIX-01`).
+  - [x] Verify light mode contrast and mobile/tablet responsive layouts (STATIC_GREEN / RUNTIME_PENDING).
+  - [x] Hide generic automation engine from active navigation (`UI-AUTOMATION-HIDDEN-01`).
+  - [x] Prepare R07 Homologation Manifest (`r07-homologation-manifest.md`).
 
 - [ ] **R07: End-to-End Homologation, Browser Recording & Staging Sign-Off**
   - [ ] Run full 46-scenario acceptance suite to green.

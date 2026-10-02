@@ -250,7 +250,7 @@ export function BrandNameEditor({
             <div className="flex items-center gap-2.5 mt-2 min-h-10">
               <BrandLogo size={logoSizeNum} />
               <span style={previewTextStyle}>
-                {draft.name || "QWork Nexus"}
+                {draft.name || "Operix"}
               </span>
             </div>
           </div>

@@ -1,7 +1,7 @@
 {
-  "name": "QWork Nexus",
-  "short_name": "QWork Nexus",
-  "description": "QWork Nexus — Proprietary enterprise platform.",
+  "name": "Operix",
+  "short_name": "Operix",
+  "description": "Operix — Proprietary enterprise platform.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

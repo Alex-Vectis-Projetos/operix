@@ -1098,13 +1098,13 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         },
       });
 
-      // Active claim held by auto-draft list (provisional in ADR-002; reserved in current DB)
+      // Active claim held by auto-draft list with provisional status (ADR-002)
       await prisma.paymentListEntryClaim.create({
         data: {
           workspaceId: fixture.workspaceA,
           paymentListId: pl.id,
           weeklogEntryId: manualEntryId,
-          status: "reserved",
+          status: "provisional",
         },
       });
 
@@ -3598,6 +3598,8 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       expect(dialogSrc).toContain("reviewedCarName");
       expect(dialogSrc).toContain("reviewedLicensePlate");
       expect(dialogSrc).toContain("reviewedTotal");
+      expect(dialogSrc).toContain("Aplicar para baixo");
+      expect(dialogSrc).toContain("onApplyDownward");
 
       // 2. Verify that applying values downward to multiple rows is supported via batch row patch API
       const testImportId = "76000000-0000-4000-8000-000000000088";
@@ -3700,6 +3702,14 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       expect(indexHtml).toContain("Operix");
       expect(indexHtml).not.toContain("Nexus");
       expect(indexHtml).not.toContain("WorkNexus");
+
+      const manifestJson = await readFile("public/manifest.json", "utf8");
+      expect(manifestJson).toContain('"name": "Operix"');
+      expect(manifestJson).not.toContain("Nexus");
+
+      const brandConfig = await readFile("src/brand.config.ts", "utf8");
+      expect(brandConfig).toContain('appName: "Operix"');
+      expect(brandConfig).not.toContain("Nexus");
     });
 
     it("UI-AUTOMATION-HIDDEN-01: Deferred automation module absent from active navigation", async () => {

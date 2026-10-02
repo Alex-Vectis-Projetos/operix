@@ -2109,7 +2109,7 @@ billingRouter.post("/reports/financial/email", async (req: AuthenticatedRequest,
       lines,
     });
     const tpl = reportEmail({
-      title: "Relatório Financeiro QWork Nexus",
+      title: "Relatório Financeiro Operix",
       body: `Segue o relatório financeiro dos últimos ${input.periodMonths} meses.`,
     });
     const sendResult = await sendEmail({

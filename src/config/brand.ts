@@ -6,7 +6,7 @@ import brandLogo from "@/assets/brand-logo.svg";
  * Single source of truth for Auth screen, Sidebar and TopBar.
  */
 export const BRAND = {
-  name: "QWork Nexus",
-  shortName: "QWork",
+  name: "Operix",
+  shortName: "Operix",
   logo: brandLogo,
 } as const;
