@@ -14,7 +14,9 @@ import {
   reviewExternalListImport,
 } from "../services/externalListImportService.js";
 import {
+  associateInvoiceForPaymentList,
   commitReviewedImport,
+  createInvoiceForPaymentList,
   createPaymentList,
   getPaymentList,
   listPaymentLists,
@@ -228,6 +230,26 @@ paymentListsRouter.patch("/:id/status", async (req: Request, res: Response) => {
       throw new ForbiddenError("FORBIDDEN_ROLE: Apenas operadores internos possuem autoridade para aprovar faturamento.");
     }
     return res.json(await transitionPaymentList(req.ctx!, routeParam(req, "id"), toStatus, { isClientAuthorized: !isInternalManager }));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.post("/:id/invoice/create", async (req: Request, res: Response) => {
+  try {
+    const listId = routeParam(req, "id");
+    const result = await createInvoiceForPaymentList(req.ctx!, listId, req.body);
+    return res.status(result.idempotent ? 200 : 201).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.post("/:id/invoice/associate", async (req: Request, res: Response) => {
+  try {
+    const listId = routeParam(req, "id");
+    const result = await associateInvoiceForPaymentList(req.ctx!, listId, req.body);
+    return res.status(200).json(result);
   } catch (error) {
     return sendError(res, error);
   }

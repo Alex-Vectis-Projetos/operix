@@ -43,12 +43,12 @@
     - [x] Forward-only migration `20261002180000_spec006_r04_1_provenance_restrict` enforcing `ON DELETE RESTRICT` for commercial provenance (`LIST-PROVENANCE-IMMUTABLE-01`).
     - [x] Internal manager gate for `ready_for_billing`, promoting claims `provisional -> reserved`, idempotent execution, zero Finance effect, and pre-invoice cancellation (`LIST-INTERNAL-READY-FOR-BILLING-01`).
 
-- [ ] **R05: Spec 005 / ADR-004 — Explicit Invoice Commands & Direct Internal Billing**
-  - [ ] Implement `POST /api/payment-lists/:id/invoice/create`.
-  - [ ] Implement `POST /api/payment-lists/:id/invoice/associate`.
-  - [ ] Enforce strict state transition to `pending` upon invoice command.
-  - [ ] Transition claims from `reserved` to immutable `consumed`.
-  - [ ] Verify Finance V2 revenue projections: `pending` (Expected = Total, Received = 0) $\rightarrow$ `paid` (Expected = 0, Received = Total).
+- [x] **R05: Spec 005 / ADR-004 — Explicit Invoice Commands & Direct Internal Billing**
+  - [x] Implement `POST /api/payment-lists/:id/invoice/create`.
+  - [x] Implement `POST /api/payment-lists/:id/invoice/associate`.
+  - [x] Enforce strict state transition to `pending` upon invoice command.
+  - [x] Transition claims from `reserved` to immutable `consumed`.
+  - [x] Verify Finance V2 revenue projections: `pending` (Expected = Total, Received = 0) $\rightarrow$ `paid` (Expected = 0, Received = Total).
 
 - [ ] **R06: Importer UX Preservation & Contractual UI Release Gates**
   - [ ] Connect interactive document controls (rotation, zoom, editable grid, bulk downward apply) in frontend importer using existing `PATCH /api/external-operational-imports/:id/rows`.

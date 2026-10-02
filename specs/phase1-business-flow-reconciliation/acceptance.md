@@ -162,7 +162,29 @@
 - **Given** an eligible PaymentList in `ready_for_billing` or `confronted`,
 - **When** calling `POST /api/payment-lists/:id/invoice/create` or `POST /api/payment-lists/:id/invoice/associate`,
 - **Then** the invoice is created/linked, `paymentList.invoiceId` is populated, status transitions to `pending`, and claims transition to `consumed` (immutable). PaymentList MUST NOT transition to `pending` before this command. Post-invoice cancellation (`pending` $\rightarrow$ `cancelled`) is forbidden in Phase 1.
-- **Status**: `RED` (Proves missing `/invoice/create` and `/invoice/associate` command routes).
+- **Status**: `GREEN` (ALIGNED — Implemented in R05 and verified by integration tests).
+
+### LIST-INVOICE-CREATE-IDEMPOTENT-01: Repeated Create Command Idempotency
+- **Given** a PaymentList that has already executed `invoice/create` and is in `pending`,
+- **When** calling `POST /api/payment-lists/:id/invoice/create` again,
+- **Then** the command idempotently returns the existing invoice handoff without creating duplicate invoices.
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### LIST-INVOICE-CONCURRENT-01: Concurrent Create Concurrency Safety
+- **Given** concurrent calls to `POST /api/payment-lists/:id/invoice/create` on the same list,
+- **Then** exactly one canonical invoice and link is established atomically.
+- **Status**: `GREEN` (ALIGNED — Verified by test with row locking).
+
+### LIST-INVOICE-ASSOCIATE-IDEMPOTENT-01: Existing Invoice Association & Idempotency
+- **Given** an eligible PaymentList and compatible existing BillingInvoice,
+- **When** calling `POST /api/payment-lists/:id/invoice/associate`,
+- **Then** the invoice is linked, status transitions to `pending`, claims transition to `consumed`, repeated calls are idempotent, client mismatch/foreign tenant IDs return 422/404, and conflicting active links return 409.
+- **Status**: `GREEN` (ALIGNED — Verified by test).
+
+### LIST-INVOICE-ATOMIC-ROLLBACK-01: Transaction Failure Atomicity
+- **Given** an invalid claim or state during invoice creation,
+- **Then** invoice creation, list link, status transition, and claim transitions rollback together atomically.
+- **Status**: `GREEN` (ALIGNED — Verified by test).
 
 ### FIN-AUTO-DRAFT-NO-EFFECT-01: Zero Draft Finance Impact
 - **Given** an automatically generated draft `PaymentList`,
@@ -270,9 +292,9 @@
 
 ### CLIENT-CAPABILITY-INVOICE-VIEW-01: Invoice View Capability Enforcement
 - **Given** a Client Collaborator session evaluated for `invoice.view`,
-- **When** authority is asserted,
-- **Then** the capability model validates the grant; canonical route-level enforcement remains deferred to R05.
-- **Status**: `INFRASTRUCTURE_GREEN / ROUTE_WIRING_PENDING_R05` (Model & resolver active; canonical route deferred to R05).
+- **When** accessing canonical invoice endpoints `GET /api/billing/invoices/:invoiceId` or `GET /api/billing/invoices/:invoiceId/pdf`,
+- **Then** access is allowed if granted with matching client and siteKey scope, revoked/unauthorized grants return 403, cross-tenant returns 404, and zero internal ledger leakage occurs.
+- **Status**: `GREEN` (ALIGNED — Route-level enforcement verified by real HTTP tests in R05).
 
 ### CLIENT-COLLABORATORS-MANAGE-01: Client Representative Delegation
 - **Given** an authorized client representative with `client.collaborators.manage`,

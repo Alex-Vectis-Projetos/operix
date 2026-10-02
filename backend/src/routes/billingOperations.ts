@@ -1,8 +1,12 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { Router, type NextFunction, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import type { AuthenticatedRequest } from "../middleware/auth.js";
+import { requireAuth } from "../middleware/auth.js";
+import { resolveRequestContext } from "../middleware/requestContext.js";
+import { assertClientCapability, ForbiddenError, NotFoundError } from "../lib/objectAuth.js";
+import { buildSimplePdf } from "../lib/pdf/simplePdf.js";
 import { isEmailConfigured, sendEmail } from "../lib/email/resend.js";
 
 export const operationalBillingRouter = Router();
@@ -271,7 +275,7 @@ function mapBillingSupplier(supplier: {
   };
 }
 
-function mapBillingInvoice(invoice: {
+export function mapBillingInvoice(invoice: {
   id: string;
   workspaceId: string | null;
   invoiceNumber: string;
@@ -1327,3 +1331,163 @@ operationalBillingRouter.get("/admin/ops/payments", async (req: AuthenticatedReq
     return next(error);
   }
 });
+
+operationalBillingRouter.get("/invoices/:invoiceId", requireAuth, resolveRequestContext, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ctx = req.ctx;
+    const workspaceId = ctx?.activeWorkspaceId;
+    if (!workspaceId) {
+      return res.status(403).json({ message: "FORBIDDEN_ROLE" });
+    }
+    const { invoiceId } = z.object({ invoiceId: z.string().min(1) }).parse(req.params);
+
+    const invoice = await prisma.billingInvoice.findFirst({
+      where: { id: invoiceId, workspaceId, deletedAt: null },
+    });
+    if (!invoice) {
+      return res.status(404).json({ message: "Fatura não encontrada." });
+    }
+
+    const isInternalManager =
+      ctx.platformRole === "platform_admin" ||
+      ctx.membershipRole === "owner" ||
+      ctx.membershipRole === "admin";
+
+    if (!isInternalManager) {
+      const snapshot = invoice.customerSnapshot as Record<string, any> | null;
+      let clientId = snapshot?.clientId || invoice.billingClientId;
+      if (!clientId) {
+        const metadata = invoice.metadata as Record<string, any> | null;
+        if (metadata?.paymentListId) {
+          const pl = await prisma.paymentList.findUnique({
+            where: { id: metadata.paymentListId },
+            select: { clientId: true },
+          });
+          if (pl) clientId = pl.clientId;
+        }
+      }
+      if (!clientId && invoice.customerName) {
+        const c = await prisma.client.findFirst({
+          where: { workspaceId, name: invoice.customerName },
+          select: { id: true },
+        });
+        if (c) clientId = c.id;
+      }
+      if (!clientId) {
+        return res.status(403).json({ message: "CAPABILITY_UNAUTHORIZED: Cliente não associado à fatura." });
+      }
+
+      const grant = await assertClientCapability(ctx, {
+        clientId,
+        capability: "invoice.view",
+      });
+
+      if (grant.siteKey) {
+        const metadata = invoice.metadata as Record<string, any> | null;
+        if (metadata?.items && Array.isArray(metadata.items) && metadata.items.length > 0) {
+          const allMatch = metadata.items.every(
+            (item: any) => !item.operationalSiteKey || item.operationalSiteKey === grant.siteKey
+          );
+          if (!allMatch) {
+            return res.status(403).json({
+              message: "SITE_SCOPE_UNAUTHORIZED: Local operacional não autorizado para este validador.",
+            });
+          }
+        }
+      }
+    }
+
+    const mapped = mapBillingInvoice(invoice);
+    return res.json({
+      invoice: mapped,
+      ...mapped,
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && "statusCode" in error) {
+      return res.status((error as any).statusCode).json({ message: (error as any).message });
+    }
+    return next(error);
+  }
+});
+
+operationalBillingRouter.get("/invoices/:invoiceId/pdf", requireAuth, resolveRequestContext, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ctx = req.ctx;
+    const workspaceId = ctx?.activeWorkspaceId;
+    if (!workspaceId) {
+      return res.status(403).json({ message: "FORBIDDEN_ROLE" });
+    }
+    const { invoiceId } = z.object({ invoiceId: z.string().min(1) }).parse(req.params);
+
+    const invoice = await prisma.billingInvoice.findFirst({
+      where: { id: invoiceId, workspaceId, deletedAt: null },
+    });
+    if (!invoice) {
+      return res.status(404).json({ message: "Fatura não encontrada." });
+    }
+
+    const isInternalManager =
+      ctx.platformRole === "platform_admin" ||
+      ctx.membershipRole === "owner" ||
+      ctx.membershipRole === "admin";
+
+    if (!isInternalManager) {
+      const snapshot = invoice.customerSnapshot as Record<string, any> | null;
+      let clientId = snapshot?.clientId || invoice.billingClientId;
+      if (!clientId) {
+        const metadata = invoice.metadata as Record<string, any> | null;
+        if (metadata?.paymentListId) {
+          const pl = await prisma.paymentList.findUnique({
+            where: { id: metadata.paymentListId },
+            select: { clientId: true },
+          });
+          if (pl) clientId = pl.clientId;
+        }
+      }
+      if (!clientId && invoice.customerName) {
+        const c = await prisma.client.findFirst({
+          where: { workspaceId, name: invoice.customerName },
+          select: { id: true },
+        });
+        if (c) clientId = c.id;
+      }
+      if (!clientId) {
+        return res.status(403).json({ message: "CAPABILITY_UNAUTHORIZED: Cliente não associado à fatura." });
+      }
+
+      await assertClientCapability(ctx, {
+        clientId,
+        capability: "invoice.view",
+      });
+    }
+
+    const metadata = invoice.metadata as Record<string, any> | null;
+    const lines = [
+      `Client: ${invoice.customerName ?? "N/A"}`,
+      `Date: ${invoice.issueDate.toISOString().slice(0, 10)}`,
+      `Total: ${Number(invoice.totalAmount).toFixed(2)} ${metadata?.currency ?? "EUR"}`,
+      `Statut: ${invoice.status}`,
+    ];
+    if (metadata?.paymentListNumber) {
+      lines.push(`Bordereau: ${metadata.paymentListNumber}`);
+    }
+    if (invoice.notes) {
+      lines.push(`Notes: ${invoice.notes}`);
+    }
+
+    const pdfBuffer = buildSimplePdf({
+      title: `Facture ${invoice.invoiceNumber}`,
+      lines,
+    });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
+    return res.send(pdfBuffer);
+  } catch (error) {
+    if (error && typeof error === "object" && "statusCode" in error) {
+      return res.status((error as any).statusCode).json({ message: (error as any).message });
+    }
+    return next(error);
+  }
+});
+

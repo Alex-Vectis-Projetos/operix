@@ -19,6 +19,7 @@ const { productionOrdersRouter } = await import("../../backend/src/routes/produc
 const { budgetsRouter } = await import("../../backend/src/routes/budgets.js");
 const { externalOperationalImportsRouter } = await import("../../backend/src/routes/externalOperationalImports.js");
 const { clientsRouter } = await import("../../backend/src/routes/clients.js");
+const { operationalBillingRouter } = await import("../../backend/src/routes/billingOperations.js");
 const { minioImportDocumentStorage, aiImportExtractionProvider } = await import("../../backend/src/services/externalImportAdapters.js");
 const { signAccessToken } = await import("../../backend/src/lib/jwt.js");
 const { prisma } = await import("../../backend/src/lib/prisma.js");
@@ -81,6 +82,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       "distributions",
       "expenses",
       "financial_records",
+      "billing_invoices",
       "client_access_grants",
     ]) {
       await prisma.$executeRawUnsafe(`DELETE FROM "${table}" WHERE workspace_id IN ('${ws.join("','")}')`);
@@ -216,6 +218,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     app.use("/api/budgets", budgetsRouter);
     app.use("/api/external-operational-imports", externalOperationalImportsRouter);
     app.use("/api/clients", clientsRouter);
+    app.use("/api/billing", operationalBillingRouter);
 
     app.use((err: any, _req: any, res: any, _next: any) => {
       const status = typeof err?.statusCode === "number" ? err.statusCode : 500;
@@ -1617,9 +1620,68 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     const readyListId = "74000000-0000-4000-8000-000000000099";
     const pendingListId = "74000000-0000-4000-8000-000000000077";
     const draftListId = "74000000-0000-4000-8000-000000000088";
+    const concListId = "74000000-0000-4000-8000-000000000066";
+    const assocListId = "74000000-0000-4000-8000-000000000055";
+    const rollbackListId = "74000000-0000-4000-8000-000000000044";
+    const groupWlId = "75000000-0000-4000-8000-000000000044";
+    const groupPoId = "76000000-0000-4000-8000-000000000044";
+
+    const groupPoMap = new Map<string, string>();
+    async function ensureGroupEntry(entryId: string) {
+      let poId = groupPoMap.get(entryId);
+      if (!poId) {
+        poId = randomUUID();
+        groupPoMap.set(entryId, poId);
+      }
+      await prisma.productionOrder.upsert({
+        where: { id: poId },
+        create: { id: poId, workspaceId: fixture.workspaceA, code: `PO-${randomUUID().slice(0, 8)}`, clientId: fixture.clientAId, status: "delivered" },
+        update: {},
+      });
+      await prisma.weeklog.upsert({
+        where: { id: groupWlId },
+        create: {
+          id: groupWlId,
+          workspaceId: fixture.workspaceA,
+          clientId: fixture.clientAId,
+          siteKey: "site-lyon",
+          startsOn: new Date("2026-07-19T00:00:00.000Z"),
+          endsOn: new Date("2026-07-25T23:59:59.999Z"),
+          yearReference: 2026,
+          week: "2026-W30",
+          weekNumber: 30,
+          status: "validated",
+        },
+        update: {},
+      });
+      await prisma.weeklogEntry.upsert({
+        where: { id: entryId },
+        create: {
+          id: entryId,
+          workspaceId: fixture.workspaceA,
+          weeklogId: groupWlId,
+          productionOrderId: poId,
+          technicianUserId: fixture.ownerA,
+          technicianName: "Owner A",
+          clientId: fixture.clientAId,
+          totalAmount: 500,
+          currencyCode: "EUR",
+          deliveredAt: new Date("2026-07-20T10:00:00Z"),
+          validationStatus: "approved",
+        },
+        update: {},
+      });
+    }
 
     beforeEach(async () => {
-      await prisma.paymentList.deleteMany({ where: { id: { in: [readyListId, pendingListId, draftListId] } } });
+      const allIds = [readyListId, pendingListId, draftListId, concListId, assocListId, rollbackListId];
+      await prisma.paymentListEntryClaim.deleteMany({ where: { paymentListId: { in: allIds } } });
+      await prisma.paymentListItem.deleteMany({ where: { paymentListId: { in: allIds } } });
+      await prisma.paymentList.deleteMany({ where: { id: { in: allIds } } });
+      await prisma.billingInvoice.deleteMany({ where: { workspaceId: { in: [fixture.workspaceA, fixture.workspaceB] } } });
+
+      await ensureGroupEntry("entry-claim-ready-01");
+
       await prisma.paymentList.create({
         data: {
           id: readyListId,
@@ -1628,11 +1690,21 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
           clientId: fixture.clientAId,
           clientName: "VECTIS Client",
           currencyCode: "EUR",
-          status: "draft",
+          status: "ready_for_billing",
           recognizedTotal: "2500.00",
           createdBy: fixture.ownerA,
         },
       });
+
+      await prisma.paymentListEntryClaim.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          paymentListId: readyListId,
+          weeklogEntryId: "entry-claim-ready-01",
+          status: "reserved",
+        },
+      });
+
       await prisma.paymentList.create({
         data: {
           id: pendingListId,
@@ -1649,7 +1721,15 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
     });
 
     it("LIST-INVOICE-HANDOFF-01: Eligible List exposes the smallest supported create/associate invoice flow", async () => {
-      // RED: POST /api/payment-lists/:id/invoice/create route does not exist yet (returns 404)
+      // 1. Client collaborator without internal manager authority is denied (403)
+      const clientResp = await request(`/api/payment-lists/${readyListId}/invoice/create`, {
+        method: "POST",
+        headers: headers(fixture.clientAUser, fixture.workspaceA, "client-no-inv", "user"),
+        body: JSON.stringify({ notes: "Unauthorized client call" }),
+      });
+      expect(clientResp.status).toBe(403);
+
+      // 2. Authorized internal operator invokes create
       const response = await request(`/api/payment-lists/${readyListId}/invoice/create`, {
         method: "POST",
         headers: headers(fixture.ownerA, fixture.workspaceA, "invoice-handoff-key"),
@@ -1663,6 +1743,253 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       const updatedList = await prisma.paymentList.findUniqueOrThrow({ where: { id: readyListId } });
       expect(updatedList.status).toBe("pending");
       expect(updatedList.invoiceId).toBe(body.invoiceId);
+
+      // 3. Reserved claims transitioned to consumed (immutable)
+      const claim = await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: readyListId } });
+      expect(claim.status).toBe("consumed");
+      expect(claim.consumedAt).toBeInstanceOf(Date);
+      expect(claim.releasedAt).toBeNull();
+
+      // 4. Post-invoice cancellation (pending -> cancelled) is strictly forbidden in Phase 1
+      const cancelResp = await request(`/api/payment-lists/${readyListId}/status`, {
+        method: "PATCH",
+        headers: headers(fixture.ownerA, fixture.workspaceA),
+        body: JSON.stringify({ toStatus: "cancelled" }),
+      });
+      expect(cancelResp.status).toBe(409);
+    });
+
+    it("LIST-INVOICE-CREATE-IDEMPOTENT-01: Repeated create command returns and reuses same handoff without duplicate invoice", async () => {
+      // First call creates the invoice
+      const res1 = await request(`/api/payment-lists/${readyListId}/invoice/create`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "idemp-key-1"),
+        body: JSON.stringify({ notes: "Initial create" }),
+      });
+      expect(res1.status).toBe(201);
+      const body1 = await res1.json();
+      expect(body1.invoiceId).toBeDefined();
+
+      const invoiceCountBefore = await prisma.billingInvoice.count({
+        where: { workspaceId: fixture.workspaceA },
+      });
+
+      // Second call returns existing handoff idempotently
+      const res2 = await request(`/api/payment-lists/${readyListId}/invoice/create`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "idemp-key-2"),
+        body: JSON.stringify({ notes: "Repeated create" }),
+      });
+      expect([200, 201]).toContain(res2.status);
+      const body2 = await res2.json();
+      expect(body2.invoiceId).toBe(body1.invoiceId);
+
+      const invoiceCountAfter = await prisma.billingInvoice.count({
+        where: { workspaceId: fixture.workspaceA },
+      });
+      expect(invoiceCountAfter).toBe(invoiceCountBefore);
+    });
+
+    it("LIST-INVOICE-CONCURRENT-01: Concurrent create creates exactly one effective invoice and link", async () => {
+      await ensureGroupEntry("entry-claim-conc-01");
+      await prisma.paymentList.create({
+        data: {
+          id: concListId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-CONC-001",
+          clientId: fixture.clientAId,
+          clientName: "VECTIS Client",
+          currencyCode: "EUR",
+          status: "ready_for_billing",
+          recognizedTotal: "1200.00",
+          createdBy: fixture.ownerA,
+        },
+      });
+      await prisma.paymentListEntryClaim.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          paymentListId: concListId,
+          weeklogEntryId: "entry-claim-conc-01",
+          status: "reserved",
+        },
+      });
+
+      const [res1, res2] = await Promise.all([
+        request(`/api/payment-lists/${concListId}/invoice/create`, {
+          method: "POST",
+          headers: headers(fixture.ownerA, fixture.workspaceA, "conc-call-1"),
+          body: JSON.stringify({ notes: "Concurrent 1" }),
+        }),
+        request(`/api/payment-lists/${concListId}/invoice/create`, {
+          method: "POST",
+          headers: headers(fixture.ownerA, fixture.workspaceA, "conc-call-2"),
+          body: JSON.stringify({ notes: "Concurrent 2" }),
+        }),
+      ]);
+
+      expect([200, 201]).toContain(res1.status);
+      expect([200, 201]).toContain(res2.status);
+      const b1 = await res1.json();
+      const b2 = await res2.json();
+      expect(b1.invoiceId).toBe(b2.invoiceId);
+
+      const updated = await prisma.paymentList.findUniqueOrThrow({ where: { id: concListId } });
+      expect(updated.status).toBe("pending");
+      expect(updated.invoiceId).toBe(b1.invoiceId);
+
+      const claim = await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: concListId } });
+      expect(claim.status).toBe("consumed");
+    });
+
+    it("LIST-INVOICE-ASSOCIATE-IDEMPOTENT-01: Explicit associate associates compatible invoice, remains idempotent, and blocks incompatible link", async () => {
+      await ensureGroupEntry("entry-claim-assoc-01");
+      // 1. Create a compatible invoice in Workspace A for Client A
+      const existingInv = await prisma.billingInvoice.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          invoiceNumber: "FAC-COMPAT-001",
+          customerName: "VECTIS Client",
+          customerSnapshot: { clientId: fixture.clientAId },
+          totalAmount: 1500,
+          remainingAmount: 1500,
+          status: "draft",
+          source: "manual",
+        },
+      });
+
+      await prisma.paymentList.create({
+        data: {
+          id: assocListId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-ASSOC-001",
+          clientId: fixture.clientAId,
+          clientName: "VECTIS Client",
+          currencyCode: "EUR",
+          status: "ready_for_billing",
+          recognizedTotal: "1500.00",
+          createdBy: fixture.ownerA,
+        },
+      });
+      await prisma.paymentListEntryClaim.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          paymentListId: assocListId,
+          weeklogEntryId: "entry-claim-assoc-01",
+          status: "reserved",
+        },
+      });
+
+      // 2. Associate existing invoice
+      const assocRes = await request(`/api/payment-lists/${assocListId}/invoice/associate`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "assoc-key"),
+        body: JSON.stringify({ invoiceId: existingInv.id }),
+      });
+      expect(assocRes.status).toBe(200);
+      const assocBody = await assocRes.json();
+      expect(assocBody.invoiceId).toBe(existingInv.id);
+
+      const listAfter = await prisma.paymentList.findUniqueOrThrow({ where: { id: assocListId } });
+      expect(listAfter.status).toBe("pending");
+      expect(listAfter.invoiceId).toBe(existingInv.id);
+
+      // 3. Repeated associate to same invoice is idempotent
+      const repeatRes = await request(`/api/payment-lists/${assocListId}/invoice/associate`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "assoc-repeat-key"),
+        body: JSON.stringify({ invoiceId: existingInv.id }),
+      });
+      expect(repeatRes.status).toBe(200);
+
+      // 4. Associating a different invoice when already linked returns 409 Conflict
+      const diffInv = await prisma.billingInvoice.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          invoiceNumber: "FAC-DIFF-001",
+          customerName: "VECTIS Client",
+          customerSnapshot: { clientId: fixture.clientAId },
+          totalAmount: 1500,
+          remainingAmount: 1500,
+          status: "draft",
+          source: "manual",
+        },
+      });
+      const diffRes = await request(`/api/payment-lists/${assocListId}/invoice/associate`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "assoc-diff-key"),
+        body: JSON.stringify({ invoiceId: diffInv.id }),
+      });
+      expect(diffRes.status).toBe(409);
+
+      // 5. Cross-tenant foreign invoice ID returns 404 (does not leak existence)
+      const foreignInv = await prisma.billingInvoice.create({
+        data: {
+          workspaceId: fixture.workspaceB,
+          invoiceNumber: "FAC-FOR-001",
+          customerName: "VECTIS Client",
+          totalAmount: 100,
+          remainingAmount: 100,
+          status: "draft",
+          source: "manual",
+        },
+      });
+      const foreignRes = await request(`/api/payment-lists/${readyListId}/invoice/associate`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "assoc-foreign-key"),
+        body: JSON.stringify({ invoiceId: foreignInv.id }),
+      });
+      expect(foreignRes.status).toBe(404);
+    });
+
+    it("LIST-INVOICE-ATOMIC-ROLLBACK-01: Transaction failure rolls back invoice, link, status, and claims together", async () => {
+      await ensureGroupEntry("entry-claim-rollback-01");
+      await prisma.paymentList.create({
+        data: {
+          id: rollbackListId,
+          workspaceId: fixture.workspaceA,
+          listNumber: "PL-ROLLBACK-001",
+          clientId: fixture.clientAId,
+          clientName: "VECTIS Client",
+          currencyCode: "EUR",
+          status: "ready_for_billing",
+          recognizedTotal: "1000.00",
+          createdBy: fixture.ownerA,
+        },
+      });
+      // Add a provisional claim: cannot be consumed without being reserved
+      await prisma.paymentListEntryClaim.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          paymentListId: rollbackListId,
+          weeklogEntryId: "entry-claim-rollback-01",
+          status: "provisional",
+        },
+      });
+
+      const invCountBefore = await prisma.billingInvoice.count({
+        where: { workspaceId: fixture.workspaceA },
+      });
+
+      const failRes = await request(`/api/payment-lists/${rollbackListId}/invoice/create`, {
+        method: "POST",
+        headers: headers(fixture.ownerA, fixture.workspaceA, "rollback-key"),
+        body: JSON.stringify({ notes: "Failing create" }),
+      });
+      expect(failRes.status).toBe(422);
+
+      // Everything rolled back:
+      const listAfter = await prisma.paymentList.findUniqueOrThrow({ where: { id: rollbackListId } });
+      expect(listAfter.status).toBe("ready_for_billing");
+      expect(listAfter.invoiceId).toBeNull();
+
+      const claimAfter = await prisma.paymentListEntryClaim.findFirstOrThrow({ where: { paymentListId: rollbackListId } });
+      expect(claimAfter.status).toBe("provisional");
+      expect(claimAfter.consumedAt).toBeNull();
+
+      const invCountAfter = await prisma.billingInvoice.count({
+        where: { workspaceId: fixture.workspaceA },
+      });
+      expect(invCountAfter).toBe(invCountBefore);
     });
 
     it("FIN-AUTO-DRAFT-NO-EFFECT-01: Automatic draft List changes neither Expected nor Received", async () => {
@@ -2492,7 +2819,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       expect(bodyOwner.status).toBe("cancelled");
     });
 
-    it("CLIENT-CAPABILITY-INVOICE-VIEW-01: [INFRASTRUCTURE_GREEN / ROUTE_WIRING_PENDING_R05] invoice.view is resolved in capability model while canonical route is deferred to R05", async () => {
+    it("CLIENT-CAPABILITY-INVOICE-VIEW-01: invoice.view capability enforced at canonical route level with zero ledger leak and site scoping", async () => {
       // 1. Verify capability definition in infrastructure
       expect(ALLOWED_CLIENT_CAPABILITIES).toContain("invoice.view");
 
@@ -2511,10 +2838,40 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
 
       // 3. Grant with explicit invoice.view resolves successfully
       const invViewUser = "71000000-0000-4000-8000-000000000095";
+      const invViewApp = "72000000-0000-4000-8000-000000000095";
       await prisma.user.upsert({
         where: { id: invViewUser },
-        create: { id: invViewUser, email: "inv-view@client.com", fullName: "Invoice Viewer", role: "user", passwordHash: "x" },
+        create: {
+          id: invViewUser,
+          email: "inv-view@client.com",
+          fullName: "Invoice Viewer",
+          role: "user",
+          passwordHash: "x",
+        },
         update: {},
+      });
+      let appUserInv = await prisma.appUser.findUnique({
+        where: { authUserId: invViewUser },
+      });
+      if (!appUserInv) {
+        appUserInv = await prisma.appUser.create({
+          data: {
+            id: invViewApp,
+            authUserId: invViewUser,
+            email: "inv-view@client.com",
+            workspaceId: fixture.workspaceA,
+          },
+        });
+      }
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: appUserInv.id } },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: appUserInv.id,
+          role: "client",
+          status: "active",
+        },
+        update: { status: "active", role: "client" },
       });
       await prisma.clientAccessGrant.upsert({
         where: { workspaceId_userId_clientId: { workspaceId: fixture.workspaceA, userId: invViewUser, clientId: fixture.clientAId } },
@@ -2544,7 +2901,124 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       );
       expect(resolved.capabilities).toContain("invoice.view");
 
-      // 4. Note: HTTP route GET /api/invoices/:id is NOT faked or invented in R02; route wiring is owned by R05
+      // 4. Canonical route GET /api/billing/invoices/:id route-level proof
+      const invFixture = await prisma.billingInvoice.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          invoiceNumber: "FAC-VIEW-001",
+          customerName: "VECTIS Client",
+          customerSnapshot: { clientId: fixture.clientAId },
+          totalAmount: 3200,
+          remainingAmount: 3200,
+          status: "draft",
+          source: "manual",
+          metadata: {
+            currency: "EUR",
+            items: [{ operationalSiteKey: "site-lyon" }],
+          },
+        },
+      });
+
+      // 4a. Collaborator with active invoice.view grant accesses invoice JSON
+      const resView = await request(`/api/billing/invoices/${invFixture.id}`, {
+        headers: headers(invViewUser, fixture.workspaceA, "inv-view-key", "user"),
+      });
+      expect(resView.status).toBe(200);
+      const invData = await resView.json();
+      expect(invData.invoice_number).toBe("FAC-VIEW-001");
+      expect(invData.total_amount).toBe(3200);
+      // Zero internal Finance ledger leakage
+      expect(invData.margin).toBeUndefined();
+      expect(invData.internalLedger).toBeUndefined();
+
+      // 4b. Collaborator accesses PDF document
+      const resPdf = await request(`/api/billing/invoices/${invFixture.id}/pdf`, {
+        headers: headers(invViewUser, fixture.workspaceA, "inv-pdf-key", "user"),
+      });
+      expect(resPdf.status).toBe(200);
+      expect(resPdf.headers.get("content-type")).toContain("application/pdf");
+
+      // 4c. Collaborator lacking invoice.view is denied (403 CAPABILITY_UNAUTHORIZED)
+      const resNoCap = await request(`/api/billing/invoices/${invFixture.id}`, {
+        headers: headers(fixture.techA, fixture.workspaceA, "inv-no-cap-key", "user"),
+      });
+      expect(resNoCap.status).toBe(403);
+
+      // 4d. Revoked grant is denied (403)
+      await prisma.clientAccessGrant.update({
+        where: { workspaceId_userId_clientId: { workspaceId: fixture.workspaceA, userId: invViewUser, clientId: fixture.clientAId } },
+        data: { status: "revoked" },
+      });
+      const resRevoked = await request(`/api/billing/invoices/${invFixture.id}`, {
+        headers: headers(invViewUser, fixture.workspaceA, "inv-revoked-key", "user"),
+      });
+      expect(resRevoked.status).toBe(403);
+
+      // 4e. Site-scoped grant mismatch is denied (403 SITE_SCOPE_UNAUTHORIZED)
+      const siteScopedUser = "71000000-0000-4000-8000-000000000096";
+      const siteScopedApp = "72000000-0000-4000-8000-000000000096";
+      await prisma.user.upsert({
+        where: { id: siteScopedUser },
+        create: {
+          id: siteScopedUser,
+          email: "site-scoped@client.com",
+          fullName: "Site Scoped Viewer",
+          role: "user",
+          passwordHash: "x",
+        },
+        update: {},
+      });
+      let appUserSite = await prisma.appUser.findUnique({
+        where: { authUserId: siteScopedUser },
+      });
+      if (!appUserSite) {
+        appUserSite = await prisma.appUser.create({
+          data: {
+            id: siteScopedApp,
+            authUserId: siteScopedUser,
+            email: "site-scoped@client.com",
+            workspaceId: fixture.workspaceA,
+          },
+        });
+      }
+      await prisma.membership.upsert({
+        where: { workspaceId_userId: { workspaceId: fixture.workspaceA, userId: appUserSite.id } },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: appUserSite.id,
+          role: "client",
+          status: "active",
+        },
+        update: { status: "active", role: "client" },
+      });
+      await prisma.clientAccessGrant.upsert({
+        where: { workspaceId_userId_clientId: { workspaceId: fixture.workspaceA, userId: siteScopedUser, clientId: fixture.clientAId } },
+        create: {
+          workspaceId: fixture.workspaceA,
+          userId: siteScopedUser,
+          clientId: fixture.clientAId,
+          capabilities: ["invoice.view"],
+          siteKey: "site-paris",
+          status: "active",
+        },
+        update: {
+          capabilities: ["invoice.view"],
+          siteKey: "site-paris",
+          status: "active",
+        },
+      });
+      const resSiteScope = await request(`/api/billing/invoices/${invFixture.id}`, {
+        headers: headers(siteScopedUser, fixture.workspaceA, "inv-site-scope-key", "user"),
+      });
+      expect(resSiteScope.status).toBe(403);
+
+      // 4f. Cross-tenant access returns 404 (does not leak foreign invoice existence)
+      const resCrossTenant = await request(`/api/billing/invoices/${invFixture.id}`, {
+        headers: headers(fixture.ownerB, fixture.workspaceB, "inv-cross-key"),
+      });
+      expect(resCrossTenant.status).toBe(404);
+
+      await prisma.billingInvoice.deleteMany({ where: { id: invFixture.id } });
     });
 
     it("CLIENT-COLLABORATORS-MANAGE-01: Authorized client representative delegates, updates, and revokes collaborators", async () => {

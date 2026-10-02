@@ -574,12 +574,21 @@ R04/R04.1 addressed:
 - authorized internal manager transition to `ready_for_billing`, promoting claims `provisional -> reserved`, idempotent, zero Finance effect, and pre-invoice cancellation releasing claims;
 - acceptance `LIST-PROVENANCE-IMMUTABLE-01` and `LIST-INTERNAL-READY-FOR-BILLING-01` verified GREEN.
 
+R05 addressed:
+- explicit invoice commands: `POST /api/payment-lists/:id/invoice/create` and `POST /api/payment-lists/:id/invoice/associate`;
+- internal manager authority gate (`manager(ctx)`), client collaborators denied 403;
+- atomic transaction promoting `ready_for_billing`/`confronted` PaymentList to `pending` with `invoiceId`;
+- definitive `reserved` claims promoted to immutable `consumed` (`consumedAt` set, `releasedAt` null);
+- provisional claims rejected with 422 before `pending`;
+- create/associate idempotency, row locking (`FOR UPDATE`) protecting concurrent races, and atomic rollback on failure;
+- tenant isolation: foreign invoice IDs return 404 without leaking existence; client mismatch rejected with 422;
+- Finance boundary verified: `ready_for_billing`/`confronted` (Expected = 0, Received = 0), `pending` (Expected = recognizedTotal, Received = 0), `paid` (Expected = 0, Received = recognizedTotal);
+- canonical `invoice.view` client capability wired to `GET /api/billing/invoices/:invoiceId` and `/pdf` with siteKey scoping, revoked grant denial, and zero internal ledger leakage;
+- acceptance `LIST-INVOICE-HANDOFF-01`, `LIST-INVOICE-CREATE-IDEMPOTENT-01`, `LIST-INVOICE-CONCURRENT-01`, `LIST-INVOICE-ASSOCIATE-IDEMPOTENT-01`, `LIST-INVOICE-ATOMIC-ROLLBACK-01`, and `CLIENT-CAPABILITY-INVOICE-VIEW-01` verified GREEN.
+
 Reviewed local checkpoint:
 
-`f838bf07350d852eeb895cfaf06b19d2f09a48b0`
-
-Commit:
-`feat(phase1): implement spec006 r04 auto payment lists and claims`
+`b332e404b9ae21dfffc3f86e3ba6ee48cf4966a4`
 
 Branch:
 `fix/phase1-business-flow-reconciliation`
@@ -592,13 +601,12 @@ Always verify Git; this SHA is a checkpoint, not a permanent assumption.
 
 Current approved phase:
 
-### Spec006 R05
-Spec 005 / ADR-004 — Explicit Invoice Commands & Direct Internal Billing.
-- `POST /api/payment-lists/:id/invoice/create`
-- `POST /api/payment-lists/:id/invoice/associate`
-- Strict state transition to `pending` upon invoice command
-- Claims transition from `reserved` to immutable `consumed`
-- Finance V2 revenue projections (`pending` -> `paid`)
+### Spec006 R06
+Importer UX Preservation & Contractual UI Release Gates.
+- Connect interactive document controls (rotation, zoom, editable grid, bulk downward apply) in frontend importer using existing `PATCH /api/external-operational-imports/:id/rows`
+- Execute Operix brand hygiene audit: purge residual "Nexus" and "WorkNexus" strings (`UI-BRAND-OPERIX-01`)
+- Verify light mode contrast and mobile/tablet responsive layouts
+- Hide generic automation engine from active navigation
 
 ---
 

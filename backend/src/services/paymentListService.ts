@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma.js";
 import { ConflictError, ForbiddenError, NotFoundError, UnprocessableEntityError } from "../lib/objectAuth.js";
 import type { RequestContext } from "../middleware/requestContext.js";
 import { projectPaymentListItemInTransaction } from "./downstreamPaymentOrderAdapter.js";
+import { mapBillingInvoice } from "../routes/billingOperations.js";
 
 const currencySchema = z.string({ required_error: "LIST_CURRENCY_REQUIRED" }).regex(/^[A-Z]{3}$/, "LIST_CURRENCY_REQUIRED");
 const createSchema = z.object({
@@ -93,11 +94,7 @@ export async function absorbProvisionalClaimsInTransaction(
 
   for (const claim of existingClaims) {
     if (claim.paymentListId === params.targetPaymentListId) continue;
-    if (claim.status === "consumed") {
-      throw new ConflictError("WEEKLOG_ENTRY_ALREADY_CLAIMED");
-    }
-    // Reserved claim on a non-draft list cannot be absorbed
-    if (claim.status === "reserved" && claim.paymentList.status !== "draft") {
+    if (claim.status === "consumed" || claim.status === "reserved") {
       throw new ConflictError("WEEKLOG_ENTRY_ALREADY_CLAIMED");
     }
 
@@ -471,3 +468,269 @@ export async function transitionPaymentList(
     return presentList(await tx.paymentList.findUniqueOrThrow({ where: { id: list.id }, include: { items: true, claims: true } }));
   });
 }
+
+async function allocateInvoiceNumber(tx: Prisma.TransactionClient, workspaceId: string): Promise<string> {
+  const rows = await tx.$queryRaw<Array<{ currentValue: number }>>(Prisma.sql`
+    INSERT INTO tenant_sequence_counters (id, workspace_id, sequence_type, current_value, updated_at)
+    VALUES (gen_random_uuid(), ${workspaceId}, 'invoice', 1, NOW())
+    ON CONFLICT (workspace_id, sequence_type)
+    DO UPDATE SET current_value = tenant_sequence_counters.current_value + 1, updated_at = NOW()
+    RETURNING current_value AS "currentValue"
+  `);
+  const next = rows[0]?.currentValue;
+  if (!Number.isInteger(next) || next < 1) throw new ConflictError("INVOICE_NUMBER_EXHAUSTED");
+  const year = new Date().getUTCFullYear();
+  return `FAC-${year}-${String(next).padStart(5, "0")}`;
+}
+
+export async function createInvoiceForPaymentList(
+  ctx: RequestContext,
+  paymentListId: string,
+  payload?: { notes?: string; invoiceNumber?: string; issueDate?: string | Date; dueDate?: string | Date }
+) {
+  manager(ctx);
+  const workspaceId = ws(ctx);
+
+  return prisma.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<Array<{ id: string; status: string; invoice_id: string | null }>>(
+      Prisma.sql`SELECT id, status, invoice_id FROM payment_lists WHERE id = ${paymentListId} AND workspace_id = ${workspaceId} FOR UPDATE`
+    );
+    if (!locked) {
+      throw new NotFoundError("LIST_NOT_FOUND");
+    }
+
+    if (locked.status === "pending" && locked.invoice_id) {
+      const existingInvoice = await tx.billingInvoice.findFirst({
+        where: { id: locked.invoice_id, workspaceId, deletedAt: null },
+      });
+      return {
+        idempotent: true,
+        invoiceId: locked.invoice_id,
+        invoice: existingInvoice ? mapBillingInvoice(existingInvoice) : null,
+        status: "pending",
+      };
+    }
+
+    if (locked.status !== "ready_for_billing" && locked.status !== "confronted") {
+      throw new ConflictError(
+        `LIST_STATUS_INELIGIBLE_FOR_INVOICE: Only ready_for_billing or confronted lists can be invoiced (current: ${locked.status}).`
+      );
+    }
+
+    const list = await tx.paymentList.findUniqueOrThrow({
+      where: { id: paymentListId },
+      include: { items: true, claims: true },
+    });
+
+    const provisionalClaims = list.claims.filter((c) => c.status === "provisional");
+    if (provisionalClaims.length > 0) {
+      throw new UnprocessableEntityError(
+        "CANNOT_CONSUME_PROVISIONAL_CLAIMS: Only reserved claims can become consumed."
+      );
+    }
+
+    let invoiceNumber = payload?.invoiceNumber?.trim();
+    if (!invoiceNumber) {
+      invoiceNumber = await allocateInvoiceNumber(tx, workspaceId);
+    }
+
+    const issueDate = payload?.issueDate ? new Date(payload.issueDate) : list.issueDate ?? new Date();
+    const dueDate = payload?.dueDate ? new Date(payload.dueDate) : list.dueDate ?? null;
+    const recognizedAmount = Number(list.recognizedTotal);
+
+    const billingClient = await tx.billingClient.findFirst({
+      where: { id: list.clientId, workspaceId },
+    });
+
+    const invoice = await tx.billingInvoice.create({
+      data: {
+        workspaceId,
+        invoiceNumber,
+        type: "outgoing",
+        billingClientId: billingClient?.id ?? null,
+        customerName: list.clientName,
+        customerSnapshot: {
+          clientId: list.clientId,
+          clientName: list.clientName,
+        },
+        issueDate,
+        dueDate,
+        totalAmount: recognizedAmount,
+        paidAmount: 0,
+        remainingAmount: recognizedAmount,
+        status: "draft",
+        notes: payload?.notes?.trim() || list.notes || null,
+        source: "payment_list",
+        createdBy: ctx.actorUserId ?? null,
+        yearReference: issueDate.getUTCFullYear(),
+        metadata: {
+          paymentListId: list.id,
+          paymentListNumber: list.listNumber,
+          currency: list.currencyCode,
+          originWeeklogId: list.originWeeklogId,
+          originWeeklogValidationId: list.originWeeklogValidationId,
+          sourceType: list.sourceType,
+          itemCount: list.items.length,
+          items: list.items.map((i: any) => ({
+            id: i.id,
+            carName: i.carName,
+            licensePlate: i.licensePlate,
+            vin: i.vin,
+            technicianName: i.technicianName,
+            operationalSiteKey: i.operationalSiteKey,
+            totalAmount: i.totalAmount?.toString?.() ?? String(i.totalAmount),
+          })),
+        },
+      },
+    });
+
+    await tx.paymentList.update({
+      where: { id: list.id },
+      data: {
+        status: "pending",
+        invoiceId: invoice.id,
+        issueDate,
+        dueDate,
+      },
+    });
+
+    const now = new Date();
+    await tx.paymentListEntryClaim.updateMany({
+      where: {
+        workspaceId,
+        paymentListId: list.id,
+        status: "reserved",
+      },
+      data: {
+        status: "consumed",
+        consumedAt: now,
+        releasedAt: null,
+      },
+    });
+
+    return {
+      idempotent: false,
+      invoiceId: invoice.id,
+      invoice: mapBillingInvoice(invoice),
+      status: "pending",
+    };
+  });
+}
+
+export async function associateInvoiceForPaymentList(
+  ctx: RequestContext,
+  paymentListId: string,
+  payload: { invoiceId: string }
+) {
+  manager(ctx);
+  const workspaceId = ws(ctx);
+  const targetInvoiceId = payload.invoiceId?.trim();
+  if (!targetInvoiceId) {
+    throw new UnprocessableEntityError("INVOICE_ID_REQUIRED");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<Array<{ id: string; status: string; invoice_id: string | null }>>(
+      Prisma.sql`SELECT id, status, invoice_id FROM payment_lists WHERE id = ${paymentListId} AND workspace_id = ${workspaceId} FOR UPDATE`
+    );
+    if (!locked) {
+      throw new NotFoundError("LIST_NOT_FOUND");
+    }
+
+    if (locked.status === "pending" && locked.invoice_id === targetInvoiceId) {
+      const existingInvoice = await tx.billingInvoice.findFirst({
+        where: { id: targetInvoiceId, workspaceId, deletedAt: null },
+      });
+      return {
+        idempotent: true,
+        invoiceId: targetInvoiceId,
+        invoice: existingInvoice ? mapBillingInvoice(existingInvoice) : null,
+        status: "pending",
+      };
+    }
+
+    if (locked.invoice_id && locked.invoice_id !== targetInvoiceId) {
+      throw new ConflictError(
+        `LIST_ALREADY_INVOICED: List is already linked to another invoice (${locked.invoice_id}).`
+      );
+    }
+
+    if (locked.status !== "ready_for_billing" && locked.status !== "confronted") {
+      throw new ConflictError(
+        `LIST_STATUS_INELIGIBLE_FOR_INVOICE: Only ready_for_billing or confronted lists can be invoiced (current: ${locked.status}).`
+      );
+    }
+
+    const invoice = await tx.billingInvoice.findFirst({
+      where: { id: targetInvoiceId, workspaceId, deletedAt: null },
+    });
+    if (!invoice) {
+      throw new NotFoundError("INVOICE_NOT_FOUND");
+    }
+
+    const list = await tx.paymentList.findUniqueOrThrow({
+      where: { id: paymentListId },
+      include: { items: true, claims: true },
+    });
+
+    const snapshot = invoice.customerSnapshot as Record<string, any> | null;
+    const invoiceClientId = snapshot?.clientId || invoice.billingClientId;
+    if (invoiceClientId && invoiceClientId !== list.clientId) {
+      throw new UnprocessableEntityError("INVOICE_CLIENT_MISMATCH: Invoice belongs to a different client.");
+    }
+    if (!invoiceClientId && invoice.customerName && invoice.customerName.trim().toLowerCase() !== list.clientName.trim().toLowerCase()) {
+      throw new UnprocessableEntityError("INVOICE_CLIENT_MISMATCH: Invoice belongs to a different client.");
+    }
+
+    const otherList = await tx.paymentList.findFirst({
+      where: {
+        workspaceId,
+        invoiceId: invoice.id,
+        id: { not: list.id },
+        status: { notIn: ["cancelled", "superseded"] },
+      },
+    });
+    if (otherList) {
+      throw new ConflictError(
+        `INVOICE_ALREADY_LINKED: Invoice is already associated with list ${otherList.listNumber}.`
+      );
+    }
+
+    const provisionalClaims = list.claims.filter((c) => c.status === "provisional");
+    if (provisionalClaims.length > 0) {
+      throw new UnprocessableEntityError(
+        "CANNOT_CONSUME_PROVISIONAL_CLAIMS: Only reserved claims can become consumed."
+      );
+    }
+
+    await tx.paymentList.update({
+      where: { id: list.id },
+      data: {
+        status: "pending",
+        invoiceId: invoice.id,
+      },
+    });
+
+    const now = new Date();
+    await tx.paymentListEntryClaim.updateMany({
+      where: {
+        workspaceId,
+        paymentListId: list.id,
+        status: "reserved",
+      },
+      data: {
+        status: "consumed",
+        consumedAt: now,
+        releasedAt: null,
+      },
+    });
+
+    return {
+      idempotent: false,
+      invoiceId: invoice.id,
+      invoice: mapBillingInvoice(invoice),
+      status: "pending",
+    };
+  });
+}
+
