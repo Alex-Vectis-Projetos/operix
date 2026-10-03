@@ -14,7 +14,8 @@
  * "Global", "Próprio", "Convidado" badges. No descriptive footers.
  */
 import { useMemo, type ReactNode } from "react";
-import { Check, ChevronDown, Crown, ShieldCheck, Loader2 } from "lucide-react";
+import { Check, ChevronDown, Crown, Loader2 } from "lucide-react";
+import { BrandLogo } from "@/components/BrandLogo";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useTenant } from "@/contexts/TenantContext";
 import {
@@ -65,7 +66,7 @@ export function WorkspaceSwitcher() {
     // Single workspace — passive pill, no dropdown.
     WorkspaceControl = workspaceName ? (
       <div className="hidden md:flex items-center gap-1.5 px-2 h-8 rounded-md text-xs border border-border/40 bg-muted/20 text-foreground/90">
-        <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+        <BrandLogo size={20} />
         <span className="truncate font-medium max-w-[180px]">{workspaceName}</span>
       </div>
     ) : null;
@@ -82,7 +83,7 @@ export function WorkspaceSwitcher() {
               "text-foreground/90 hover:bg-accent/50",
             )}
           >
-            <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+            <BrandLogo size={20} />
             <span className="truncate font-semibold max-w-[160px] sm:max-w-[220px]">
               {workspaceName || "—"}
             </span>
