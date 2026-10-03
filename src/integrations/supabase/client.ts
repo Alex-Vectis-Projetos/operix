@@ -217,10 +217,10 @@ if (g.__SUPABASE_CLIENT__) {
 export const supabase =
   g.__SUPABASE_CLIENT__ ??
   (g.__SUPABASE_CLIENT__ = (() => {
-    const blocked = isDevOriginBlockedByCors();
-    if (blocked) {
+    const shouldBlock = !SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY || isDevOriginBlockedByCors();
+    if (shouldBlock) {
       console.debug(
-        "[SUPABASE] Dev origin detected — installing silent no-op facade + fetch blocker to avoid CORS errors. Use backend API routes for persistence.",
+        "[SUPABASE] Standalone backend or dev origin detected — installing silent no-op facade + fetch blocker to avoid CORS errors. Use backend API routes for persistence.",
       );
       installSupabaseFetchBlockerOnce();
       return noopSupabaseFacade();
