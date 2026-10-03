@@ -1,11 +1,11 @@
-import logo from "@/assets/brand-logo.svg";
+import logo from "@/assets/operix-logo-icon.png";
 
 /**
  * Single source of truth for application branding.
- * Synchronous import — no fetch, no state, no async.
  */
 export const brandConfig = {
   appName: "Operix",
   shortName: "Operix",
   logo,
 } as const;
+

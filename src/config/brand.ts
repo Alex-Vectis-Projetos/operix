@@ -1,8 +1,7 @@
-import brandLogo from "@/assets/brand-logo.svg";
+import brandLogo from "@/assets/operix-logo-icon.png";
 
 /**
  * Central brand configuration.
- * Imported synchronously — no fetch, no state, no useEffect.
  * Single source of truth for Auth screen, Sidebar and TopBar.
  */
 export const BRAND = {
@@ -10,3 +9,4 @@ export const BRAND = {
   shortName: "Operix",
   logo: brandLogo,
 } as const;
+
