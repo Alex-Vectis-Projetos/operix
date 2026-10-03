@@ -14,7 +14,7 @@ import { reportEmail } from "../lib/email/templates.js";
 export const billingRouter = Router();
 
 const workspaceIdSchema = z.object({
-  workspaceId: z.string().uuid(),
+  workspaceId: z.string().min(1),
 });
 
 const billingProfileSchema = z.object({

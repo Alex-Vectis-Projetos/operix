@@ -321,7 +321,7 @@ workspaceRouter.post("/personal", async (req: AuthenticatedRequest, res: Respons
 workspaceRouter.get("/:workspaceId/billing-context", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const paramsSchema = z.object({
-      workspaceId: z.string().uuid(),
+      workspaceId: z.string().min(1),
     });
     const { workspaceId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
 
@@ -378,7 +378,7 @@ workspaceRouter.get("/:workspaceId/billing-context", async (req: AuthenticatedRe
 workspaceRouter.get("/:workspaceId/members", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const paramsSchema = z.object({
-      workspaceId: z.string().uuid(),
+      workspaceId: z.string().min(1),
     });
     const { workspaceId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
 
@@ -474,7 +474,7 @@ workspaceRouter.get("/:workspaceId/members", async (req: AuthenticatedRequest, r
 workspaceRouter.post("/:workspaceId/members", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const paramsSchema = z.object({
-      workspaceId: z.string().uuid(),
+      workspaceId: z.string().min(1),
     });
     const { workspaceId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const input = createWorkspaceMemberSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
@@ -587,8 +587,8 @@ workspaceRouter.post("/:workspaceId/members", async (req: AuthenticatedRequest, 
 workspaceRouter.patch("/:workspaceId/members/:membershipId", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const paramsSchema = z.object({
-      workspaceId: z.string().uuid(),
-      membershipId: z.string().uuid(),
+      workspaceId: z.string().min(1),
+      membershipId: z.string().min(1),
     });
     const { workspaceId, membershipId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const input = updateWorkspaceMemberSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);

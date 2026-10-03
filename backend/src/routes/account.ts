@@ -294,8 +294,8 @@ accountRouter.patch("/profile", async (req: AuthenticatedRequest, res: Response,
 accountRouter.get("/role", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const querySchema = z.object({
-      userId: z.string().uuid().optional(),
-      workspaceId: z.string().uuid().optional(),
+      userId: z.string().min(1).optional(),
+      workspaceId: z.string().min(1).optional(),
     });
     const { userId, workspaceId } = querySchema.parse((req as AuthenticatedRequest & { query: unknown }).query);
     const targetUserId = userId ?? req.auth!.userId;
@@ -368,8 +368,8 @@ accountRouter.get("/workspaces", async (req: AuthenticatedRequest, res: Response
 accountRouter.get("/context", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const querySchema = z.object({
-      userId: z.string().uuid().optional(),
-      workspaceId: z.string().uuid().optional(),
+      userId: z.string().min(1).optional(),
+      workspaceId: z.string().min(1).optional(),
     });
     const { userId, workspaceId } = querySchema.parse((req as AuthenticatedRequest & { query: unknown }).query);
     const targetUserId = userId ?? req.auth!.userId;
@@ -433,8 +433,8 @@ accountRouter.get("/context", async (req: AuthenticatedRequest, res: Response, n
 accountRouter.get("/permissions", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const querySchema = z.object({
-      userId: z.string().uuid().optional(),
-      workspaceId: z.string().uuid().optional(),
+      userId: z.string().min(1).optional(),
+      workspaceId: z.string().min(1).optional(),
     });
     const { userId, workspaceId } = querySchema.parse((req as AuthenticatedRequest & { query: unknown }).query);
     const targetUserId = userId ?? req.auth!.userId;

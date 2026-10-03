@@ -20,7 +20,7 @@ const createSchema = z.object({ amount: money, currencyCode: currency, category:
 const reverseSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
 const participant = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("person"), personId: z.string().uuid() }).strict(),
-  z.object({ kind: z.literal("workspace"), workspaceId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("workspace"), workspaceId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("client"), clientId: z.string().uuid() }).strict(),
 ]);
 const allocation = z.discriminatedUnion("mode", [

@@ -38,7 +38,7 @@ const customerSnapshotSchema = z.object({
 });
 
 const operationalInvoiceSchema = z.object({
-  workspace_id: z.string().uuid().nullable().optional(),
+  workspace_id: z.string().min(1).nullable().optional(),
   invoice_number: z.string().min(1).max(120),
   type: invoiceTypeSchema.default("outgoing"),
   supplier_id: z.string().uuid().nullable().optional(),
@@ -89,7 +89,7 @@ const clientContactSchema = z.object({
 });
 
 const operationalClientSchema = z.object({
-  workspace_id: z.string().uuid().nullable().optional(),
+  workspace_id: z.string().min(1).nullable().optional(),
   kind: clientKindSchema.default("professional"),
   name: z.string().min(1).max(160),
   siren: z.string().max(32).nullable().optional(),
@@ -458,7 +458,7 @@ operationalBillingRouter.get("/admin/ops/clients", async (req: AuthenticatedRequ
     if (!requireAdmin(req, res)) return;
     const querySchema = z.object({
       active_only: z.coerce.boolean().optional().default(false),
-      workspace_id: z.string().uuid().nullable().optional(),
+      workspace_id: z.string().min(1).nullable().optional(),
     });
     const { active_only, workspace_id } = querySchema.parse((req as AuthenticatedRequest & { query: unknown }).query);
 
