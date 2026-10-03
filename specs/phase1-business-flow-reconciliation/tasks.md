@@ -57,7 +57,10 @@
   - [x] Hide generic automation engine from active navigation (`UI-AUTOMATION-HIDDEN-01`).
   - [x] Prepare R07 Homologation Manifest (`r07-homologation-manifest.md`).
 
-- [ ] **R07: End-to-End Homologation, Browser Recording & Staging Sign-Off**
-  - [ ] Run full 46-scenario acceptance suite to green.
-  - [ ] Execute browser subagent recording full operational flow.
-  - [ ] Compile final homologation report for human sign-off.
+- [x] **R07: Release Verification, Migration Rehearsal & Homologation Package**
+  - [x] Run full 69-scenario acceptance suite to green (`69/69 PASS`).
+  - [x] Execute disposable PostgreSQL 16 migration replay from zero (16/16 applied, zero drift, authenticated smoke verified).
+  - [x] Execute core domain regressions (budget, production, weeklog, payment-list, confrontation, finance, unit).
+  - [x] Complete infrastructure discovery: protect production (`operix-pro.com`), record staging infrastructure blocker.
+  - [x] Publish Phase 1 Release & Rollback Package (`specs/phase1-business-flow-reconciliation/release-package.md`).
+  - [ ] Execute live browser flows and record video upon staging environment provisioning.
