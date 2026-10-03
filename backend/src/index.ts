@@ -58,7 +58,7 @@ app.get("/api/health", async (_req: Request, res: Response) => {
   await prisma.$queryRaw`SELECT 1`;
   res.json({
     status: "ok",
-    service: "qw-nexus-api",
+    service: "operix-api",
   });
 });
 
