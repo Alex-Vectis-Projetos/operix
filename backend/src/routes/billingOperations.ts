@@ -11,6 +11,9 @@ import { isEmailConfigured, sendEmail } from "../lib/email/resend.js";
 
 export const operationalBillingRouter = Router();
 
+operationalBillingRouter.use(requireAuth);
+operationalBillingRouter.use(resolveRequestContext);
+
 const invoiceStatusSchema = z.enum(["draft", "pending", "partial", "paid", "overdue", "cancelled"]);
 const invoiceTypeSchema = z.enum(["incoming", "outgoing"]);
 
@@ -118,7 +121,15 @@ const clientAttachmentSchema = z.object({
 });
 
 function requireAdmin(req: AuthenticatedRequest, res: Response) {
-  if (req.auth?.role !== "admin") {
+  const ctx = req.ctx;
+  const isInternalManager =
+    ctx?.platformRole === "platform_admin" ||
+    ctx?.membershipRole === "owner" ||
+    ctx?.membershipRole === "admin" ||
+    req.auth?.role === "admin" ||
+    req.auth?.role === "owner";
+
+  if (!isInternalManager) {
     res.status(403).json({ message: "Forbidden." });
     return false;
   }
@@ -461,13 +472,14 @@ operationalBillingRouter.get("/admin/ops/clients", async (req: AuthenticatedRequ
       workspace_id: z.string().min(1).nullable().optional(),
     });
     const { active_only, workspace_id } = querySchema.parse((req as AuthenticatedRequest & { query: unknown }).query);
+    const effectiveWorkspaceId = workspace_id || req.ctx?.activeWorkspaceId || null;
 
-    await lazyAssignDisplayIdsToExistingClients(workspace_id ?? null);
+    await lazyAssignDisplayIdsToExistingClients(effectiveWorkspaceId ?? null);
 
     const clients = await prisma.billingClient.findMany({
       where: {
         ...(active_only ? { isActive: true } : {}),
-        ...(workspace_id ? { workspaceId: workspace_id } : {}),
+        ...(effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : {}),
       },
       orderBy: [
         { customerDisplayNum: { sort: "asc", nulls: "last" } },
@@ -838,8 +850,13 @@ operationalBillingRouter.get("/admin/ops/suppliers", async (req: AuthenticatedRe
   try {
     if (!requireAdmin(req, res)) return;
 
+    const workspaceId = req.ctx?.activeWorkspaceId;
+
     const suppliers = await prisma.billingSupplier.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        ...(workspaceId ? { workspaceId } : {}),
+      },
       orderBy: { name: "asc" },
       take: 500,
       select: {
@@ -860,8 +877,13 @@ operationalBillingRouter.get("/admin/ops/invoices", async (req: AuthenticatedReq
   try {
     if (!requireAdmin(req, res)) return;
 
+    const workspaceId = req.ctx?.activeWorkspaceId;
+
     const invoices = await prisma.billingInvoice.findMany({
-      where: { deletedAt: null },
+      where: {
+        deletedAt: null,
+        ...(workspaceId ? { workspaceId } : {}),
+      },
       orderBy: [{ createdAt: "desc" }, { issueDate: "desc" }],
       take: 500,
     });
