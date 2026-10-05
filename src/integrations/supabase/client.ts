@@ -235,6 +235,11 @@ function getOrCreateClient(): any {
 // Instantiates only if a method/property is accessed at runtime.
 export const supabase: any = new Proxy({}, {
   get(_target, prop) {
+    if (typeof prop === "symbol" || prop === "then" || prop === "$$typeof" || prop === "toJSON") {
+      return undefined;
+    }
+    const stack = new Error().stack;
+    console.log("[SUPABASE] getOrCreateClient called for prop:", String(prop), stack);
     const client = getOrCreateClient();
     const val = (client as any)[prop];
     return typeof val === "function" ? val.bind(client) : val;
