@@ -12,7 +12,7 @@ import { useNavigate } from "react-router-dom";
 /**
  * RevenueChart — Canonical Dashboard Financial Overview.
  *
- * Backed strictly by PostgreSQL /api/finance-v2/summary authority.
+ * Backed strictly by PostgreSQL /api/finance/v2/summary authority.
  * Invariants:
  * - Zero Supabase queries
  * - Zero unbacked client-side mathematical assumptions
@@ -145,7 +145,7 @@ function RevenueChartContent({ onNavigate }: { onNavigate: () => void }) {
 
       <div className="pt-2 border-t border-border/40 flex items-center justify-between text-xs text-muted-foreground">
         <span>Obrigações liquidadas: {formatFinanceMoney(primary.settledObligationPayments, primary.currencyCode)}</span>
-        <span className="text-[10px] opacity-75">Fonte: Express /api/finance-v2/summary</span>
+        <span className="text-[10px] opacity-75">Fonte: Express /api/finance/v2/summary</span>
       </div>
     </div>
   );
