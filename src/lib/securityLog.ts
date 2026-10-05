@@ -69,8 +69,11 @@ export async function logSecurityEvent(p: SecurityEventPayload): Promise<void> {
     const isDirectIpDevBuild = /\/\/72\.62\.27\.129:1010\b/.test(
       typeof window !== "undefined" ? window.location.origin : "",
     ) || /72\.62\.27\.129:4010\/api/.test(apiBase);
-    if (import.meta.env.DEV || isDirectIpDevBuild) {
-      console.debug("[securityLog] skipped (DEV non-Supabase build)", p);
+    const hasSupabase = Boolean(
+      (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
+    );
+    if (!hasSupabase || import.meta.env.DEV || isDirectIpDevBuild) {
+      console.debug("[securityLog] skipped (non-Supabase or standalone build)", p);
       return;
     }
     const ip = await resolveIp();

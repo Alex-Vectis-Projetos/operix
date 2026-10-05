@@ -172,8 +172,11 @@ export function start() {
   if (booted || typeof window === "undefined") return;
   booted = true;
   try {
+    const hasSupabase = Boolean(
+      (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
+    );
     const g = globalThis as any;
-    if (!g.__SUPABASE_CLIENT__) {
+    if (!hasSupabase || !g.__SUPABASE_CLIENT__) {
       return;
     }
     const rt: any = (supabase as any).realtime;

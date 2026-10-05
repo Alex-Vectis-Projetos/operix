@@ -211,16 +211,13 @@ function getOrCreateClient(): any {
   if (g.__SUPABASE_CLIENT__) {
     return g.__SUPABASE_CLIENT__;
   }
-  console.log("[SUPABASE] createClient (singleton init)");
   const shouldBlock = !SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY || isDevOriginBlockedByCors();
   if (shouldBlock) {
-    console.debug(
-      "[SUPABASE] Standalone backend or dev origin detected — installing silent no-op facade + fetch blocker to avoid CORS errors. Use backend API routes for persistence.",
-    );
     installSupabaseFetchBlockerOnce();
     g.__SUPABASE_CLIENT__ = noopSupabaseFacade();
     return g.__SUPABASE_CLIENT__;
   }
+  console.log("[SUPABASE] createClient (singleton init)");
   g.__SUPABASE_CLIENT__ = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     auth: {
       storage: localStorage,
@@ -238,8 +235,6 @@ export const supabase: any = new Proxy({}, {
     if (typeof prop === "symbol" || prop === "then" || prop === "$$typeof" || prop === "toJSON") {
       return undefined;
     }
-    const stack = new Error().stack;
-    console.log("[SUPABASE] getOrCreateClient called for prop:", String(prop), stack);
     const client = getOrCreateClient();
     const val = (client as any)[prop];
     return typeof val === "function" ? val.bind(client) : val;

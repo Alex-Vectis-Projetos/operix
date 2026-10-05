@@ -67,7 +67,10 @@ export async function registerCurrentDevice(workspaceId?: string | null) {
     const isDirectIpDevBuild = /\/\/72\.62\.27\.129:1010\b/.test(
       typeof window !== "undefined" ? window.location.origin : "",
     ) || /72\.62\.27\.129:4010\/api/.test(apiBase);
-    if (import.meta.env.DEV || isDirectIpDevBuild) {
+    const hasSupabase = Boolean(
+      (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
+    );
+    if (!hasSupabase || import.meta.env.DEV || isDirectIpDevBuild) {
       return;
     }
     const { browser, os, deviceType } = parseUA();

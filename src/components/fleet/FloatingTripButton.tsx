@@ -8,6 +8,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 import { registerCheckpoint, finalizeTripWithCurrentGps } from "@/lib/fleet/tripActions";
 
 const POS_KEY = "fleet_floating_pos_v1";
@@ -81,6 +82,10 @@ export function FloatingTripButton() {
     enabled: !!user,
     refetchInterval: 30_000,
     queryFn: async () => {
+      const hasSupabase = Boolean(
+        (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
+      );
+      if (!hasSupabase) return null;
       const { data } = await supabase
         .from("fleet_trips")
         .select("id, vehicle_id, driver_id, date, km_start")
