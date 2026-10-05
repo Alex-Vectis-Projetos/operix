@@ -51,7 +51,7 @@ export function useCountryDocumentRequirements(country?: string, includeInactive
   });
 
   const update = useMutation({
-    mutationFn: ({ id, ...input }: { id: string; document_name?: string; sort_order?: number; active?: boolean }) =>
+    mutationFn: ({ id, ...input }: { id: string; document_name?: string; applies_to?: "both" | "technician" | "provider_operational"; sort_order?: number; active?: boolean }) =>
       apiRequest<CountryDocumentRequirement>(`/country-document-requirements/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -65,7 +65,22 @@ export function useCountryDocumentRequirements(country?: string, includeInactive
     onError: (err) => toast({ title: "Erro ao atualizar", description: String((err as any)?.message ?? err), variant: "destructive" }),
   });
 
-  return { ...query, requirements: query.data ?? [], create, update };
+  const seedDefaults = useMutation({
+    mutationFn: (country: string) =>
+      apiRequest<CountryDocumentRequirement[]>("/country-document-requirements/seed-defaults", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ country }),
+        timeoutMs: 15000,
+      }),
+    onSuccess: () => {
+      invalidate();
+      toast({ title: "Modelo padrão de documentos carregado com sucesso." });
+    },
+    onError: (err) => toast({ title: "Erro ao carregar modelo padrão", description: String((err as any)?.message ?? err), variant: "destructive" }),
+  });
+
+  return { ...query, requirements: query.data ?? [], create, update, seedDefaults };
 }
 
 export function useConfiguredCountries() {

@@ -56,6 +56,111 @@ countryDocumentRequirementsRouter.get("/countries", requireAuth, async (req: Aut
   return res.json(rows.map((r) => r.country));
 });
 
+const DEFAULT_COUNTRY_TEMPLATES: Record<string, Array<{ name: string; appliesTo: "both" | "technician" | "provider_operational" }>> = {
+  "Portugal": [
+    { name: "Documento de Identificação (CC / Passaporte / Título de Residência)", appliesTo: "both" },
+    { name: "Comprovativo de Início de Atividade / Certidão de Empresa", appliesTo: "both" },
+    { name: "Seguro de Responsabilidade Civil / Acidentes de Trabalho", appliesTo: "both" },
+    { name: "Comprovativo de Morada / Domicílio Fiscal", appliesTo: "both" },
+    { name: "Certificação Técnica PDR / Automóvel", appliesTo: "technician" },
+    { name: "Carta de Condução", appliesTo: "both" },
+  ],
+  "Bélgica": [
+    { name: "Documento de Identidade Oficial / Passaporte", appliesTo: "both" },
+    { name: "Declaração Limosa / Documento A1 (Destacamento)", appliesTo: "both" },
+    { name: "Registo Empresarial / Número de IVA (BCE / KBO)", appliesTo: "both" },
+    { name: "Seguro de Responsabilidade Civil Profissional", appliesTo: "both" },
+    { name: "Certificação Técnica PDR", appliesTo: "technician" },
+    { name: "Carta de Condução", appliesTo: "both" },
+  ],
+  "Espanha": [
+    { name: "Documento de Identidade (DNI / NIE / Passaporte)", appliesTo: "both" },
+    { name: "Certificado de Alta no RETA / IAE / CIF", appliesTo: "both" },
+    { name: "Seguro de Responsabilidade Civil", appliesTo: "both" },
+    { name: "Certificado de Estar al Corriente con la Seguridad Social e Hacienda", appliesTo: "both" },
+    { name: "Certificação Técnica PDR / Automóvel", appliesTo: "technician" },
+    { name: "Carta de Condução", appliesTo: "both" },
+  ],
+  "França": [
+    { name: "Pièce d'Identité / Titre de Séjour / Passeport", appliesTo: "both" },
+    { name: "Extrait Kbis / Attestation URSSAF / SIRET", appliesTo: "both" },
+    { name: "Assurance Responsabilité Civile Professionnelle (RC Pro)", appliesTo: "both" },
+    { name: "Attestation A1 (si détachement européen)", appliesTo: "both" },
+    { name: "Certificação Técnica PDR", appliesTo: "technician" },
+    { name: "Permis de Conduire", appliesTo: "both" },
+  ],
+  "Alemanha": [
+    { name: "Personalausweis / Reisepass (Identificação Oficial)", appliesTo: "both" },
+    { name: "Gewerbeanmeldung (Registo de Atividade Comercial)", appliesTo: "both" },
+    { name: "Betriebshaftpflichtversicherung (Seguro de Responsabilidade)", appliesTo: "both" },
+    { name: "Freistellungsbescheinigung (Certificado Fiscal)", appliesTo: "both" },
+    { name: "Certificação Técnica PDR", appliesTo: "technician" },
+    { name: "Führerschein (Carta de Condução)", appliesTo: "both" },
+  ],
+  "Brasil": [
+    { name: "Documento de Identidade Oficial (RG / CNH) e CPF", appliesTo: "both" },
+    { name: "Comprovante de CNPJ / MEI / Contrato Social", appliesTo: "both" },
+    { name: "Comprovante de Residência Atualizado", appliesTo: "both" },
+    { name: "Certificado de Formação / Qualificação Técnica PDR", appliesTo: "technician" },
+    { name: "Carteira Nacional de Habilitação (CNH)", appliesTo: "both" },
+  ],
+  "default": [
+    { name: "Documento Oficial de Identificação / Passaporte", appliesTo: "both" },
+    { name: "Comprovativo de Registo Fiscal e Empresarial", appliesTo: "both" },
+    { name: "Seguro de Responsabilidade Civil Profissional", appliesTo: "both" },
+    { name: "Comprovativo de Morada / Domicílio", appliesTo: "both" },
+    { name: "Certificação Técnica / Qualificação PDR", appliesTo: "technician" },
+    { name: "Carta / Licença de Condução", appliesTo: "both" },
+  ],
+};
+
+// POST /country-document-requirements/seed-defaults — popula matriz padrão recomendada para o país
+countryDocumentRequirementsRouter.post("/seed-defaults", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!checkPermission(req, "edit")) {
+    return res.status(403).json({ message: "Você não tem permissão para editar esta configuração." });
+  }
+  const { country } = req.body ?? {};
+  const cName = String(country ?? "").trim();
+  if (!cName) {
+    return res.status(400).json({ message: "country é obrigatório." });
+  }
+
+  const templates = DEFAULT_COUNTRY_TEMPLATES[cName] ?? DEFAULT_COUNTRY_TEMPLATES["default"];
+  const results = [];
+  let order = 1;
+
+  for (const item of templates) {
+    const existing = await prisma.countryDocumentRequirement.findUnique({
+      where: { country_documentName: { country: cName, documentName: item.name } },
+    });
+    if (existing) {
+      if (!existing.active) {
+        const reactivated = await prisma.countryDocumentRequirement.update({
+          where: { id: existing.id },
+          data: { active: true, appliesTo: item.appliesTo, sortOrder: order },
+        });
+        results.push(mapRequirement(reactivated));
+      } else {
+        results.push(mapRequirement(existing));
+      }
+    } else {
+      const created = await prisma.countryDocumentRequirement.create({
+        data: {
+          country: cName,
+          documentName: item.name,
+          appliesTo: item.appliesTo,
+          sortOrder: order,
+          active: true,
+        },
+      });
+      results.push(mapRequirement(created));
+    }
+    order++;
+  }
+
+  return res.status(201).json(results);
+});
+
 // POST /country-document-requirements
 countryDocumentRequirementsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (!checkPermission(req, "edit")) {
