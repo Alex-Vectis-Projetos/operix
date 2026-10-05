@@ -228,23 +228,23 @@ export function FileUploadZone({ onFilesSelected, isProcessing, disabled = false
           <DropdownMenuContent align="end" className="min-w-[180px]">
             <DropdownMenuItem onClick={() => fileInputRef.current?.click()} disabled={isInactive}>
               <FileText className="h-3.5 w-3.5 mr-2" />
-              {t("upload.file") || "Enviar arquivo"}
+              {t("upload.file", "Enviar arquivo")}
             </DropdownMenuItem>
             {canUseCamera ? (
               <Can permission="service_orders.scan_document">
                 <DropdownMenuItem onClick={() => startCamera("photo")} disabled={isInactive}>
                   <Camera className="h-3.5 w-3.5 mr-2" />
-                  {t("upload.photo") || "Tirar foto"}
+                  {t("upload.photo", "Tirar foto")}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => startCamera("scan")} disabled={isInactive}>
                   <ScanLine className="h-3.5 w-3.5 mr-2" />
-                  {t("upload.scan") || "Escanear documento"}
+                  {t("upload.scan", "Escanear documento")}
                 </DropdownMenuItem>
               </Can>
             ) : (
                 <DropdownMenuItem onClick={() => fileInputRef.current?.click()} disabled={isInactive}>
                   <Image className="h-3.5 w-3.5 mr-2" />
-                  {t("upload.photo") || "Escolher foto existente"}
+                  {t("upload.chooseExisting", "Escolher foto existente")}
                 </DropdownMenuItem>
               )}
           </DropdownMenuContent>
@@ -261,11 +261,11 @@ export function FileUploadZone({ onFilesSelected, isProcessing, disabled = false
         <Dialog open={cameraOpen} onOpenChange={(o) => { if (!o) stopCamera(); }}>
           <DialogContent className="max-h-[calc(100svh-1rem)] max-w-lg overflow-y-auto p-0">
             <DialogHeader className="p-4 pb-2">
-              <DialogTitle>{cameraMode === "scan" ? (t("upload.scanMode") || "Scan Document") : (t("upload.photoMode") || "Take Photo")}</DialogTitle>
+              <DialogTitle>{cameraMode === "scan" ? t("upload.scanMode", "Escanear documento") : t("upload.photoMode", "Tirar foto")}</DialogTitle>
               <DialogDescription>
                 {cameraMode === "scan"
-                  ? (t("upload.scanHint") || "Position the document within the frame and capture.")
-                  : (t("upload.photoHint") || "Position the document and take a photo.")}
+                  ? t("upload.scanHint", "Posicione o documento no enquadramento e capture.")
+                  : t("upload.photoHint", "Posicione o documento e tire uma foto.")}
               </DialogDescription>
             </DialogHeader>
             {cameraError ? (
@@ -280,10 +280,10 @@ export function FileUploadZone({ onFilesSelected, isProcessing, disabled = false
                 </div>
                 <div className="grid grid-cols-1 gap-2 p-4 sm:flex sm:items-center sm:justify-between">
                   <Button variant="ghost" size="sm" onClick={retakeCapture}>
-                    <RotateCcw className="h-4 w-4 mr-1" /> {t("upload.retake") || "Retake"}
+                    <RotateCcw className="h-4 w-4 mr-1" /> {t("upload.retake", "Tirar novamente")}
                   </Button>
                   <Button onClick={confirmCapture}>
-                    <Check className="h-4 w-4 mr-1" /> {t("upload.confirm") || "Confirm & Process"}
+                    <Check className="h-4 w-4 mr-1" /> {t("upload.confirm", "Confirmar e processar")}
                   </Button>
                 </div>
               </>
@@ -373,7 +373,7 @@ export function FileUploadZone({ onFilesSelected, isProcessing, disabled = false
                   className="h-8 text-xs gap-1.5"
                   onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
                 >
-                  <FileText className="h-3.5 w-3.5" /> {t("upload.file") || "Upload"}
+                  <FileText className="h-3.5 w-3.5" /> {t("upload.file", "Enviar arquivo")}
                 </Button>
               </Can>
               {canUseCamera ? (
@@ -384,7 +384,7 @@ export function FileUploadZone({ onFilesSelected, isProcessing, disabled = false
                     className="h-8 text-xs gap-1.5"
                     onClick={(e) => { e.stopPropagation(); startCamera("photo"); }}
                   >
-                    <Camera className="h-3.5 w-3.5" /> {t("upload.photo") || "Photo"}
+                    <Camera className="h-3.5 w-3.5" /> {t("upload.photo", "Tirar foto")}
                   </Button>
                   <Button
                     variant="outline"
@@ -392,7 +392,7 @@ export function FileUploadZone({ onFilesSelected, isProcessing, disabled = false
                     className="h-8 text-xs gap-1.5"
                     onClick={(e) => { e.stopPropagation(); startCamera("scan"); }}
                   >
-                    <ScanLine className="h-3.5 w-3.5" /> {t("upload.scan") || "Scan"}
+                    <ScanLine className="h-3.5 w-3.5" /> {t("upload.scan", "Escanear documento")}
                   </Button>
                 </Can>
               ) : (
@@ -402,7 +402,7 @@ export function FileUploadZone({ onFilesSelected, isProcessing, disabled = false
                   className="h-8 text-xs gap-1.5"
                   onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
                 >
-                  <Image className="h-3.5 w-3.5" /> {t("upload.photo") || "Escolher imagem"}
+                  <Image className="h-3.5 w-3.5" /> {t("upload.chooseExisting", "Escolher imagem")}
                 </Button>
               )}
             </div>
