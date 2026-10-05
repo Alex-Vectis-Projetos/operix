@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { Camera, ClipboardCopy, RefreshCw, FileText, RotateCw, Image as ImageIcon, Trash2 } from "lucide-react";
+import { Camera, ClipboardCopy, RefreshCw, FileText, Image as ImageIcon, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useOperationalTimeline } from "@/hooks/useOperationalTimeline";
 import { buildErrorReport, reportToText } from "@/lib/errorReport";
 import { captureScreenshot, loadLastScreenshot, clearLastScreenshot } from "@/lib/screenshotCapture";
 import { getDiagnosticsSnapshot } from "@/lib/runtimeDiagnostics";
-import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
   route: string;
@@ -58,17 +57,6 @@ export function AgentDiagnosticsView({ route, module, online }: Props) {
     setTimeout(() => window.location.reload(), 300);
   }
 
-  async function handleResetRealtime() {
-    try {
-      const rt: any = (supabase as any).realtime;
-      rt?.disconnect?.();
-      setTimeout(() => rt?.connect?.(), 200);
-      toast.success("Realtime reiniciado.");
-    } catch {
-      toast.error("Não foi possível reiniciar o realtime.");
-    }
-  }
-
   function handleClearShot() {
     clearLastScreenshot();
     setShotTick((t) => t + 1);
@@ -93,8 +81,7 @@ export function AgentDiagnosticsView({ route, module, online }: Props) {
       {/* Recovery actions */}
       <section className="space-y-1.5">
         <div className="text-[10px] uppercase tracking-wider text-white/40 px-0.5">Acções de recuperação</div>
-        <div className="grid grid-cols-2 gap-1.5">
-          <ActionBtn icon={RotateCw} label="Reset realtime" onClick={handleResetRealtime} />
+        <div className="grid grid-cols-3 gap-1.5">
           <ActionBtn icon={RefreshCw} label="Recarregar módulo" onClick={handleReloadModule} />
           <ActionBtn icon={Camera} label="Capturar ecrã" onClick={handleCaptureScreen} />
           <ActionBtn icon={ClipboardCopy} label="Copiar relatório" onClick={handleCopyReport} />

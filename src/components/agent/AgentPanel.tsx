@@ -34,11 +34,12 @@ interface Msg {
   actionLabel?: string;
 }
 
-const STORAGE_KEY = "qwork.agent.history.v2";
+const STORAGE_KEY = "operix.agent.history.v1";
+const LEGACY_STORAGE_KEY = "qwork.agent.history.v2";
 
 function loadHistory(): Msg[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
     return raw ? (JSON.parse(raw) as Msg[]).slice(-60) : [];
   } catch { return []; }
 }

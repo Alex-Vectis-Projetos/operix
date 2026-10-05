@@ -1,27 +1,10 @@
 /**
- * useOperationalCopilotBoot — Phase 4 (DEFERRED).
+ * useOperationalCopilotBoot — DEPRECATED / DISABLED (Phase 1 Cleanup).
  *
- * The Copilot snapshot pulls 7 tables of historical data. We arm it only
- * after the dashboard has painted AND the browser is idle. SAFE_BOOT
- * disables it completely. Failures stay contained in TanStack Query.
+ * Global background polling of legacy Supabase tables has been removed.
+ * Copilot operational interaction is handled on-demand via TopBar AIControlCenter
+ * and POST /api/agent/chat.
  */
-import { useEffect, useState } from "react";
-import { useOperationalCopilot } from "./useOperationalCopilot";
-import { bootStage, scheduleDeferredBoot } from "@/lib/bootStage";
-
 export function useOperationalCopilotBoot() {
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    if (bootStage.isSafeBoot()) {
-      bootStage.log("OperationalCopilot", "skipped (SAFE_BOOT)");
-      return;
-    }
-    return scheduleDeferredBoot("OperationalCopilot", () => {
-      setReady(true);
-    }, { delayMs: 10000, idleTimeoutMs: 12000 });
-  }, []);
-
-  // Query stays disabled until `ready` flips post-paint/idle.
-  useOperationalCopilot({ enabled: ready });
+  // No-op. Zero background queries executed.
 }

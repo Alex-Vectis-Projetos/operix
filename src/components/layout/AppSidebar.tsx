@@ -31,6 +31,7 @@ type NavItem = {
   action: string;
   end?: boolean;
   enabled?: boolean; // extra gating (e.g. platform owner)
+  badge?: string;
 };
 
 type NavGroup = {
@@ -71,7 +72,7 @@ export const AppSidebar = memo(function AppSidebar() {
     {
       // Cliente — flush entre Painel e Operações, com espaçamento visual via className pt-4 abaixo.
       items: [
-        { title: "Cliente", url: "/clients", icon: UserPlus, module: "accounting", action: "view" },
+        { title: t("nav.clients", "Clientes"), url: "/clients", icon: UserPlus, module: "accounting", action: "view" },
       ],
     },
     {
@@ -103,7 +104,7 @@ export const AppSidebar = memo(function AppSidebar() {
       label: t("nav.group.intelligence", "Inteligência"),
       items: [
         { title: t("nav.automations", "Automações"), url: "/automations", icon: Zap, module: "settings", action: "edit" },
-        { title: t("nav.ai", "QWork AI"), url: "/ai", icon: Brain, module: "dashboard", action: "view" },
+        { title: "Operix AI", url: "/ai", icon: Brain, module: "dashboard", action: "view", badge: "Em breve" },
       ],
     },
     {
@@ -199,7 +200,16 @@ export const AppSidebar = memo(function AppSidebar() {
                         activeClassName="bg-sidebar-accent text-primary font-medium"
                       >
                         <item.icon className="h-4 w-4 shrink-0" />
-                        {!collapsed && <span className="text-[13px] md:text-[13px]">{item.title}</span>}
+                        {!collapsed && (
+                          <div className="flex items-center justify-between flex-1 min-w-0">
+                            <span className="text-[13px] md:text-[13px] truncate">{item.title}</span>
+                            {item.badge && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-muted/80 text-muted-foreground border border-border/50 font-medium shrink-0 ml-1">
+                                {item.badge}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </NavLink>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

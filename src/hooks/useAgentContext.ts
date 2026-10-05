@@ -22,7 +22,7 @@ const ROUTE_LABELS: Record<string, { module: string; label: string }> = {
   "/documents": { module: "documents", label: "Documentos" },
   "/users": { module: "users", label: "Usuários" },
   "/settings": { module: "settings", label: "Configurações" },
-  "/ai": { module: "ai", label: "QWork AI" },
+  "/ai": { module: "ai", label: "Operix AI" },
   "/automations": { module: "automations", label: "Automações" },
   "/audit": { module: "audit", label: "Auditoria" },
   "/billing": { module: "billing", label: "Faturamento" },
