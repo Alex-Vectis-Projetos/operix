@@ -1,7 +1,6 @@
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Loader2, ShieldCheck, ExternalLink } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useConsent } from "@/hooks/useConsent";
 import { CONSENT_ITEMS, TERMS_VERSION, ConsentKey } from "@/config/legal";
@@ -63,28 +62,12 @@ export function ConsentGate({ children }: { children: ReactNode }) {
     if (!allChecked || !user) return;
     setSubmitting(true);
     try {
-      let ip: string | null = null;
-      try {
-        const r = await fetch("https://api.ipify.org?format=json");
-        if (r.ok) ip = (await r.json())?.ip ?? null;
-      } catch { /* IP capture best-effort */ }
-
-      const payload = {
-        user_id: user.id,
-        terms_version: TERMS_VERSION,
-        language: navigator.language || null,
-        ip_address: ip,
-        user_agent: navigator.userAgent,
-        status: "accepted",
-        ...accepted,
-      };
-
-      const { error } = await supabase.from("user_consents" as any).insert(payload as any);
-      if (error) throw error;
+      const consentKey = `qw.consent.accepted_${user.id}_${TERMS_VERSION}`;
+      localStorage.setItem(consentKey, "true");
       toast.success("Consentimentos registrados.");
       await refetch();
     } catch (err: any) {
-      console.error("[ConsentGate] insert error:", err);
+      console.error("[ConsentGate] error:", err);
       toast.error("Não foi possível registrar os consentimentos. Tente novamente.");
     } finally {
       setSubmitting(false);
