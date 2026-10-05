@@ -397,6 +397,7 @@ export async function updateBudgetRevision(
 export interface ApproveRevisionOptions {
   notes?: string;
   dueAt?: Date | string | null;
+  operationalSiteKey?: string | null;
 }
 
 /**
@@ -476,9 +477,24 @@ export async function approveBudgetRevision(
         throw new UnprocessableEntityError("Não é possível aprovar orçamento para ordem de produção já entregue.");
       }
 
-      // Re-aprovação com OP aberta: Aplica estritamente a WHITELIST de campos permitidos
       const vehicleSnap = (revision.vehicleSnapshot as any) || {};
       const clientSnap = (revision.clientSnapshot as any) || {};
+      const dossierSnap = (revision.dossierSnapshot as any) || {};
+      const canonicalSiteKey =
+        options?.operationalSiteKey ||
+        (budget as any).siteKey ||
+        (budget as any).operationalSiteKey ||
+        dossierSnap.siteKey ||
+        dossierSnap.operationalSiteKey ||
+        clientSnap.siteKey ||
+        clientSnap.operationalSiteKey ||
+        vehicleSnap.siteKey ||
+        vehicleSnap.operationalSiteKey ||
+        null;
+      const canonicalCurrency =
+        revision.currencyCode ||
+        (budget as any).currencyCode ||
+        "EUR";
 
       resolvedPO = await tx.productionOrder.update({
         where: { id: existingPO.id },
@@ -494,6 +510,8 @@ export async function approveBudgetRevision(
           clientName: clientSnap.name || existingPO.clientName,
           platform: `Orçamento ${budget.code} · Total ${revision.finalTotal} EUR`,
           dueAt: options?.dueAt ? new Date(options.dueAt) : existingPO.dueAt,
+          operationalSiteKey: canonicalSiteKey || existingPO.operationalSiteKey,
+          currencyCode: canonicalCurrency || existingPO.currencyCode,
           // Preservados intocados: status, startedAt, finishedAt, deliveredAt, technicianUserId, technicianName, priority
         },
       });
@@ -501,6 +519,22 @@ export async function approveBudgetRevision(
       // Primeira aprovação: Cria uma única ProductionOrder vinculada
       const vehicleSnap = (revision.vehicleSnapshot as any) || {};
       const clientSnap = (revision.clientSnapshot as any) || {};
+      const dossierSnap = (revision.dossierSnapshot as any) || {};
+      const canonicalSiteKey =
+        options?.operationalSiteKey ||
+        (budget as any).siteKey ||
+        (budget as any).operationalSiteKey ||
+        dossierSnap.siteKey ||
+        dossierSnap.operationalSiteKey ||
+        clientSnap.siteKey ||
+        clientSnap.operationalSiteKey ||
+        vehicleSnap.siteKey ||
+        vehicleSnap.operationalSiteKey ||
+        null;
+      const canonicalCurrency =
+        revision.currencyCode ||
+        (budget as any).currencyCode ||
+        "EUR";
       const poCode = `PO-${Date.now().toString(36).toUpperCase()}`;
 
       resolvedPO = await tx.productionOrder.create({
@@ -523,6 +557,8 @@ export async function approveBudgetRevision(
           notes: options?.notes || `Orçamento ${budget.code} (Rev ${revision.revisionNumber})`,
           createdBy: actorUserId,
           dueAt: options?.dueAt ? new Date(options.dueAt) : null,
+          operationalSiteKey: canonicalSiteKey,
+          currencyCode: canonicalCurrency,
         },
       });
     }

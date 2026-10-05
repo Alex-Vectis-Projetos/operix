@@ -859,6 +859,9 @@ productionOrdersRouter.post("/", async (req: Request, res: Response, next: NextF
         status: b.status ?? "new_vehicle",
         commercialStatus: b.commercial_status ?? b.commercialStatus ?? null,
         serviceOrderId: b.service_order_id ?? b.serviceOrderId ?? null,
+        operationalSiteKey: b.operational_site_key ?? b.operationalSiteKey ?? null,
+        currencyCode: b.currency_code ?? b.currencyCode ?? "EUR",
+        performedServices: b.performed_services ?? b.performedServices ?? null,
         budgetId,
         budgetRevisionId,
         dueAt: parseDate(b.due_at ?? b.dueAt),
@@ -932,6 +935,15 @@ productionOrdersRouter.patch("/:id", async (req: Request, res: Response, next: N
     }
     if (b.service_order_id !== undefined || b.serviceOrderId !== undefined) {
       data.serviceOrderId = b.service_order_id ?? b.serviceOrderId ?? null;
+    }
+    if (b.operational_site_key !== undefined || b.operationalSiteKey !== undefined) {
+      data.operationalSiteKey = b.operational_site_key ?? b.operationalSiteKey ?? null;
+    }
+    if (b.currency_code !== undefined || b.currencyCode !== undefined) {
+      data.currencyCode = b.currency_code ?? b.currencyCode ?? null;
+    }
+    if (b.performed_services !== undefined || b.performedServices !== undefined) {
+      data.performedServices = b.performed_services ?? b.performedServices ?? null;
     }
     if (b.due_at !== undefined || b.dueAt !== undefined) {
       data.dueAt = parseDate(b.due_at ?? b.dueAt);
