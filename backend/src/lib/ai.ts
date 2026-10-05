@@ -6,7 +6,11 @@ interface AIConfig {
   defaultModel: string;
 }
 
-function getAIConfigs(): AIConfig[] {
+export function hasAIProvider(): boolean {
+  return Boolean(env.GEMINI_API_KEY || env.OPENAI_API_KEY);
+}
+
+export function getAIConfigsSafe(): AIConfig[] {
   const configs: AIConfig[] = [];
   if (env.GEMINI_API_KEY) {
     configs.push({
@@ -22,10 +26,45 @@ function getAIConfigs(): AIConfig[] {
       defaultModel: "gpt-4o-mini",
     });
   }
+  return configs;
+}
+
+function getAIConfigs(): AIConfig[] {
+  const configs = getAIConfigsSafe();
   if (configs.length === 0) {
     throw new Error("No AI provider configured. Set GEMINI_API_KEY or OPENAI_API_KEY.");
   }
   return configs;
+}
+
+export async function fetchAIStream(payload: Record<string, unknown>, signal?: AbortSignal): Promise<globalThis.Response | null> {
+  const configs = getAIConfigsSafe();
+  if (configs.length === 0) return null;
+
+  for (let i = 0; i < configs.length; i++) {
+    const config = configs[i];
+    try {
+      const res = await fetch(config.endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: config.defaultModel, stream: true, ...payload }),
+        signal,
+      });
+
+      if (res.ok && res.body) {
+        return res;
+      }
+      console.warn(`[ai-stream] Provider ${config.endpoint} returned ${res.status}`);
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") throw err;
+      console.warn(`[ai-stream] Provider ${config.endpoint} error:`, err);
+    }
+  }
+
+  return null;
 }
 
 function hasToolCalls(data: unknown): boolean {

@@ -83,7 +83,7 @@ function analyzeReport(
 
 export function reportToText(r: ErrorReport): string {
   return [
-    `QWork Agent · Relatório técnico`,
+    `Operix Copilot · Relatório técnico`,
     `─────────────────────────────`,
     `ID: ${r.id}`,
     `Hora: ${r.createdAt}`,

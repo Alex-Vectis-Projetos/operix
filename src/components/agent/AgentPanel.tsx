@@ -89,7 +89,7 @@ export default function AgentPanel({ onClose }: Props) {
   // Welcome
   useEffect(() => {
     if (messages.length === 0) {
-      pushAgent(`Olá. QWork Agent operacional — a observar "${ctx.label}".`);
+      pushAgent(`Olá. Operix Copilot operacional — a observar "${ctx.label}".`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -270,7 +270,7 @@ export default function AgentPanel({ onClose }: Props) {
       />
     <div
       role="dialog"
-      aria-label="QWork Agent"
+      aria-label="Operix Copilot"
       className={cn(
         "fixed z-[1001] flex flex-col overflow-hidden text-white isolate",
         "border border-[hsl(195_100%_60%/0.18)]",
@@ -320,7 +320,7 @@ export default function AgentPanel({ onClose }: Props) {
               }}
             />
             <div className="min-w-0">
-              <div className="text-sm font-semibold tracking-wide leading-tight">QW · CONSOLE</div>
+              <div className="text-sm font-semibold tracking-wide leading-tight">OPERIX · COPILOT</div>
               <div className="text-[10px] uppercase tracking-[0.18em] text-[hsl(195_100%_75%)] truncate">
                 {aiSnap.visual.label} · {ctx.label}
               </div>

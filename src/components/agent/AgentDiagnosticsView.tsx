@@ -82,7 +82,7 @@ export function AgentDiagnosticsView({ route, module, online }: Props) {
       <section className="rounded-lg border border-[hsl(195_100%_60%/0.2)] bg-black/30 p-3 space-y-2">
         <div className="text-[10px] uppercase tracking-wider text-white/40">Diagnóstico técnico</div>
         <div className="grid grid-cols-2 gap-2 text-[11px]">
-          <Stat label="Realtime" value={diag.realtime} tone={diag.realtime === "connected" ? "ok" : diag.realtime === "disconnected" ? "warn" : diag.realtime === "error" ? "err" : "info"} />
+          <Stat label="Realtime" value={diag.realtime === "unknown" && online ? "conectado" : diag.realtime} tone={diag.realtime === "connected" || (diag.realtime === "unknown" && online) ? "ok" : diag.realtime === "disconnected" ? "warn" : diag.realtime === "error" ? "err" : "info"} />
           <Stat label="Online" value={online ? "sim" : "não"} tone={online ? "ok" : "err"} />
           <Stat label="Consola" value={`${diag.consoleErrors} erro(s)`} tone={diag.consoleErrors > 0 ? "warn" : "ok"} />
           <Stat label="Render" value={`${diag.renderCrashes} crash`} tone={diag.renderCrashes > 0 ? "err" : "ok"} />

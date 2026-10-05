@@ -16,8 +16,9 @@ import type { OperationalSignal } from "@/hooks/useOperationalSignals";
 import type { AgentEvent } from "./agentEventBus";
 import { getDiagnosticsSnapshot } from "./runtimeDiagnostics";
 import { getAccessToken } from "./authSession";
+import { API_BASE_URL } from "./api";
 
-const CHAT_URL = `${(import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_SUPABASE_URL}/functions/v1/agent-chat`;
+const CHAT_URL = `${API_BASE_URL}/agent/chat`;
 
 const MIN_INTERVAL_MS = 1500; // rate limit local
 let lastCallAt = 0;
