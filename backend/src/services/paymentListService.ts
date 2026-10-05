@@ -437,6 +437,12 @@ export async function transitionPaymentList(
         where: { paymentListId: list.id, workspaceId, status: "provisional" },
         data: { status: "reserved" },
       });
+      if (list.recognizedTotal.isZero() && !list.sourceDocumentTotal.isZero()) {
+        await tx.paymentList.update({
+          where: { id: list.id },
+          data: { recognizedTotal: list.sourceDocumentTotal },
+        });
+      }
     }
     if (toStatus === "pending") {
       const currentRun = await tx.paymentListConfrontationRun.findFirst({
@@ -536,7 +542,11 @@ export async function createInvoiceForPaymentList(
 
     const issueDate = payload?.issueDate ? new Date(payload.issueDate) : list.issueDate ?? new Date();
     const dueDate = payload?.dueDate ? new Date(payload.dueDate) : list.dueDate ?? null;
-    const recognizedAmount = Number(list.recognizedTotal);
+    const effectiveRecognized =
+      list.recognizedTotal.isZero() && !list.sourceDocumentTotal.isZero()
+        ? list.sourceDocumentTotal
+        : list.recognizedTotal;
+    const recognizedAmount = Number(effectiveRecognized);
 
     const billingClient = await tx.billingClient.findFirst({
       where: { id: list.clientId, workspaceId },
@@ -589,6 +599,7 @@ export async function createInvoiceForPaymentList(
       data: {
         status: "pending",
         invoiceId: invoice.id,
+        recognizedTotal: effectiveRecognized,
         issueDate,
         dueDate,
       },
