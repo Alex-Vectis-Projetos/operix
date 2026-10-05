@@ -14,7 +14,7 @@
  * "Global", "Próprio", "Convidado" badges. No descriptive footers.
  */
 import { useMemo, type ReactNode } from "react";
-import { Check, ChevronDown, Crown, Loader2 } from "lucide-react";
+import { Check, ChevronDown, Crown, Loader2, ShieldCheck } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useTenant } from "@/contexts/TenantContext";
