@@ -102,9 +102,11 @@ export default function AgentPanel({ onClose }: Props) {
     if (!fresh.length) return;
     fresh.forEach((s) => announced.current.add(s.id));
     fresh.forEach((s) => {
+      const titleText = s.detail ? `${s.title} — ${s.detail}` : s.title;
+      if (messages.some((m) => m.text.includes(s.title))) return;
       const sug = suggestions.find((g) => g.id === `sug-${s.id}`);
       pushAgentTyping(
-        s.detail ? `${s.title} — ${s.detail}` : s.title,
+        titleText,
         sug ? { action: sug.action, actionLabel: sug.label } : undefined,
       );
     });
@@ -273,14 +275,14 @@ export default function AgentPanel({ onClose }: Props) {
       aria-label="Operix Copilot"
       className={cn(
         "fixed z-[1001] flex flex-col overflow-hidden text-white isolate",
-        "border border-[hsl(195_100%_60%/0.18)]",
-        "shadow-[0_20px_60px_-20px_hsl(220_90%_5%/0.85),0_0_0_1px_hsl(195_100%_60%/0.1)]",
-        "backdrop-blur-2xl bg-[hsl(220_50%_4%/0.92)]",
+        "border border-[hsl(195_100%_60%/0.25)]",
+        "shadow-[0_20px_60px_-20px_hsl(220_90%_5%/0.95),0_0_0_1px_hsl(195_100%_60%/0.15)]",
+        "backdrop-blur-2xl bg-[hsl(220_50%_4%/0.97)]",
         // Mobile: bottom sheet — full width, rounded top, slides up from bottom
-        "inset-x-0 bottom-0 max-h-[min(88svh,720px)] rounded-t-2xl pb-[env(safe-area-inset-bottom)]",
+        "inset-x-0 bottom-0 h-[85vh] max-h-[720px] rounded-t-2xl pb-[env(safe-area-inset-bottom)]",
         "animate-in slide-in-from-bottom duration-300 ease-out",
         // Desktop: contextual popover anchored under the AI button (top-right)
-        "md:inset-x-auto md:bottom-auto md:right-4 md:top-16 md:w-[380px] md:max-h-[min(70svh,720px)] md:rounded-2xl",
+        "md:inset-x-auto md:bottom-auto md:right-4 md:top-16 md:w-[410px] md:h-[610px] md:max-h-[82vh] md:rounded-2xl",
         "md:animate-in md:fade-in md:zoom-in-95 md:slide-in-from-top-2 md:duration-200",
       )}
       style={{ transformOrigin: `top right` }}
@@ -298,18 +300,9 @@ export default function AgentPanel({ onClose }: Props) {
       />
 
       {/* Header */}
-      <div className={cn("relative px-4 py-3 border-b border-[hsl(195_100%_60%/0.15)] bg-gradient-to-br", headerTint)}>
+      <div className={cn("shrink-0 relative px-4 py-3 border-b border-[hsl(195_100%_60%/0.15)] bg-gradient-to-br", headerTint)}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            {/* state pip — mirrors the live robot identity, no duplicate avatar */}
-            <span
-              aria-hidden
-              className="relative inline-flex h-2.5 w-2.5 shrink-0 rounded-full"
-              style={{
-                background: `hsl(${aiSnap.visual.hue})`,
-                boxShadow: `0 0 10px hsl(${aiSnap.visual.hue} / 0.8)`,
-              }}
-            />
             {/* state pip — mirrors the live robot identity, no duplicate avatar */}
             <span
               aria-hidden
@@ -359,7 +352,7 @@ export default function AgentPanel({ onClose }: Props) {
 
       {/* Signals (chat tab only) */}
       {tab === "chat" && signals.length > 0 && (
-        <div className="relative px-3 py-2 border-b border-[hsl(195_100%_60%/0.1)] space-y-1 bg-black/20">
+        <div className="shrink-0 relative px-3 py-1.5 border-b border-[hsl(195_100%_60%/0.1)] space-y-1 bg-black/20">
           {signals.slice(0, 4).map((s) => {
             const Icon = signalIcon(s.level);
             return (
@@ -387,151 +380,149 @@ export default function AgentPanel({ onClose }: Props) {
       )}
 
       {tab === "chat" && (
-      <>
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          {/* Messages */}
+          <div ref={listRef} className="relative flex-1 overflow-y-auto px-3 py-3 space-y-2 min-h-0">
+            {messages.map((m) => (
+              <div key={m.id} className={cn("max-w-[88%]", m.from === "user" ? "ml-auto" : "")}>
+                <div
+                  className={cn(
+                    "rounded-2xl px-3 py-2 text-sm leading-snug whitespace-pre-wrap",
+                    m.from === "agent"
+                      ? "bg-[hsl(220_50%_10%/0.9)] border border-[hsl(195_100%_60%/0.2)] text-white/90 rounded-bl-sm"
+                      : "bg-[hsl(195_90%_45%)] text-[hsl(220_60%_6%)] rounded-br-sm font-medium",
+                  )}
+                >
+                  {m.typing ? (
+                    <span className="agent-typing inline-flex items-center h-4">
+                      <span /><span /><span />
+                    </span>
+                  ) : (
+                    m.text
+                  )}
+                </div>
+                <div className={cn("text-[9px] text-white/30 mt-0.5 px-1", m.from === "user" ? "text-right" : "")}>
+                  {formatTime(m.at)}
+                </div>
+                {m.action && m.actionLabel && !m.typing && (
+                  <button
+                    onClick={() => runAction(m.action!, m.actionLabel!)}
+                    className="mt-1 inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md border border-[hsl(195_100%_60%/0.35)] text-[hsl(195_100%_75%)] hover:bg-[hsl(195_100%_60%/0.1)] transition"
+                  >
+                    {m.actionLabel}
+                    <ArrowRight className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            ))}
 
-
-      {/* Messages */}
-      <div ref={listRef} className="relative flex-1 overflow-y-auto px-3 py-3 space-y-2 min-h-[160px]">
-        {messages.map((m) => (
-          <div key={m.id} className={cn("max-w-[88%]", m.from === "user" ? "ml-auto" : "")}>
-            <div
-              className={cn(
-                "rounded-2xl px-3 py-2 text-sm leading-snug whitespace-pre-wrap",
-                m.from === "agent"
-                  ? "bg-[hsl(220_50%_10%/0.9)] border border-[hsl(195_100%_60%/0.2)] text-white/90 rounded-bl-sm"
-                  : "bg-[hsl(195_90%_45%)] text-[hsl(220_60%_6%)] rounded-br-sm font-medium",
-              )}
-            >
-              {m.typing ? (
-                <span className="agent-typing inline-flex items-center h-4">
-                  <span /><span /><span />
-                </span>
-              ) : (
-                m.text
-              )}
-            </div>
-            <div className={cn("text-[9px] text-white/30 mt-0.5 px-1", m.from === "user" ? "text-right" : "")}>
-              {formatTime(m.at)}
-            </div>
-            {m.action && m.actionLabel && !m.typing && (
-              <button
-                onClick={() => runAction(m.action!, m.actionLabel!)}
-                className="mt-1 inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md border border-[hsl(195_100%_60%/0.35)] text-[hsl(195_100%_75%)] hover:bg-[hsl(195_100%_60%/0.1)] transition"
-              >
-                {m.actionLabel}
-                <ArrowRight className="h-3 w-3" />
-              </button>
+            {events.length > 0 && (
+              <details className="mt-2 text-[11px] text-white/40">
+                <summary className="cursor-pointer select-none hover:text-white/80">
+                  Stream operacional ({events.length})
+                </summary>
+                <ul className="mt-1 space-y-0.5 pl-2 max-h-40 overflow-y-auto">
+                  {events.slice(-12).reverse().map((e) => (
+                    <li key={e.id} className="truncate">
+                      <span
+                        className={cn(
+                          "inline-block h-1.5 w-1.5 rounded-full mr-1.5 align-middle",
+                          e.level === "error" && "bg-destructive",
+                          e.level === "warn" && "bg-[hsl(38_92%_55%)]",
+                          e.level === "success" && "bg-[hsl(152_60%_45%)]",
+                          e.level === "info" && "bg-[hsl(195_100%_60%)]",
+                        )}
+                      />
+                      {e.title}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
           </div>
-        ))}
 
-        {events.length > 0 && (
-          <details className="mt-2 text-[11px] text-white/40">
-            <summary className="cursor-pointer select-none hover:text-white/80">
-              Stream operacional ({events.length})
-            </summary>
-            <ul className="mt-1 space-y-0.5 pl-2 max-h-40 overflow-y-auto">
-              {events.slice(-12).reverse().map((e) => (
-                <li key={e.id} className="truncate">
-                  <span
+          {/* Suggestions */}
+          {suggestions.length > 0 && (
+            <div className="shrink-0 relative px-3 pt-2 pb-1.5 border-t border-[hsl(195_100%_60%/0.1)] bg-black/30">
+              <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1.5">Sugestões</div>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => runAction(s.action, s.label)}
                     className={cn(
-                      "inline-block h-1.5 w-1.5 rounded-full mr-1.5 align-middle",
-                      e.level === "error" && "bg-destructive",
-                      e.level === "warn" && "bg-[hsl(38_92%_55%)]",
-                      e.level === "success" && "bg-[hsl(152_60%_45%)]",
-                      e.level === "info" && "bg-[hsl(195_100%_60%)]",
+                      "text-[11px] px-2.5 py-1 rounded-full border transition",
+                      s.tone === "error"
+                        ? "border-destructive/50 text-destructive hover:bg-destructive/10"
+                        : s.tone === "warn"
+                          ? "border-[hsl(38_92%_55%/0.5)] text-[hsl(38_92%_70%)] hover:bg-[hsl(38_92%_55%/0.1)]"
+                          : "border-[hsl(195_100%_60%/0.4)] text-[hsl(195_100%_75%)] hover:bg-[hsl(195_100%_60%/0.1)]",
                     )}
-                  />
-                  {e.title}
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </div>
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-      {/* Suggestions */}
-      {suggestions.length > 0 && (
-        <div className="relative px-3 pt-2 pb-1 border-t border-[hsl(195_100%_60%/0.1)] bg-black/30">
-          <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1.5">Sugestões</div>
-          <div className="flex flex-wrap gap-1.5">
-            {suggestions.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => runAction(s.action, s.label)}
-                className={cn(
-                  "text-[11px] px-2.5 py-1 rounded-full border transition",
-                  s.tone === "error"
-                    ? "border-destructive/50 text-destructive hover:bg-destructive/10"
-                    : s.tone === "warn"
-                      ? "border-[hsl(38_92%_55%/0.5)] text-[hsl(38_92%_70%)] hover:bg-[hsl(38_92%_55%/0.1)]"
-                      : "border-[hsl(195_100%_60%/0.4)] text-[hsl(195_100%_75%)] hover:bg-[hsl(195_100%_60%/0.1)]",
-                )}
-              >
-                {s.label}
-              </button>
-            ))}
+          {/* Composer */}
+          <div className="shrink-0 relative p-2 border-t border-[hsl(195_100%_60%/0.15)] bg-black/40 flex items-center gap-1.5">
+            <button
+              type="button"
+              aria-label="Capturar ecrã"
+              onClick={async () => {
+                const d = await captureScreenshot();
+                if (d) {
+                  toast.success("Ecrã capturado localmente.");
+                  setTab("diag");
+                } else {
+                  toast.error("Captura cancelada ou não suportada.");
+                }
+              }}
+              className="h-9 w-9 shrink-0 rounded-md flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition"
+            >
+              <Paperclip className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              aria-label="Ditar"
+              onClick={() => toast("Voz chega na próxima fase", { description: "Reconhecimento por voz será adicionado em breve." })}
+              className="h-9 w-9 shrink-0 rounded-md flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition"
+            >
+              <Mic className="h-4 w-4" />
+            </button>
+            <textarea
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+              }}
+              placeholder={busy ? "A pensar…" : "Fale com o agente…"}
+              disabled={busy}
+              className={cn(
+                "flex-1 resize-none bg-[hsl(220_50%_8%)] border border-[hsl(195_100%_60%/0.2)] rounded-md",
+                "px-3 py-2 text-sm text-white placeholder:text-white/30",
+                "focus:outline-none focus:ring-2 focus:ring-[hsl(195_100%_60%/0.4)] focus:border-[hsl(195_100%_60%/0.5)]",
+                "max-h-24 disabled:opacity-60",
+              )}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || busy}
+              aria-label="Enviar"
+              className={cn(
+                "h-9 w-9 shrink-0 rounded-md flex items-center justify-center",
+                "bg-[hsl(195_100%_55%)] text-[hsl(220_60%_6%)] hover:bg-[hsl(195_100%_60%)]",
+                "disabled:opacity-30 disabled:cursor-not-allowed transition-colors",
+              )}
+            >
+              <Send className="h-4 w-4" />
+            </button>
           </div>
         </div>
-      )}
-
-      {/* Composer */}
-      <div className="relative p-2 border-t border-[hsl(195_100%_60%/0.15)] bg-black/40 flex items-end gap-1.5">
-        <button
-          type="button"
-          aria-label="Capturar ecrã"
-          onClick={async () => {
-            const d = await captureScreenshot();
-            if (d) {
-              toast.success("Ecrã capturado localmente.");
-              setTab("diag");
-            } else {
-              toast.error("Captura cancelada ou não suportada.");
-            }
-          }}
-          className="h-9 w-9 shrink-0 rounded-md flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition"
-        >
-          <Paperclip className="h-4 w-4" />
-        </button>
-
-        <button
-          type="button"
-          aria-label="Ditar"
-          onClick={() => toast("Voz chega na próxima fase", { description: "Reconhecimento por voz será adicionado em breve." })}
-          className="h-9 w-9 shrink-0 rounded-md flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition"
-        >
-          <Mic className="h-4 w-4" />
-        </button>
-        <textarea
-          rows={1}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
-          }}
-          placeholder={busy ? "A pensar…" : "Fale com o agente…"}
-          disabled={busy}
-          className={cn(
-            "flex-1 resize-none bg-[hsl(220_50%_8%)] border border-[hsl(195_100%_60%/0.2)] rounded-md",
-            "px-3 py-2 text-sm text-white placeholder:text-white/30",
-            "focus:outline-none focus:ring-2 focus:ring-[hsl(195_100%_60%/0.4)] focus:border-[hsl(195_100%_60%/0.5)]",
-            "max-h-32 disabled:opacity-60",
-          )}
-        />
-        <button
-          onClick={handleSend}
-          disabled={!input.trim() || busy}
-          aria-label="Enviar"
-          className={cn(
-            "h-9 w-9 shrink-0 rounded-md flex items-center justify-center",
-            "bg-[hsl(195_100%_55%)] text-[hsl(220_60%_6%)] hover:bg-[hsl(195_100%_60%)]",
-            "disabled:opacity-30 disabled:cursor-not-allowed transition-colors",
-          )}
-        >
-          <Send className="h-4 w-4" />
-        </button>
-      </div>
-      </>
       )}
     </div>
     </div>,
