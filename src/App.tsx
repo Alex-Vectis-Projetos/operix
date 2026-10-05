@@ -76,51 +76,6 @@ function RouteContentBoundary({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { t } = useLanguage();
 
-  useEffect(() => {
-    // #region debug-point D:route-start
-    void fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "route-loading-stall",
-        runId: "pre-fix",
-        hypothesisId: "D",
-        location: "src/App.tsx:RouteContentBoundary",
-        msg: "[DEBUG] ROUTE_START",
-        data: {
-          pathname: location.pathname,
-          search: location.search,
-        },
-        ts: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      // #region debug-point D:route-settle
-      void fetch("http://127.0.0.1:7777/event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "route-loading-stall",
-          runId: "pre-fix",
-          hypothesisId: "D",
-          location: "src/App.tsx:RouteContentBoundary:settle",
-          msg: "[DEBUG] ROUTE_SETTLE_WINDOW",
-          data: {
-            pathname: location.pathname,
-            search: location.search,
-          },
-          ts: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-    }, 2500);
-    return () => window.clearTimeout(timer);
-  }, [location.pathname, location.search]);
-
   return (
     <ErrorBoundary
       resetKey={`${location.pathname}${location.search}`}

@@ -85,28 +85,7 @@ export function PermissionGuard({
     return () => clearTimeout(t);
   }, [isLoading]);
 
-  useEffect(() => {
-    // #region debug-point C:permission-guard-state
-    void fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "route-loading-stall",
-        runId: "pre-fix",
-        hypothesisId: "C",
-        location: "src/components/PermissionGuard.tsx:state",
-        msg: "[DEBUG] PERMISSION_GUARD_STATE",
-        data: {
-          pathname: location.pathname,
-          permission,
-          isLoading,
-          timedOut,
-        },
-        ts: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [isLoading, location.pathname, permission, timedOut]);
+
 
   if (isLoading && !timedOut) {
     return (

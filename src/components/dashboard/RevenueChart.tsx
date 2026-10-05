@@ -1,200 +1,152 @@
-import {
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Area,
-  AreaChart,
-} from "recharts";
-import { useLanguage } from "@/hooks/useLanguage";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { useMemo, useState } from "react";
+import { useFinanceSummary } from "@/hooks/useFinance";
+import { formatFinanceMoney } from "@/lib/financeFormatters";
+import { useWorkspace } from "@/hooks/useWorkspace";
+import { useRole } from "@/hooks/useRole";
+import { useAuth } from "@/hooks/useAuth";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { TrendingUp, ArrowDownRight, ArrowUpRight, Wallet, ArrowRight, ShieldAlert } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-function useRevenueChartData() {
-  return useQuery({
-    queryKey: ["revenue-chart-data"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("payment_orders")
-        .select("total, status, created_at")
-        .in("status", ["paid", "partial", "pending"]);
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
-}
-
-const MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-
+/**
+ * RevenueChart — Canonical Dashboard Financial Overview.
+ *
+ * Backed strictly by PostgreSQL /api/finance-v2/summary authority.
+ * Invariants:
+ * - Zero Supabase queries
+ * - Zero unbacked client-side mathematical assumptions
+ * - Hidden gracefully when user has no financial viewing authority
+ */
 export function RevenueChart() {
-  const { t, formatCurrency } = useLanguage();
-  const { data: orders, isLoading } = useRevenueChartData();
+  const navigate = useNavigate();
+  const { myRole, isAdmin: wsIsAdmin, ownerAppUserId } = useWorkspace();
+  const { role: displayRole, isAdmin: roleIsAdmin, isOwner: roleIsOwner } = useRole();
+  const { user } = useAuth();
 
-  const now = new Date();
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth()); // 0-indexed
+  const isPersonalOwner = Boolean(
+    ownerAppUserId && (user?.id === ownerAppUserId || (user as any)?.app_user_id === ownerAppUserId)
+  );
+  const isFullManager = wsIsAdmin || roleIsAdmin || roleIsOwner || isPersonalOwner || myRole === "admin";
+  const isClient = myRole === "cliente" || displayRole === "cliente";
 
-  // Build per-month data from all orders
-  const monthMap = useMemo(() => {
-    const map = new Map<string, { received: number; pending: number }>();
-    if (!orders?.length) return map;
-
-    for (const o of orders) {
-      const d = new Date(o.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      const entry = map.get(key) ?? { received: 0, pending: 0 };
-      const total = Number(o.total || 0);
-
-      if (o.status === "paid") {
-        entry.received += total;
-      } else if (o.status === "partial") {
-        entry.received += total * 0.5;
-        entry.pending += total * 0.5;
-      } else {
-        entry.pending += total;
-      }
-      map.set(key, entry);
-    }
-    return map;
-  }, [orders]);
-
-  // Generate chart data for the current view (show full year with highlight on current month)
-  const chartData = useMemo(() => {
-    return MONTH_NAMES.map((name, i) => {
-      const key = `${viewYear}-${String(i + 1).padStart(2, "0")}`;
-      const entry = monthMap.get(key);
-      return {
-        month: name,
-        received: Math.round((entry?.received ?? 0) * 100) / 100,
-        pending: Math.round((entry?.pending ?? 0) * 100) / 100,
-        isCurrent: i === viewMonth,
-      };
-    });
-  }, [monthMap, viewYear, viewMonth]);
-
-  const navigateMonth = (delta: number) => {
-    let m = viewMonth + delta;
-    let y = viewYear;
-    if (m < 0) { m = 11; y--; }
-    if (m > 11) { m = 0; y++; }
-    setViewMonth(m);
-    setViewYear(y);
-  };
-
-  const goToToday = () => {
-    setViewYear(now.getFullYear());
-    setViewMonth(now.getMonth());
-  };
-
-  if (isLoading) {
-    return <Skeleton className="h-[340px] rounded-xl" />;
+  // Clients and unauthorized technicians do not see internal financial balance
+  if (isClient || !isFullManager) {
+    return null;
   }
 
-  const currentMonthData = chartData[viewMonth];
-  const currentTotal = (currentMonthData?.received ?? 0) + (currentMonthData?.pending ?? 0);
+  return <RevenueChartContent onNavigate={() => navigate("/financial")} />;
+}
+
+function RevenueChartContent({ onNavigate }: { onNavigate: () => void }) {
+  const { data: summary, isLoading, error } = useFinanceSummary();
+
+  if (isLoading) {
+    return <Skeleton className="h-[280px] rounded-xl" />;
+  }
+
+  if (error || !summary) {
+    return null;
+  }
+
+  const currencies = summary.currencies || [];
+
+  if (currencies.length === 0) {
+    return (
+      <div className="glass-panel rounded-xl p-5 animate-fade-in flex flex-col justify-between h-[280px]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Wallet className="h-5 w-5 text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Resumo Financeiro Canónico</h3>
+          </div>
+          <Badge variant="outline" className="text-xs">PostgreSQL Finance V2</Badge>
+        </div>
+        <div className="flex flex-col items-center justify-center text-center py-6">
+          <p className="text-xs text-muted-foreground">Sem movimentação financeira registrada no workspace.</p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onNavigate} className="text-xs self-end">
+          Aceder a Finanças <ArrowRight className="ml-1 h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  }
+
+  const primary = currencies[0];
+  const isNegative = primary.available.startsWith("-");
 
   return (
-    <div className="glass-panel rounded-xl p-5 animate-fade-in">
-      <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">{t("chart.revenueOverview")}</h3>
-          <p className="text-xs text-muted-foreground">{t("chart.monthlyRevExp")}</p>
-        </div>
-        
-        {/* Month/Year Navigator */}
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigateMonth(-1)}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <button
-            onClick={goToToday}
-            className="text-xs font-semibold text-foreground px-2 py-1 rounded hover:bg-muted/50 transition-colors min-w-[100px] text-center"
-          >
-            {MONTH_NAMES[viewMonth]} {viewYear}
-          </button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigateMonth(1)}>
-            <ChevronRight className="h-4 w-4" />
+    <div className="glass-panel rounded-xl p-5 animate-fade-in flex flex-col justify-between min-h-[280px]" data-testid="dashboard-revenue-overview">
+      <div>
+        <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-foreground">Resumo Financeiro Canónico</h3>
+              <Badge variant="outline" className="text-[10px] font-mono border-primary/30 text-primary">
+                {primary.currencyCode}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Consolidação de Listas de Pagamento e Despesas Efetivas
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onNavigate} className="text-xs h-7 gap-1">
+            <span>Ver Detalhes</span>
+            <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </div>
 
-        <div className="flex items-center gap-4 text-xs">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-primary" />
-            <span className="text-muted-foreground">{t("chart.revenue")}</span>
+        {/* Essential Finance Metrics Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <div className="rounded-lg bg-card/60 border border-border/50 p-3">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+              <span>Recebido</span>
+              <ArrowDownRight className="h-3.5 w-3.5 text-emerald-400" />
+            </div>
+            <div className="text-base font-bold text-foreground">
+              {formatFinanceMoney(primary.received, primary.currencyCode)}
+            </div>
+            <span className="text-[10px] text-muted-foreground">Listas pagas</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-accent" />
-            <span className="text-muted-foreground">Pendências</span>
+
+          <div className="rounded-lg bg-card/60 border border-border/50 p-3">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+              <span>A Receber</span>
+              <TrendingUp className="h-3.5 w-3.5 text-amber-400" />
+            </div>
+            <div className="text-base font-bold text-foreground">
+              {formatFinanceMoney(primary.expected, primary.currencyCode)}
+            </div>
+            <span className="text-[10px] text-muted-foreground">Listas pendentes</span>
+          </div>
+
+          <div className="rounded-lg bg-card/60 border border-border/50 p-3">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+              <span>Despesas</span>
+              <ArrowUpRight className="h-3.5 w-3.5 text-rose-400" />
+            </div>
+            <div className="text-base font-bold text-foreground">
+              {formatFinanceMoney(primary.expenses, primary.currencyCode)}
+            </div>
+            <span className="text-[10px] text-muted-foreground">Efetivas</span>
+          </div>
+
+          <div className="rounded-lg bg-card/60 border border-border/50 p-3">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+              <span>Disponível</span>
+              <Wallet className={`h-3.5 w-3.5 ${isNegative ? "text-destructive" : "text-emerald-400"}`} />
+            </div>
+            <div className={`text-base font-bold ${isNegative ? "text-destructive" : "text-emerald-400"}`}>
+              {formatFinanceMoney(primary.available, primary.currencyCode)}
+            </div>
+            <span className="text-[10px] text-muted-foreground">Caixa real</span>
           </div>
         </div>
       </div>
 
-      {/* Current month summary */}
-      <div className="mb-3 flex gap-4 text-xs">
-        <div className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-semibold">
-          {MONTH_NAMES[viewMonth]}: €{currentTotal.toLocaleString()}
-        </div>
+      <div className="pt-2 border-t border-border/40 flex items-center justify-between text-xs text-muted-foreground">
+        <span>Obrigações liquidadas: {formatFinanceMoney(primary.settledObligationPayments, primary.currencyCode)}</span>
+        <span className="text-[10px] opacity-75">Fonte: Express /api/finance-v2/summary</span>
       </div>
-
-      <ResponsiveContainer width="100%" height={260}>
-        <AreaChart data={chartData}>
-          <defs>
-            <linearGradient id="goldGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="hsl(43, 85%, 55%)" stopOpacity={0.2} />
-              <stop offset="100%" stopColor="hsl(43, 85%, 55%)" stopOpacity={0} />
-            </linearGradient>
-            <linearGradient id="redGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="hsl(0, 70%, 55%)" stopOpacity={0.15} />
-              <stop offset="100%" stopColor="hsl(0, 70%, 55%)" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 12%, 18%)" vertical={false} />
-          <XAxis
-            dataKey="month"
-            tick={{ fill: "hsl(220, 10%, 50%)", fontSize: 11 }}
-            axisLine={{ stroke: "hsl(220, 12%, 18%)" }}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fill: "hsl(220, 10%, 50%)", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(v) => `€${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
-          />
-          <Tooltip
-            contentStyle={{
-              background: "hsl(220, 14%, 11%)",
-              border: "1px solid hsl(220, 12%, 18%)",
-              borderRadius: "8px",
-              fontSize: 12,
-              color: "hsl(40, 10%, 92%)",
-            }}
-            formatter={(value: any, name: string) => [
-              `€${Number(value || 0).toLocaleString()}`,
-              name === "received" ? "Receita" : "Pendências",
-            ]}
-          />
-          <Area
-            type="monotone"
-            dataKey="received"
-            stroke="hsl(43, 85%, 55%)"
-            strokeWidth={2}
-            fill="url(#goldGrad)"
-          />
-          <Area
-            type="monotone"
-            dataKey="pending"
-            stroke="hsl(0, 70%, 55%)"
-            strokeWidth={2}
-            fill="url(#redGrad)"
-          />
-        </AreaChart>
-      </ResponsiveContainer>
     </div>
   );
 }

@@ -122,42 +122,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const boot = async () => {
       const stored = readStoredAuthSession();
       if (!stored?.token) {
-        // #region debug-point A:auth-anonymous
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "A",
-            location: "src/hooks/useAuth.tsx:boot:no-token",
-            msg: "[DEBUG] AUTH_READY",
-            data: { authenticated: false, reason: "no_stored_token" },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         applySession(null, null);
         setLoading(false);
         return;
       }
 
       try {
-        // #region debug-point A:auth-start
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "A",
-            location: "src/hooks/useAuth.tsx:boot:start",
-            msg: "[DEBUG] DATA_START",
-            data: { source: "auth.restore", hasStoredToken: true },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         const data = await withTimeout<{ user: AuthUser }>(
           apiRequest("/auth/me", {
             headers: {
@@ -172,61 +142,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           user: data.user,
         });
         applySession(data.user, stored.token);
-        // #region debug-point A:auth-success
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "A",
-            location: "src/hooks/useAuth.tsx:boot:success",
-            msg: "[DEBUG] DATA_SUCCESS",
-            data: { source: "auth.restore", userId: data.user.id, email: data.user.email },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         try { registerCurrentDevice(); } catch { /* device registration must not block auth */ }
       } catch (error) {
-        // #region debug-point A:auth-error
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "A",
-            location: "src/hooks/useAuth.tsx:boot:error",
-            msg: "[DEBUG] DATA_ERROR",
-            data: {
-              source: "auth.restore",
-              error: error instanceof Error ? error.message : String(error),
-            },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         clearStoredAuthSession();
         cleanupSessionRuntime();
         applySession(null, null);
       } finally {
         setLoading(false);
-        // #region debug-point A:auth-loading-end
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "A",
-            location: "src/hooks/useAuth.tsx:boot:finally",
-            msg: "[DEBUG] LOADING_END",
-            data: { source: "auth", loading: false },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
       }
     };
 

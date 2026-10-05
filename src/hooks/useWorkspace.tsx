@@ -77,22 +77,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     retry: 0,
     staleTime: 5 * 60_000,
     queryFn: async () => {
-      if (!userId) return null;
-      // #region debug-point B:workspace-start
-      void fetch("http://127.0.0.1:7777/event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "route-loading-stall",
-          runId: "pre-fix",
-          hypothesisId: "B",
-          location: "src/hooks/useWorkspace.tsx:my-workspace:start",
-          msg: "[DEBUG] DATA_START",
-          data: { source: "workspace", userId, selectedId },
-          ts: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       const data = await apiRequest<{
         appUserId: string | null;
         workspaces: Array<{
@@ -105,21 +89,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }>("/account/workspaces", { timeoutMs: 8000 });
       const memberships = data.workspaces;
       if (!memberships || memberships.length === 0) {
-        // #region debug-point B:workspace-empty
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "B",
-            location: "src/hooks/useWorkspace.tsx:my-workspace:empty",
-            msg: "[DEBUG] DATA_SUCCESS",
-            data: { source: "workspace", workspaces: 0 },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         return {
           appUserId: data.appUserId,
           availableWorkspaces: [],
@@ -143,26 +112,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           localStorage.setItem(SELECTED_KEY, membership.workspaceId);
         }
       } catch { /* best effort */ }
-      // #region debug-point B:workspace-success
-      void fetch("http://127.0.0.1:7777/event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "route-loading-stall",
-          runId: "pre-fix",
-          hypothesisId: "B",
-          location: "src/hooks/useWorkspace.tsx:my-workspace:success",
-          msg: "[DEBUG] DATA_SUCCESS",
-          data: {
-            source: "workspace",
-            workspaceId: membership.workspaceId,
-            workspaces: memberships.length,
-            selectedId,
-          },
-          ts: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       return {
         workspaceId: membership.workspaceId,
         workspaceName: membership.workspaceName,
@@ -192,31 +141,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     placeholderData: (previousData) => previousData ?? [],
   });
-
-  useEffect(() => {
-    if (userId && !wsLoading) {
-      // #region debug-point B:workspace-loading-end
-      void fetch("http://127.0.0.1:7777/event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "route-loading-stall",
-          runId: "pre-fix",
-          hypothesisId: "B",
-          location: "src/hooks/useWorkspace.tsx:loading:end",
-          msg: "[DEBUG] LOADING_END",
-          data: {
-            source: "workspace",
-            loading: false,
-            workspaceId: wsData?.workspaceId ?? null,
-            hasMembers: members.length > 0,
-          },
-          ts: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-    }
-  }, [userId, wsLoading, wsData?.workspaceId, members.length]);
 
   const memberAuthIds = useMemo(
     () => members.filter((m: WorkspaceMember) => m.auth_user_id).map((m: WorkspaceMember) => m.auth_user_id),

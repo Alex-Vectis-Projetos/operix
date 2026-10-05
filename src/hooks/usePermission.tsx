@@ -67,21 +67,6 @@ function useMyPermissionsMap() {
       if (isAdmin) return { admin: true, map: {} };
 
       try {
-        // #region debug-point C:permissions-start
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "C",
-            location: "src/hooks/usePermission.tsx:query:start",
-            msg: "[DEBUG] DATA_START",
-            data: { source: "permissions", permUserId, dbRole, isImpersonating },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         const params = new URLSearchParams();
         if (permUserId) params.set("userId", permUserId);
         if (workspaceId) params.set("workspaceId", workspaceId);
@@ -90,48 +75,11 @@ function useMyPermissionsMap() {
           admin: boolean;
           map: Record<string, Entry>;
         }>(`/account/permissions${suffix}`, { timeoutMs: 8000 });
-        // #region debug-point C:permissions-success
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "C",
-            location: "src/hooks/usePermission.tsx:query:success",
-            msg: "[DEBUG] DATA_SUCCESS",
-            data: {
-              source: "permissions",
-              admin: data.admin,
-              entries: Object.keys(data.map ?? {}).length,
-            },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         return {
           admin: data.admin,
           map: data.map ?? {},
         };
       } catch (error) {
-        // #region debug-point C:permissions-error
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "C",
-            location: "src/hooks/usePermission.tsx:query:error",
-            msg: "[DEBUG] DATA_ERROR",
-            data: {
-              source: "permissions",
-              error: error instanceof Error ? error.message : String(error),
-            },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (DEBUG) {
           void error;
         }

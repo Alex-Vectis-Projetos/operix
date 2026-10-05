@@ -35,26 +35,6 @@ export function useDashboardStats() {
     },
     queryFn: async () => {
       logScope("dashboard", "view", soView.scope, allowed);
-      // #region debug-point E:dashboard-stats-start
-      void fetch("http://127.0.0.1:7777/event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "route-loading-stall",
-          runId: "pre-fix",
-          hypothesisId: "E",
-          location: "src/hooks/useDashboardData.ts:query:start",
-          msg: "[DEBUG] DATA_START",
-          data: {
-            source: "dashboard-stats",
-            workspaceId,
-            userId: user?.id ?? null,
-            allowed,
-          },
-          ts: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
 
       try {
         let soQ: any = supabase.from("service_orders").select("total, status, created_at, created_by");
@@ -98,28 +78,6 @@ export function useDashboardStats() {
         const totalServices = serviceOrders.length;
         const performance = totalServices > 0 ? (completedServices / totalServices) * 100 : 0;
 
-        // #region debug-point E:dashboard-stats-success
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "E",
-            location: "src/hooks/useDashboardData.ts:query:success",
-            msg: "[DEBUG] DATA_SUCCESS",
-            data: {
-              source: "dashboard-stats",
-              workspaceId,
-              serviceOrders: serviceOrders.length,
-              paymentOrders: paymentOrders.length,
-              financialRecords: financialRecords.length,
-            },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-
         return {
           totalRevenue,
           pendingPayments,
@@ -133,25 +91,6 @@ export function useDashboardStats() {
           financialRecords,
         };
       } catch (error) {
-        // #region debug-point E:dashboard-stats-error
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-stall",
-            runId: "pre-fix",
-            hypothesisId: "E",
-            location: "src/hooks/useDashboardData.ts:query:error",
-            msg: "[DEBUG] DATA_ERROR",
-            data: {
-              source: "dashboard-stats",
-              workspaceId,
-              error: error instanceof Error ? error.message : String(error),
-            },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         throw error;
       }
     },

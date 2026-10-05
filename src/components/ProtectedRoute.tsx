@@ -20,29 +20,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [loading]);
 
-  useEffect(() => {
-    // #region debug-point A:protected-route-state
-    void fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "route-loading-stall",
-        runId: "pre-fix",
-        hypothesisId: "A",
-        location: "src/components/ProtectedRoute.tsx:state",
-        msg: "[DEBUG] AUTH_GUARD_STATE",
-        data: {
-          pathname: location.pathname,
-          loading,
-          timedOut,
-          hasSession: Boolean(session),
-          degraded,
-        },
-        ts: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [degraded, loading, location.pathname, session, timedOut]);
+
 
   // Auth degradado (GoTrue 504 storm): nunca prender a UI.
   if (degraded && !session) {

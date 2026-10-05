@@ -955,23 +955,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
       return;
     }
     try {
-      let budgetId: string | null = order.budgetId || order.budget_id || null;
-      if (!budgetId) {
-        try {
-          const rawMap = localStorage.getItem("budget-to-production-order-v1");
-          if (rawMap) {
-            const parsedMap = JSON.parse(rawMap) as unknown;
-            if (parsedMap && typeof parsedMap === "object") {
-              for (const [bid, oid] of Object.entries(parsedMap as Record<string, string>)) {
-                if (oid === order.id) {
-                  budgetId = bid;
-                  break;
-                }
-              }
-            }
-          }
-        } catch {}
-      }
+      const budgetId: string | null = order.budgetId || order.budget_id || null;
       if (!budgetId) {
         toast.error("Vínculo orçamento ↔ OS não encontrado. Não foi possível solicitar correção.");
         return;

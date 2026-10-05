@@ -26,6 +26,7 @@ const { prisma } = await import("../../backend/src/lib/prisma.js");
 const weeklogService = await import("../../backend/src/services/weeklogService.js");
 const paymentListService = await import("../../backend/src/services/paymentListService.js");
 const { assertClientCapability, ALLOWED_CLIENT_CAPABILITIES } = await import("../../backend/src/lib/objectAuth.js");
+const { operationalWeekOf } = await import("../../backend/src/lib/weekUtils.js");
 
 const fixture = {
   workspaceA: "70000000-0000-4000-8000-000000000001",
@@ -294,8 +295,9 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
 
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body.weeklog.weekNumber).toBe(39);
-      expect(body.weeklog.startsOn).toContain("2026-09-27");
+      const currentWeek = operationalWeekOf(new Date());
+      expect(body.weeklog.weekNumber).toBe(currentWeek.weekNumber);
+      expect(body.weeklog.startsOn).toContain(currentWeek.startsOn.toISOString().slice(0, 10));
     });
 
     it("WEEK-NO-UNFINISHED-01: ProductionOrder not finalized before boundary does not appear in the closed week", async () => {

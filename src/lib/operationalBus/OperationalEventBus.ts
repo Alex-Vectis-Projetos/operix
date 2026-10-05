@@ -23,7 +23,6 @@
  *  - No polling, no timers.
  *  - No visual UI. Existing components keep their current rendering.
  */
-import { supabase } from "@/integrations/supabase/client";
 import { RealtimeHub } from "@/lib/realtime/RealtimeHub";
 import { agentBus, type AgentEvent } from "@/lib/agentEventBus";
 import {
@@ -136,97 +135,8 @@ function priorityFor(severity: OpSeverity, source: OpSource): number {
 
 /* ---------------------------------------------------- DB adapters ----- */
 
-function wireDbAdapters(workspaceId: string) {
-  // ai_alerts — INSERT
-  unsubscribers.push(RealtimeHub.subscribe(
-    { table: "ai_alerts", event: "INSERT", workspaceId },
-    (payload: any) => {
-      const r = payload?.new ?? {};
-      emit({
-        source: "ai_alerts", kind: r.severity ?? "alert",
-        severity: severityFromLevel(r.severity),
-        priority: priorityFor(severityFromLevel(r.severity), "ai_alerts"),
-        title: r.title ?? "Alerta",
-        detail: r.message,
-        workspaceId, refTable: "ai_alerts", refId: r.id,
-        correlationKey: `ai_alerts:${r.id}`,
-        metadata: { severity: r.severity },
-        occurredAt: r.created_at ? new Date(r.created_at).getTime() : undefined,
-      });
-    },
-  ));
-
-  // discrepancies — INSERT
-  unsubscribers.push(RealtimeHub.subscribe(
-    { table: "discrepancies", event: "INSERT", workspaceId },
-    (payload: any) => {
-      const r = payload?.new ?? {};
-      emit({
-        source: "discrepancies", kind: r.kind ?? "discrepancy",
-        severity: "warn", priority: priorityFor("warn", "discrepancies"),
-        title: `Discrepância ${r.kind ?? ""}`.trim(),
-        workspaceId, refTable: "discrepancies", refId: r.id,
-        correlationKey: `discrepancies:${r.id}`,
-        occurredAt: r.created_at ? new Date(r.created_at).getTime() : undefined,
-      });
-    },
-  ));
-
-  // automation_executions — INSERT
-  unsubscribers.push(RealtimeHub.subscribe(
-    { table: "automation_executions", event: "INSERT", workspaceId },
-    (payload: any) => {
-      const r = payload?.new ?? {};
-      const sev: OpSeverity = r.status === "failed" ? "error" : "info";
-      emit({
-        source: "automation_executions", kind: r.status ?? "executed",
-        severity: sev, priority: priorityFor(sev, "automation_executions"),
-        title: `Automação ${r.status ?? ""}`.trim(),
-        workspaceId, refTable: "automation_executions", refId: r.id,
-        correlationKey: `automation:${r.id}`,
-        occurredAt: r.created_at ? new Date(r.created_at).getTime() : undefined,
-      });
-    },
-  ));
-
-  // backend_event_logs — INSERT
-  unsubscribers.push(RealtimeHub.subscribe(
-    { table: "backend_event_logs", event: "INSERT", workspaceId },
-    (payload: any) => {
-      const r = payload?.new ?? {};
-      emit({
-        source: "backend_event_logs", kind: r.event_type ?? "log",
-        severity: "info", priority: priorityFor("info", "backend_event_logs"),
-        title: r.event_type ?? "Evento",
-        workspaceId, refTable: "backend_event_logs", refId: r.id,
-        correlationKey: `backend:${r.id}`,
-        metadata: r.payload ?? undefined,
-        occurredAt: r.created_at ? new Date(r.created_at).getTime() : undefined,
-      });
-    },
-  ));
-
-  // hail_events — INSERT (workspace-independent)
-  unsubscribers.push(RealtimeHub.subscribe(
-    { table: "hail_events", event: "INSERT" },
-    (payload: any) => {
-      const r = payload?.new ?? {};
-      const sev: OpSeverity =
-        r.severity === "extreme" ? "critical" :
-        r.severity === "severe" ? "error" :
-        r.severity === "moderate" ? "warn" : "info";
-      emit({
-        source: "hail_events", kind: r.severity ?? "hail",
-        severity: sev, priority: priorityFor(sev, "hail_events"),
-        title: `Granizo ${r.severity ?? ""}`.trim(),
-        detail: r.locality ?? null,
-        refTable: "hail_events", refId: r.id,
-        correlationKey: `hail:${r.source}:${r.external_id ?? r.id}`,
-        metadata: { source: r.source, country: r.country },
-        occurredAt: r.occurred_at ? new Date(r.occurred_at).getTime() : undefined,
-      });
-    },
-  ));
+function wireDbAdapters(_workspaceId: string) {
+  // DB streaming decommissioned in Phase 1 canonical architecture
 }
 
 /* --------------------------------------------- runtime + agentBus ----- */
@@ -282,25 +192,8 @@ function wireRuntimeAdapters() {
 
 /* ----------------------------------------------------- persistence ---- */
 
-async function persist(evt: OperationalEvent) {
-  try {
-    await supabase.from("operational_events" as any).insert({
-      workspace_id: evt.workspaceId ?? currentWorkspaceId,
-      source: evt.source,
-      kind: evt.kind,
-      severity: evt.severity,
-      priority: evt.priority,
-      title: evt.title.slice(0, 240),
-      detail: evt.detail?.slice(0, 2000) ?? null,
-      correlation_key: evt.correlationKey ?? null,
-      ref_table: evt.refTable ?? null,
-      ref_id: evt.refId ?? null,
-      metadata: evt.metadata ?? {},
-      occurred_at: new Date(evt.occurredAt).toISOString(),
-    } as any);
-  } catch {
-    /* swallow — persistence is best-effort */
-  }
+async function persist(_evt: OperationalEvent) {
+  // In-memory bus; persistence to legacy tables decommissioned
 }
 
 /* --------------------------------------------------------- bootstrap --- */

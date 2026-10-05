@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 
 interface GeoPoint {
@@ -42,18 +41,6 @@ export function useGeolocation() {
         }
 
         setLocation(point);
-
-        // Store location as a notification-style log (lightweight, no new table needed)
-        try {
-          await supabase.from("backend_event_logs").insert({
-            table_name: "geolocation",
-            action: "CHECKIN",
-            actor_user_id: user.id,
-            payload: { lat: point.lat, lng: point.lng, city: point.city } as any,
-          });
-        } catch {
-          // silent
-        }
       },
       () => {
         // Permission denied or error — no-op

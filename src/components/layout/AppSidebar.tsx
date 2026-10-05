@@ -103,15 +103,15 @@ export const AppSidebar = memo(function AppSidebar() {
     {
       label: t("nav.group.intelligence", "Inteligência"),
       items: [
-        { title: t("nav.automations", "Automações"), url: "/automations", icon: Zap, module: "settings", action: "edit" },
+        { title: t("nav.automations", "Automações"), url: "/automations", icon: Zap, module: "settings", action: "edit", badge: "Em breve" },
         { title: "Operix AI", url: "/ai", icon: Brain, module: "dashboard", action: "view", badge: "Em breve" },
       ],
     },
     {
       label: t("nav.group.opportunities", "Oportunidades"),
       items: [
-        { title: t("nav.fleet"), url: "/fleet", icon: Car, module: "fleet", action: "view" },
-        { title: t("nav.marketplace", "Mercado"), url: "/marketplace", icon: Store, module: "dashboard", action: "view" },
+        { title: t("nav.fleet"), url: "/fleet", icon: Car, module: "fleet", action: "view", badge: "Em breve" },
+        { title: t("nav.marketplace", "Mercado"), url: "/marketplace", icon: Store, module: "dashboard", action: "view", badge: "Em breve" },
       ],
     },
     {

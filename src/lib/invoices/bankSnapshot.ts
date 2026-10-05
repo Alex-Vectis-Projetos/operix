@@ -39,7 +39,7 @@ export function buildBankSnapshot(mode: VatMode, cfg: BankConfig, reference?: st
   const c = cfg.companyAccount ?? {};
   return {
     kind: "company_account",
-    beneficiary: c.beneficiary ?? "QWork Group",
+    beneficiary: c.beneficiary ?? "Operix Group",
     iban: c.iban,
     bic: c.bic,
     bank_name: c.bank_name,

@@ -52,27 +52,13 @@ interface PreviewState {
   [key: string]: any;
 }
 
-function reportUploadDebug(payload: {
+function reportUploadDebug(_payload: {
   hypothesisId: string;
   location: string;
   msg: string;
   data?: Record<string, unknown>;
 }) {
-  // #region debug-point U:upload-db-timeout
-  void fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "upload-db-timeout",
-      runId: "migrated-to-api",
-      hypothesisId: payload.hypothesisId,
-      location: payload.location,
-      msg: payload.msg,
-      data: payload.data ?? {},
-      ts: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
+  // Debug telemetry decommissioned
 }
 
 function getFreshSignedUrl(storagePath: string): string {

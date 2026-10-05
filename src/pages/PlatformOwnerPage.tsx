@@ -130,24 +130,6 @@ function shortenId(value: string | null | undefined) {
 export default function PlatformOwnerPage() {
   const { data: isOwner, isLoading: ownerLoading } = useIsPlatformOwner();
 
-  if (!ownerLoading) {
-    // #region debug-point E:platform-owner-ready
-    void fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "route-loading-menu-lag",
-        runId: "pre-fix",
-        hypothesisId: "E",
-        location: "src/pages/PlatformOwnerPage.tsx:owner",
-        msg: "[DEBUG] AUTH_READY",
-        data: { route: "/platform", isOwner: !!isOwner, ownerLoading: false },
-        ts: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }
-
   if (ownerLoading) return <div className="module-shell"><LoadingState variant="cards" /></div>;
   if (!isOwner) return <Navigate to="/" replace />;
 
@@ -201,61 +183,8 @@ function OverviewTab() {
     staleTime: 60_000,
     placeholderData: (previousData) => previousData ?? [],
     queryFn: async (): Promise<PlatformSubscriptionRow[]> => {
-      try {
-        // #region debug-point E:platform-overview-start
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-menu-lag",
-            runId: "pre-fix",
-            hypothesisId: "E",
-            location: "src/pages/PlatformOwnerPage.tsx:OverviewTab:start",
-            msg: "[DEBUG] DATA_START",
-            data: { route: "/platform", source: "overview" },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-        const data = await apiRequest<{ subscriptions: PlatformSubscriptionRow[] }>("/billing/admin/overview");
-        const result = data.subscriptions ?? [];
-        // #region debug-point E:platform-overview-success
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-menu-lag",
-            runId: "pre-fix",
-            hypothesisId: "E",
-            location: "src/pages/PlatformOwnerPage.tsx:OverviewTab:success",
-            msg: "[DEBUG] DATA_SUCCESS",
-            data: { route: "/platform", rows: result.length },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-        return result;
-      } catch (error) {
-        // #region debug-point E:platform-overview-error
-        void fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "route-loading-menu-lag",
-            runId: "pre-fix",
-            hypothesisId: "E",
-            location: "src/pages/PlatformOwnerPage.tsx:OverviewTab:error",
-            msg: "[DEBUG] DATA_ERROR",
-            data: {
-              route: "/platform",
-              error: error instanceof Error ? error.message : String(error),
-            },
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-        throw error;
-      }
+      const data = await apiRequest<{ subscriptions: PlatformSubscriptionRow[] }>("/billing/admin/overview");
+      return data.subscriptions ?? [];
     },
   });
 

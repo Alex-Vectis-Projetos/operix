@@ -37,9 +37,6 @@ import { LocalBudgetsSyncBanner } from "./LocalBudgetsSyncBanner";
 import { useBudgets } from "@/hooks/useBudgets";
 import { apiBudgetToLocalBudget, localBudgetToApiPayload } from "@/lib/apiBudgets";
 
-const STORAGE_KEY = "budgets-local-v1";
-const BUDGET_TO_ORDER_MAP_KEY = "budget-to-production-order-v1";
-
 const STATUS_META: Record<BudgetStatus, { label: string; tone: string }> = {
   draft: { label: "Rascunho", tone: "bg-slate-500/10 text-slate-700 dark:text-slate-300" },
   sent: { label: "Rascunho", tone: "bg-slate-500/10 text-slate-700 dark:text-slate-300" },
@@ -95,20 +92,6 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   }, [apiBudgets]);
 
   useEffect(() => {
-    try {
-      const rawMap = localStorage.getItem(BUDGET_TO_ORDER_MAP_KEY);
-      if (rawMap) {
-        const parsed = JSON.parse(rawMap) as unknown;
-        if (parsed && typeof parsed === "object") {
-          setMapping(parsed as Record<string, string>);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  useEffect(() => {
     const handleCorrectionRequest = (ev: Event) => {
       const ce = ev as CustomEvent<{ budgetId: string; reason?: string }>;
       const budgetId = ce.detail?.budgetId;
@@ -119,9 +102,6 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         if (!prev[budgetId]) return prev;
         const next = { ...prev };
         delete next[budgetId];
-        try {
-          localStorage.setItem(BUDGET_TO_ORDER_MAP_KEY, JSON.stringify(next));
-        } catch {}
         return next;
       });
       toast.message(`Orçamento ${budgetId.slice(0, 8)} retornado para Rascunho.`);
@@ -141,9 +121,6 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         if (budgetId) {
           const next = { ...currentMap };
           delete next[budgetId];
-          try {
-            localStorage.setItem(BUDGET_TO_ORDER_MAP_KEY, JSON.stringify(next));
-          } catch {}
           return next;
         }
         return currentMap;
@@ -207,11 +184,6 @@ export function BudgetPanel({ onOpenOrder }: Props) {
 
   const persistMapping = (next: Record<string, string>) => {
     setMapping(next);
-    try {
-      localStorage.setItem(BUDGET_TO_ORDER_MAP_KEY, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
   };
 
   const handleSave = async (b: Budget) => {
@@ -449,7 +421,10 @@ export function BudgetPanel({ onOpenOrder }: Props) {
               </TableHeader>
               <TableBody>
                 {filteredItems.map((b) => {
-                  const alreadySent = !!mapping[b.id];
+                  const linkedOrder = (productionOrders || []).find(
+                    (po: any) => po.budgetId === b.id || po.budget_id === b.id || po.id === mapping[b.id],
+                  );
+                  const alreadySent = Boolean(linkedOrder || (b as any).productionOrder || (b as any).production_order || mapping[b.id]);
                   return (
                     <TableRow key={b.id}>
                       <TableCell
@@ -534,7 +509,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                               {b.status === "approved" ? "Revisar" : "Editar"}
                             </Button>
                           ) : null}
-                          {b.status === "approved" && !(b as any).productionOrder && !(b as any).production_order && !mapping[b.id] ? (
+                          {b.status === "approved" && !alreadySent ? (
                             <Button
                               size="sm"
                               variant="outline"

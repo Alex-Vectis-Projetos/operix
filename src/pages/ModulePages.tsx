@@ -759,27 +759,15 @@ export function Documents() {
   const { data: docs = [], isLoading } = useQuery({
     queryKey: ["documents", parentId],
     queryFn: async () => {
-      let q = supabase.from("documents").select("*")
-        .eq("module", "global")
-        .order("type", { ascending: true }).order("name");
-      q = parentId ? q.eq("parent_id", parentId) : q.is("parent_id", null);
-      const { data, error } = await q;
-      if (error) throw error;
-      return data;
+      const url = `/documents?entity_type=documents&module=global${parentId ? `&parent_id=${parentId}` : "&parent_id=null"}`;
+      return await apiRequest<any[]>(url);
     },
   });
 
   const { data: allFolders = [] } = useQuery({
     queryKey: ["doc-folders-all"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("documents")
-        .select("id, name, parent_id")
-        .eq("module", "global")
-        .eq("type", "folder")
-        .order("name");
-      if (error) throw error;
-      return data;
+      return await apiRequest<any[]>("/documents/folders?entity_type=documents");
     },
     enabled: showMoveDialog,
   });
@@ -803,10 +791,16 @@ export function Documents() {
 
   const createFolder = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("documents").insert({
-        name: folderName, type: "folder", parent_id: parentId, uploaded_by: user?.id, entity_type: "documents", module: "global",
+      await apiRequest("/documents", {
+        method: "POST",
+        body: JSON.stringify({
+          name: folderName,
+          type: "folder",
+          parent_id: parentId,
+          entity_type: "documents",
+          module: "global",
+        }),
       });
-      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
@@ -822,8 +816,7 @@ export function Documents() {
       if (doc.storage_path) {
         await deleteFiles("uploads", [doc.storage_path]);
       }
-      const { error } = await supabase.from("documents").delete().eq("id", doc.id);
-      if (error) throw error;
+      await apiRequest(`/documents/${doc.id}`, { method: "DELETE" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
@@ -837,8 +830,10 @@ export function Documents() {
       const docsToDelete = docs.filter((d: any) => ids.includes(d.id));
       const storagePaths = docsToDelete.filter((d: any) => d.storage_path).map((d: any) => d.storage_path);
       if (storagePaths.length > 0) await deleteFiles("uploads", storagePaths);
-      const { error } = await supabase.from("documents").delete().in("id", ids);
-      if (error) throw error;
+      await apiRequest("/documents/batch", {
+        method: "DELETE",
+        body: JSON.stringify({ ids }),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
@@ -850,8 +845,14 @@ export function Documents() {
 
   const moveMutation = useMutation({
     mutationFn: async ({ docIds, newParentId }: { docIds: string[]; newParentId: string | null }) => {
-      const { error } = await supabase.from("documents").update({ parent_id: newParentId }).in("id", docIds);
-      if (error) throw error;
+      await Promise.all(
+        docIds.map((id) =>
+          apiRequest(`/documents/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ parent_id: newParentId }),
+          }),
+        ),
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
@@ -865,11 +866,17 @@ export function Documents() {
 
   const createFolderInMove = useMutation({
     mutationFn: async (name: string) => {
-      const { data, error } = await supabase.from("documents").insert({
-        name, type: "folder", parent_id: null, uploaded_by: user?.id, entity_type: "documents", module: "global",
-      }).select("id").single();
-      if (error) throw error;
-      return data.id;
+      const created = await apiRequest<{ id: string }>("/documents", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          type: "folder",
+          parent_id: null,
+          entity_type: "documents",
+          module: "global",
+        }),
+      });
+      return created.id;
     },
     onSuccess: (id) => {
       queryClient.invalidateQueries({ queryKey: ["doc-folders-all"] });
@@ -882,8 +889,10 @@ export function Documents() {
 
   const renameMutation = useMutation({
     mutationFn: async ({ id, name }: { id: string; name: string }) => {
-      const { error } = await supabase.from("documents").update({ name }).eq("id", id);
-      if (error) throw error;
+      await apiRequest(`/documents/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
@@ -902,18 +911,19 @@ export function Documents() {
         10000,
         "documents_global_upload",
       );
-      const { error } = await withPromiseTimeout<any>(
-        supabase.from("documents").insert({
-          name: safeName, type: "file", parent_id: parentId, uploaded_by: user?.id,
-          storage_path: storagePath, mime_type: file.type, size_bytes: file.size, entity_type: "documents", module: "global",
+      await apiRequest("/documents", {
+        method: "POST",
+        body: JSON.stringify({
+          name: safeName,
+          type: "file",
+          parent_id: parentId,
+          storage_path: storagePath,
+          mime_type: file.type,
+          size_bytes: file.size,
+          entity_type: "documents",
+          module: "global",
         }),
-        10000,
-        "documents_global_insert",
-      );
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
+      });
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       toast.success(t("docs.fileUploaded"));
     } catch (err) {
@@ -1509,11 +1519,6 @@ export function UsersPage() {
 
 // ─── SETTINGS ───
 export function SettingsPage() {
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
-  const isOwner = user?.email === "qwork@qworkgroup.com";
-  const [resetting, setResetting] = useState(false);
-
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center gap-3">
@@ -1532,59 +1537,6 @@ export function SettingsPage() {
       </div>
 
       <TempCredentialsCard />
-
-      {isOwner && (
-        <Card className="border-destructive/30 bg-destructive/5">
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-4 w-4" />
-              Zona de Perigo — Desenvolvimento
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground mb-4">
-              Reset completo do sistema. Remove todos os usuários, convites e memberships exceto o owner. Esta ação é irreversível.
-            </p>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="sm" disabled={resetting}>
-                  {resetting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1" />}
-                  Reset Sistema
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Isso apagará todos os usuários, convites, memberships e dados associados. Apenas o owner (qwork@qworkgroup.com) será mantido. Esta ação é irreversível.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    onClick={async () => {
-                      setResetting(true);
-                      try {
-                        const { error } = await supabase.functions.invoke("reset-system");
-                        if (error) throw error;
-                        toast.success("Sistema resetado com sucesso");
-                        queryClient.invalidateQueries();
-                      } catch (err: any) {
-                        toast.error(err.message || "Erro ao resetar sistema");
-                      } finally {
-                        setResetting(false);
-                      }
-                    }}
-                  >
-                    Sim, resetar tudo
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </CardContent>
-        </Card>
-      )}
 
       <Card className="border-border/40 bg-card/40">
         <CardHeader>

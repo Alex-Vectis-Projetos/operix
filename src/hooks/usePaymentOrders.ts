@@ -177,42 +177,7 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export function useDiscrepancyDetection() {
-  const queryClient = useQueryClient();
 
-  return useMutation({
-    mutationFn: async () => {
-      return apiRequest("/extract/detect-discrepancies", { method: "POST" });
-    },
-    onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ["discrepancies"] });
-      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
-      if (data?.total === 0) {
-        toast.success("No discrepancies found — all payments match.");
-      } else {
-        toast.warning(`Found ${data?.total} discrepancies: ${data?.missing} missing, ${data?.mismatches} mismatches.`);
-      }
-    },
-    onError: (err) => {
-      toast.error("Detection failed: " + (err as Error).message);
-    },
-  });
-}
-
-export function useDiscrepancies() {
-  const { can, isLoading: permsLoading } = useCan();
-  const { allowed } = can("financial", "view");
-  return useQuery({
-    queryKey: ["discrepancies", allowed],
-    enabled: !permsLoading && allowed,
-    retry: 0,
-    placeholderData: (previousData: any) => previousData ?? [],
-    queryFn: async () => {
-      if (!allowed) return [];
-      return apiRequest("/discrepancies");
-    },
-  });
-}
 
 export function useFinancialSummary() {
   const { user } = useAuth();
