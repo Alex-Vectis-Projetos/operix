@@ -207,29 +207,40 @@ function noopSupabaseFacade() {
   });
 }
 
-// Singleton guard — detect accidental double-instantiation across HMR / chunks.
-if (g.__SUPABASE_CLIENT__) {
-  console.warn("[SUPABASE] Duplicate createClient detected — reusing existing instance");
-} else {
+function getOrCreateClient(): any {
+  if (g.__SUPABASE_CLIENT__) {
+    return g.__SUPABASE_CLIENT__;
+  }
   console.log("[SUPABASE] createClient (singleton init)");
+  const shouldBlock = !SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY || isDevOriginBlockedByCors();
+  if (shouldBlock) {
+    console.debug(
+      "[SUPABASE] Standalone backend or dev origin detected — installing silent no-op facade + fetch blocker to avoid CORS errors. Use backend API routes for persistence.",
+    );
+    installSupabaseFetchBlockerOnce();
+    g.__SUPABASE_CLIENT__ = noopSupabaseFacade();
+    return g.__SUPABASE_CLIENT__;
+  }
+  g.__SUPABASE_CLIENT__ = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: {
+      storage: localStorage,
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  });
+  return g.__SUPABASE_CLIENT__;
 }
 
-export const supabase =
-  g.__SUPABASE_CLIENT__ ??
-  (g.__SUPABASE_CLIENT__ = (() => {
-    const shouldBlock = !SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY || isDevOriginBlockedByCors();
-    if (shouldBlock) {
-      console.debug(
-        "[SUPABASE] Standalone backend or dev origin detected — installing silent no-op facade + fetch blocker to avoid CORS errors. Use backend API routes for persistence.",
-      );
-      installSupabaseFetchBlockerOnce();
-      return noopSupabaseFacade();
-    }
-    return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-      auth: {
-        storage: localStorage,
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    });
-  })());
+// Lazy proxy: does not call createClient() on module import.
+// Instantiates only if a method/property is accessed at runtime.
+export const supabase: any = new Proxy({}, {
+  get(_target, prop) {
+    const client = getOrCreateClient();
+    const val = (client as any)[prop];
+    return typeof val === "function" ? val.bind(client) : val;
+  },
+  apply(_target, _thisArg, args) {
+    const client = getOrCreateClient();
+    return (client as any)(...args);
+  },
+});

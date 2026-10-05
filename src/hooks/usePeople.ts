@@ -101,6 +101,10 @@ export function usePeople(filters: { type?: PersonType; status?: PersonStatus; l
         timeoutMs: 10000,
       }),
     onSuccess: (person) => {
+      if (!person?.id) {
+        toast({ title: "Erro ao criar Pessoa", description: "Resposta inválida do servidor.", variant: "destructive" });
+        return;
+      }
       invalidate();
       if (person.warning === "tax_id_duplicate") {
         toast({ title: "Pessoa criada com aviso", description: "Já existe outro Prestador com este número de identificação fiscal.", variant: "destructive" });

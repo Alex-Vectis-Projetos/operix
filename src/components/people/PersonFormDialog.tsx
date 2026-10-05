@@ -130,11 +130,15 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
       ...form,
       id_documents: identityDocuments.filter((d) => d.document_type.trim() && d.document_number.trim()),
     };
-    const person = await onSubmit(payload);
-    setSavedPerson(person);
-    if (!requiresLocation) onOpenChange(false);
-    // Para Técnico/Prestador Operacional, mantém o diálogo aberto para permitir
-    // anexar documentos imediatamente após o cadastro inicial.
+    try {
+      const person = await onSubmit(payload);
+      if (person?.id) {
+        setSavedPerson(person);
+        onOpenChange(false);
+      }
+    } catch {
+      // Handled by mutation onError toast
+    }
   }
 
   async function handleExtractInvoice(file: File) {

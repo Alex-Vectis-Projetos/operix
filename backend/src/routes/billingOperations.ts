@@ -429,16 +429,30 @@ async function logBackendEvent(
   });
 }
 
-async function ensureWorkspaceExists(workspaceId: string | null | undefined) {
-  if (!workspaceId) return null;
-  const workspace = await prisma.workspace.findUnique({
-    where: { id: workspaceId },
-    select: { id: true },
-  });
-  if (!workspace) {
-    throw new Error("Workspace not found.");
+async function resolveOperationalWorkspaceId(
+  req: AuthenticatedRequest,
+  suggestedWorkspaceId?: string | null,
+): Promise<string> {
+  const activeWorkspaceId = req.ctx?.activeWorkspaceId;
+  if (activeWorkspaceId) {
+    if (
+      suggestedWorkspaceId &&
+      suggestedWorkspaceId !== activeWorkspaceId &&
+      req.ctx?.platformRole !== "platform_admin"
+    ) {
+      throw new ForbiddenError("Acesso negado: workspace diferente do ativo.");
+    }
+    return activeWorkspaceId;
   }
-  return workspace.id;
+  if (suggestedWorkspaceId && req.ctx?.platformRole === "platform_admin") {
+    const ws = await prisma.workspace.findUnique({
+      where: { id: suggestedWorkspaceId },
+      select: { id: true },
+    });
+    if (!ws) throw new NotFoundError("Workspace não encontrado.");
+    return ws.id;
+  }
+  throw new ForbiddenError("Workspace ativo obrigatório.");
 }
 
 function sumClientBalances(
@@ -472,14 +486,14 @@ operationalBillingRouter.get("/admin/ops/clients", async (req: AuthenticatedRequ
       workspace_id: z.string().min(1).nullable().optional(),
     });
     const { active_only, workspace_id } = querySchema.parse((req as AuthenticatedRequest & { query: unknown }).query);
-    const effectiveWorkspaceId = workspace_id || req.ctx?.activeWorkspaceId || null;
+    const effectiveWorkspaceId = await resolveOperationalWorkspaceId(req, workspace_id);
 
-    await lazyAssignDisplayIdsToExistingClients(effectiveWorkspaceId ?? null);
+    await lazyAssignDisplayIdsToExistingClients(effectiveWorkspaceId);
 
     const clients = await prisma.billingClient.findMany({
       where: {
+        workspaceId: effectiveWorkspaceId,
         ...(active_only ? { isActive: true } : {}),
-        ...(effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : {}),
       },
       orderBy: [
         { customerDisplayNum: { sort: "asc", nulls: "last" } },
@@ -491,6 +505,7 @@ operationalBillingRouter.get("/admin/ops/clients", async (req: AuthenticatedRequ
     const balances = sumClientBalances(
       await prisma.billingInvoice.findMany({
         where: {
+          workspaceId: effectiveWorkspaceId,
           deletedAt: null,
           billingClientId: {
             in: clients.map((client: (typeof clients)[number]) => client.id),
@@ -518,7 +533,7 @@ operationalBillingRouter.post("/admin/ops/clients", async (req: AuthenticatedReq
   try {
     if (!requireAdmin(req, res)) return;
     const input = operationalClientSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
-    const workspaceId = await ensureWorkspaceExists(input.workspace_id);
+    const workspaceId = await resolveOperationalWorkspaceId(req, input.workspace_id);
 
     const client = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const { num: displayNum, formatted: displayId } = await getNextCustomerDisplayNum(tx, workspaceId);
@@ -581,9 +596,16 @@ operationalBillingRouter.patch("/admin/ops/clients/:clientId", async (req: Authe
     const paramsSchema = z.object({ clientId: z.string().uuid() });
     const { clientId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const input = operationalClientSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
-    const workspaceId = await ensureWorkspaceExists(input.workspace_id);
+    const workspaceId = await resolveOperationalWorkspaceId(req, input.workspace_id);
 
     const client = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const existing = await tx.billingClient.findFirst({
+        where: { id: clientId, workspaceId },
+      });
+      if (!existing) {
+        throw new NotFoundError("Client not found.");
+      }
+
       const updated = await tx.billingClient.update({
         where: { id: clientId },
         data: {
@@ -638,10 +660,11 @@ operationalBillingRouter.delete("/admin/ops/clients/:clientId", async (req: Auth
     if (!requireAdmin(req, res)) return;
     const paramsSchema = z.object({ clientId: z.string().uuid() });
     const { clientId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
+    const workspaceId = await resolveOperationalWorkspaceId(req);
 
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const existing = await tx.billingClient.findUnique({
-        where: { id: clientId },
+      const existing = await tx.billingClient.findFirst({
+        where: { id: clientId, workspaceId },
         select: {
           id: true,
           workspaceId: true,
@@ -680,33 +703,31 @@ operationalBillingRouter.get("/admin/ops/clients/:clientId", async (req: Authent
     if (!requireAdmin(req, res)) return;
     const paramsSchema = z.object({ clientId: z.string().uuid() });
     const { clientId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
+    const workspaceId = await resolveOperationalWorkspaceId(req);
 
-    const preClient = await prisma.billingClient.findUnique({
-      where: { id: clientId },
-      select: { id: true, workspaceId: true },
-    });
-    if (preClient?.workspaceId) {
-      await lazyAssignDisplayIdsToExistingClients(preClient.workspaceId);
-    }
-
-    const client = await prisma.billingClient.findUnique({
-      where: { id: clientId },
+    const client = await prisma.billingClient.findFirst({
+      where: { id: clientId, workspaceId },
     });
 
     if (!client) {
       return res.status(404).json({ message: "Client not found." });
     }
 
+    if (client.workspaceId) {
+      await lazyAssignDisplayIdsToExistingClients(client.workspaceId);
+    }
+
     const [invoices, attachments] = await Promise.all([
       prisma.billingInvoice.findMany({
         where: {
           billingClientId: clientId,
+          workspaceId,
           deletedAt: null,
         },
         orderBy: [{ issueDate: "desc" }, { createdAt: "desc" }],
       }),
       prisma.billingAttachment.findMany({
-        where: { billingClientId: clientId },
+        where: { billingClientId: clientId, workspaceId },
         orderBy: { createdAt: "desc" },
       }),
     ]);
@@ -747,9 +768,10 @@ operationalBillingRouter.post("/admin/ops/clients/:clientId/attachments", async 
     const paramsSchema = z.object({ clientId: z.string().uuid() });
     const { clientId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const input = clientAttachmentSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
+    const workspaceId = await resolveOperationalWorkspaceId(req);
 
-    const client = await prisma.billingClient.findUnique({
-      where: { id: clientId },
+    const client = await prisma.billingClient.findFirst({
+      where: { id: clientId, workspaceId },
       select: {
         id: true,
         workspaceId: true,
@@ -804,12 +826,14 @@ operationalBillingRouter.delete("/admin/ops/clients/:clientId/attachments/:attac
       attachmentId: z.string().uuid(),
     });
     const { clientId, attachmentId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
+    const workspaceId = await resolveOperationalWorkspaceId(req);
 
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const existing = await tx.billingAttachment.findFirst({
         where: {
           id: attachmentId,
           billingClientId: clientId,
+          workspaceId,
         },
         select: {
           id: true,
@@ -849,13 +873,12 @@ operationalBillingRouter.delete("/admin/ops/clients/:clientId/attachments/:attac
 operationalBillingRouter.get("/admin/ops/suppliers", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     if (!requireAdmin(req, res)) return;
-
-    const workspaceId = req.ctx?.activeWorkspaceId;
+    const workspaceId = await resolveOperationalWorkspaceId(req);
 
     const suppliers = await prisma.billingSupplier.findMany({
       where: {
         isActive: true,
-        ...(workspaceId ? { workspaceId } : {}),
+        workspaceId,
       },
       orderBy: { name: "asc" },
       take: 500,
@@ -876,13 +899,12 @@ operationalBillingRouter.get("/admin/ops/suppliers", async (req: AuthenticatedRe
 operationalBillingRouter.get("/admin/ops/invoices", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     if (!requireAdmin(req, res)) return;
-
-    const workspaceId = req.ctx?.activeWorkspaceId;
+    const workspaceId = await resolveOperationalWorkspaceId(req);
 
     const invoices = await prisma.billingInvoice.findMany({
       where: {
         deletedAt: null,
-        ...(workspaceId ? { workspaceId } : {}),
+        workspaceId,
       },
       orderBy: [{ createdAt: "desc" }, { issueDate: "desc" }],
       take: 500,
@@ -900,7 +922,7 @@ operationalBillingRouter.post("/admin/ops/invoices", async (req: AuthenticatedRe
   try {
     if (!requireAdmin(req, res)) return;
     const input = operationalInvoiceSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
-    const workspaceId = await ensureWorkspaceExists(input.workspace_id);
+    const workspaceId = await resolveOperationalWorkspaceId(req, input.workspace_id);
     const issueDate = parseDateInput(input.issue_date);
     const dueDate = parseDateInput(input.due_date);
     const paidAmount = Number(input.paid_amount ?? 0);
@@ -964,7 +986,7 @@ operationalBillingRouter.patch("/admin/ops/invoices/:invoiceId", async (req: Aut
     const paramsSchema = z.object({ invoiceId: z.string().uuid() });
     const { invoiceId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const input = operationalInvoiceSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
-    const workspaceId = await ensureWorkspaceExists(input.workspace_id);
+    const workspaceId = await resolveOperationalWorkspaceId(req, input.workspace_id);
     const issueDate = parseDateInput(input.issue_date);
     const dueDate = parseDateInput(input.due_date);
     const paidAmount = Number(input.paid_amount ?? 0);
@@ -972,6 +994,13 @@ operationalBillingRouter.patch("/admin/ops/invoices/:invoiceId", async (req: Aut
     const remainingAmount = Math.max(0, totalAmount - paidAmount);
 
     const invoice = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const existing = await tx.billingInvoice.findFirst({
+        where: { id: invoiceId, workspaceId, deletedAt: null },
+      });
+      if (!existing) {
+        throw new NotFoundError("Invoice not found.");
+      }
+
       const updated = await tx.billingInvoice.update({
         where: { id: invoiceId },
         data: {
@@ -1003,7 +1032,7 @@ operationalBillingRouter.patch("/admin/ops/invoices/:invoiceId", async (req: Aut
         rowId: updated.id,
         action: "invoice.updated",
         actorUserId: req.auth?.userId ?? null,
-        workspaceId,
+        workspaceId: updated.workspaceId,
         payload: {
           invoice_number: updated.invoiceNumber,
           total_amount: updated.totalAmount,
@@ -1027,10 +1056,11 @@ operationalBillingRouter.delete("/admin/ops/invoices/:invoiceId", async (req: Au
     if (!requireAdmin(req, res)) return;
     const paramsSchema = z.object({ invoiceId: z.string().uuid() });
     const { invoiceId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
+    const workspaceId = await resolveOperationalWorkspaceId(req);
 
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const existing = await tx.billingInvoice.findUnique({
-        where: { id: invoiceId },
+      const existing = await tx.billingInvoice.findFirst({
+        where: { id: invoiceId, workspaceId },
         select: {
           id: true,
           workspaceId: true,
@@ -1069,11 +1099,21 @@ operationalBillingRouter.get("/admin/ops/invoices/:invoiceId/audit", async (req:
     if (!requireAdmin(req, res)) return;
     const paramsSchema = z.object({ invoiceId: z.string().uuid() });
     const { invoiceId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
+    const workspaceId = await resolveOperationalWorkspaceId(req);
+
+    const invoice = await prisma.billingInvoice.findFirst({
+      where: { id: invoiceId, workspaceId },
+      select: { id: true },
+    });
+    if (!invoice) {
+      return res.status(404).json({ message: "Invoice not found." });
+    }
 
     const logs = await prisma.backendEventLog.findMany({
       where: {
         tableName: "billing_invoices",
         rowId: invoiceId,
+        workspaceId,
       },
       orderBy: { createdAt: "desc" },
       take: 50,
@@ -1103,7 +1143,7 @@ operationalBillingRouter.post("/admin/ops/invoices/import", async (req: Authenti
   try {
     if (!requireAdmin(req, res)) return;
     const input = importInvoiceSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
-    const workspaceId = await ensureWorkspaceExists(input.workspace_id);
+    const workspaceId = await resolveOperationalWorkspaceId(req, input.workspace_id);
     const issueDate = parseDateInput(input.issue_date);
     const dueDate = parseDateInput(input.due_date);
     const paidAmount = Number(input.paid_amount ?? 0);

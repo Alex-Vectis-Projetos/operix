@@ -172,6 +172,10 @@ export function start() {
   if (booted || typeof window === "undefined") return;
   booted = true;
   try {
+    const g = globalThis as any;
+    if (!g.__SUPABASE_CLIENT__) {
+      return;
+    }
     const rt: any = (supabase as any).realtime;
     if (rt?.onOpen) {
       rt.onOpen(() => {

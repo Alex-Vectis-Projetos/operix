@@ -274,24 +274,28 @@ export default function ClientsScreen() {
         is_active: form.is_active,
       };
       if (editing) {
-        await apiRequest(`/billing/admin/ops/clients/${editing.id}`, {
+        const res = await apiRequest<{ client?: Client; id?: string }>(`/billing/admin/ops/clients/${editing.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        if (!res) throw new Error("Servidor não confirmou atualização do cliente.");
         toast({ title: "Cliente atualizado" });
       } else {
-        await apiRequest("/billing/admin/ops/clients", {
+        const res = await apiRequest<{ client?: Client; id?: string }>("/billing/admin/ops/clients", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        if (!res || (!res.client && !res.id)) {
+          throw new Error("Servidor não confirmou persistência do cliente.");
+        }
         toast({ title: "Cliente criado" });
       }
       setCreating(false);
-      qc.invalidateQueries({ queryKey: ["ops-billing-clients"] });
+      await qc.invalidateQueries({ queryKey: ["ops-billing-clients"] });
       if (editing?.id) {
-        qc.invalidateQueries({ queryKey: ["ops-billing-client-detail", editing.id] });
+        await qc.invalidateQueries({ queryKey: ["ops-billing-client-detail", editing.id] });
       }
     } catch (e: any) {
       toast({ title: "Erro ao guardar", description: e.message, variant: "destructive" });

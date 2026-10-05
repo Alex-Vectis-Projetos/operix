@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 
 /**
@@ -67,53 +66,14 @@ export function ImpersonationProvider({ children }: { children: ReactNode }) {
       if (t.userId === user.id) return; // can't impersonate self
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(t));
       setTarget(t);
-      // Audit log (fire-and-forget, must not block UI)
-      supabase
-        .from("backend_event_logs")
-        .insert({
-          table_name: "impersonation",
-          action: "IMPERSONATION_START",
-          row_id: t.userId,
-          actor_user_id: user.id,
-          payload: {
-            target_user_id: t.userId,
-            target_email: t.email,
-            target_role: t.role,
-            target_name: t.fullName,
-          } as any,
-        })
-        .then(
-          () => {},
-          (err) => console.error("[Impersonation] log start failed:", err),
-        );
     },
     [user?.id],
   );
 
   const stopImpersonation = useCallback(async () => {
-    const prev = target;
     sessionStorage.removeItem(STORAGE_KEY);
     setTarget(null);
-    if (prev && user?.id) {
-      supabase
-        .from("backend_event_logs")
-        .insert({
-          table_name: "impersonation",
-          action: "IMPERSONATION_STOP",
-          row_id: prev.userId,
-          actor_user_id: user.id,
-          payload: {
-            target_user_id: prev.userId,
-            target_email: prev.email,
-            target_role: prev.role,
-          } as any,
-        })
-        .then(
-          () => {},
-          (err) => console.error("[Impersonation] log stop failed:", err),
-        );
-    }
-  }, [target, user?.id]);
+  }, []);
 
   const value: ImpersonationContextType = {
     target,
