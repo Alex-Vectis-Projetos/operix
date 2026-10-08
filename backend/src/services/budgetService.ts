@@ -50,18 +50,29 @@ export function calculateRevisionTotals(input: {
   // Se grossTotal não foi informado explicitamente ou for 0, calcular pela soma dos itens
   if (gross.isZero()) {
     let sum = new Prisma.Decimal(0);
-    const sumList = (items: unknown) => {
+    const sumList = (items: unknown, quantityKeys: string[], unitPriceKeys: string[]) => {
       if (Array.isArray(items)) {
         for (const it of items) {
-          const price = toDecimal(it?.price ?? it?.total ?? it?.unitPrice ?? 0);
-          const qty = toDecimal(it?.quantity ?? it?.qty ?? 1);
-          sum = sum.add(price.mul(qty));
+          const declaredTotal = it?.total;
+          if (declaredTotal !== undefined && declaredTotal !== null && declaredTotal !== "") {
+            sum = sum.add(toDecimal(declaredTotal));
+            continue;
+          }
+          const quantityValue = quantityKeys
+            .map((key) => it?.[key])
+            .find((value) => value !== undefined && value !== null && value !== "");
+          const unitPriceValue = unitPriceKeys
+            .map((key) => it?.[key])
+            .find((value) => value !== undefined && value !== null && value !== "");
+          const qty = toDecimal(quantityValue ?? 1);
+          const unitPrice = toDecimal(unitPriceValue ?? 0);
+          sum = sum.add(unitPrice.mul(qty));
         }
       }
     };
-    sumList(input.parts);
-    sumList(input.services);
-    sumList(input.labor);
+    sumList(input.parts, ["quantity", "qty"], ["unitPrice", "unit_price", "price"]);
+    sumList(input.services, ["quantity", "qty"], ["unitPrice", "unit_price", "price"]);
+    sumList(input.labor, ["hours", "quantity", "qty"], ["hourlyRate", "hourly_rate", "unitPrice", "unit_price", "rate"]);
     if (!sum.isZero()) {
       gross = sum;
     }
@@ -151,6 +162,7 @@ export interface CreateBudgetInput {
   diagnosis?: string | null;
   technicalDescription?: string | null;
   notes?: string | null;
+  signature?: any;
   grossTotal?: unknown;
   discountPct?: unknown;
   taxPct?: unknown;
@@ -160,14 +172,29 @@ export interface CreateBudgetInput {
  * Criação atômica de agregador Budget e sua primeira BudgetRevision (draft).
  */
 export async function createBudget(input: CreateBudgetInput) {
+  let legacyBillingClient: {
+    id: string;
+    workspaceId: string | null;
+    name: string;
+    customerDisplayId: string | null;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+    postalCode: string | null;
+    city: string | null;
+    country: string | null;
+    notes: string | null;
+    createdBy: string | null;
+  } | null = null;
+
   // 1. Validação estrita de vinculação cross-tenant de cliente (CLIENT-01)
   if (input.clientId) {
-    let client = await prisma.client.findUnique({
+    const client = await prisma.client.findUnique({
       where: { id: input.clientId },
       select: { id: true, workspaceId: true, name: true },
     });
     if (!client) {
-      const billingClient = await prisma.billingClient.findUnique({
+      legacyBillingClient = await prisma.billingClient.findUnique({
         where: { id: input.clientId },
         select: {
           id: true,
@@ -184,38 +211,15 @@ export async function createBudget(input: CreateBudgetInput) {
           createdBy: true,
         },
       });
-      if (billingClient) {
-        if (billingClient.workspaceId !== input.workspaceId) {
+      if (legacyBillingClient && legacyBillingClient.workspaceId !== input.workspaceId) {
           throw new ForbiddenError("Cliente não pertence ao workspace ativo.");
-        }
-        client = await prisma.client.upsert({
-          where: { id: billingClient.id },
-          create: {
-            id: billingClient.id,
-            workspaceId: input.workspaceId,
-            visibilityScope: "workspace",
-            name: billingClient.name,
-            contactEmail: billingClient.email,
-            contactPhone: billingClient.phone,
-            address: [billingClient.address, billingClient.postalCode, billingClient.city, billingClient.country]
-              .filter(Boolean)
-              .join(", ") || null,
-            displayCode: billingClient.customerDisplayId,
-            notes: billingClient.notes,
-            createdBy: billingClient.createdBy,
-          },
-          update: {
-            name: billingClient.name,
-          },
-          select: { id: true, workspaceId: true, name: true },
-        });
       }
     }
-    if (!client || client.workspaceId !== input.workspaceId) {
+    if ((!client && !legacyBillingClient) || (client && client.workspaceId !== input.workspaceId)) {
       throw new ForbiddenError("Cliente não pertence ao workspace ativo.");
     }
     if (!input.clientName) {
-      input.clientName = client.name;
+      input.clientName = client?.name ?? legacyBillingClient!.name;
     }
   }
 
@@ -227,6 +231,27 @@ export async function createBudget(input: CreateBudgetInput) {
     attempts++;
     try {
       return await prisma.$transaction(async (tx) => {
+        if (legacyBillingClient) {
+          await tx.client.upsert({
+            where: { id: legacyBillingClient.id },
+            create: {
+              id: legacyBillingClient.id,
+              workspaceId: input.workspaceId,
+              visibilityScope: "workspace",
+              name: legacyBillingClient.name,
+              contactEmail: legacyBillingClient.email,
+              contactPhone: legacyBillingClient.phone,
+              address: [legacyBillingClient.address, legacyBillingClient.postalCode, legacyBillingClient.city, legacyBillingClient.country]
+                .filter(Boolean)
+                .join(", ") || null,
+              displayCode: legacyBillingClient.customerDisplayId,
+              notes: legacyBillingClient.notes,
+              createdBy: legacyBillingClient.createdBy,
+            },
+            update: { name: legacyBillingClient.name },
+          });
+        }
+
         const code = await generateBudgetCode(tx, input.workspaceId);
 
         const budget = await tx.budget.create({
@@ -274,6 +299,7 @@ export async function createBudget(input: CreateBudgetInput) {
             interventionTypes: input.interventionTypes ?? [],
             diagnosis: input.diagnosis ?? null,
             technicalDescription: input.technicalDescription ?? null,
+            signature: input.signature ?? Prisma.JsonNull,
             ...totals,
             createdById: input.createdById,
           },
@@ -295,6 +321,15 @@ export async function createBudget(input: CreateBudgetInput) {
         };
       });
     } catch (err: any) {
+      if (err?.code === "P2002" && String(err?.meta?.target ?? "").includes("legacy") && input.legacyLocalId) {
+        const existing = await prisma.budget.findFirst({
+          where: { workspaceId: input.workspaceId, legacyLocalId: input.legacyLocalId },
+          include: { currentRevision: true },
+        });
+        if (existing?.currentRevision) {
+          return { budget: existing, revision: existing.currentRevision };
+        }
+      }
       if (err?.code === "P2002" && err?.meta?.target?.includes("code") && attempts < 5) {
         continue;
       }
@@ -321,6 +356,7 @@ export interface UpdateRevisionInput {
   taxPct?: unknown;
   currencyCode?: string;
   budgetType?: string;
+  signature?: any;
 }
 
 /**
@@ -378,6 +414,10 @@ export async function updateBudgetRevision(
         interventionTypes: data.interventionTypes ?? targetRev.interventionTypes,
         diagnosis: data.diagnosis ?? targetRev.diagnosis,
         technicalDescription: data.technicalDescription ?? targetRev.technicalDescription,
+        signature:
+          data.signature === undefined
+            ? targetRev.signature
+            : data.signature ?? Prisma.JsonNull,
         ...totals,
       },
     });
@@ -417,6 +457,7 @@ export async function updateBudgetRevision(
         interventionTypes: data.interventionTypes ?? targetRev.interventionTypes,
         diagnosis: data.diagnosis ?? targetRev.diagnosis,
         technicalDescription: data.technicalDescription ?? targetRev.technicalDescription,
+        signature: data.signature ?? Prisma.JsonNull,
         ...totals,
         createdById: actorUserId,
       },
@@ -443,6 +484,137 @@ export interface ApproveRevisionOptions {
   notes?: string;
   dueAt?: Date | string | null;
   operationalSiteKey?: string | null;
+}
+
+type StructuredProductionService = {
+  id: string;
+  name: string;
+  description: string;
+  category: "service" | "part" | "labor";
+  quantity: string;
+  unitPrice: string;
+  total: string;
+  completed: false;
+  status: "pending";
+  currency: string;
+};
+
+function strictDecimal(value: unknown, errorCode: string): Prisma.Decimal {
+  try {
+    const decimal = new Prisma.Decimal(String(value));
+    if (!decimal.isFinite()) throw new Error("not finite");
+    return decimal;
+  } catch {
+    throw new UnprocessableEntityError(errorCode);
+  }
+}
+
+function buildStructuredProductionServices(
+  revision: Pick<BudgetRevision, "services" | "parts" | "labor" | "grossTotal">,
+  currencyCode: string,
+): StructuredProductionService[] {
+  const structured: StructuredProductionService[] = [];
+  const sources: Array<{
+    category: StructuredProductionService["category"];
+    rows: unknown;
+    quantityKeys: string[];
+    unitPriceKeys: string[];
+  }> = [
+    { category: "service", rows: revision.services, quantityKeys: ["quantity", "qty"], unitPriceKeys: ["unitPrice", "unit_price", "price"] },
+    { category: "part", rows: revision.parts, quantityKeys: ["quantity", "qty"], unitPriceKeys: ["unitPrice", "unit_price", "price"] },
+    { category: "labor", rows: revision.labor, quantityKeys: ["hours", "quantity", "qty"], unitPriceKeys: ["hourlyRate", "hourly_rate", "unitPrice", "unit_price", "rate"] },
+  ];
+
+  for (const source of sources) {
+    if (!Array.isArray(source.rows)) continue;
+    source.rows.forEach((raw, index) => {
+      const item = raw as Record<string, unknown>;
+      const name = String(item.name ?? item.description ?? item.serviceName ?? "").trim();
+      const quantityRaw = source.quantityKeys
+        .map((key) => item[key])
+        .find((value) => value !== undefined && value !== null && value !== "");
+      const unitPriceRaw = source.unitPriceKeys
+        .map((key) => item[key])
+        .find((value) => value !== undefined && value !== null && value !== "");
+      const totalRaw = item.total;
+
+      const valueCandidates = [unitPriceRaw, totalRaw].filter(
+        (value) => value !== undefined && value !== null && value !== "",
+      );
+      const hasPositiveValue = valueCandidates.some((value) => {
+        try {
+          return new Prisma.Decimal(String(value)).gt(0);
+        } catch {
+          return true;
+        }
+      });
+
+      // Ignore only the empty placeholder rows created by the form.
+      if (!name && !hasPositiveValue) return;
+      if (!name) {
+        throw new UnprocessableEntityError(`BUDGET_SERVICE_NAME_REQUIRED: ${source.category}[${index}]`);
+      }
+
+      const quantity = strictDecimal(quantityRaw ?? 1, `BUDGET_SERVICE_QUANTITY_INVALID: ${source.category}[${index}]`);
+      if (quantity.lte(0)) {
+        throw new UnprocessableEntityError(`BUDGET_SERVICE_QUANTITY_INVALID: ${source.category}[${index}]`);
+      }
+
+      let unitPrice: Prisma.Decimal;
+      let total: Prisma.Decimal;
+      if (unitPriceRaw !== undefined) {
+        unitPrice = strictDecimal(unitPriceRaw, `BUDGET_SERVICE_VALUE_INVALID: ${source.category}[${index}]`);
+        total = quantity.mul(unitPrice);
+        if (totalRaw !== undefined && totalRaw !== null && totalRaw !== "") {
+          const declaredTotal = strictDecimal(totalRaw, `BUDGET_SERVICE_TOTAL_INVALID: ${source.category}[${index}]`);
+          if (!declaredTotal.equals(total)) {
+            throw new UnprocessableEntityError(`BUDGET_SERVICE_TOTAL_MISMATCH: ${source.category}[${index}]`);
+          }
+          total = declaredTotal;
+        }
+      } else if (totalRaw !== undefined && totalRaw !== null && totalRaw !== "") {
+        total = strictDecimal(totalRaw, `BUDGET_SERVICE_TOTAL_INVALID: ${source.category}[${index}]`);
+        unitPrice = total.div(quantity);
+      } else {
+        throw new UnprocessableEntityError(`BUDGET_SERVICE_VALUE_REQUIRED: ${source.category}[${index}]`);
+      }
+
+      if (unitPrice.lte(0) || total.lte(0)) {
+        throw new UnprocessableEntityError(`BUDGET_SERVICE_VALUE_REQUIRED: ${source.category}[${index}]`);
+      }
+
+      structured.push({
+        id: String(item.id || `${source.category}-${index + 1}`),
+        name,
+        description: String(item.description ?? name).trim() || name,
+        category: source.category,
+        quantity: quantity.toString(),
+        unitPrice: unitPrice.toFixed(2),
+        total: total.toFixed(2),
+        completed: false,
+        status: "pending",
+        currency: currencyCode,
+      });
+    });
+  }
+
+  if (structured.length === 0) {
+    throw new UnprocessableEntityError(
+      "BUDGET_NO_EXECUTABLE_SERVICES: O orçamento precisa conter ao menos uma linha estruturada com descrição e valor positivo.",
+    );
+  }
+
+  const structuredGrossTotal = structured.reduce(
+    (sum, service) => sum.add(service.total),
+    new Prisma.Decimal(0),
+  );
+  if (!structuredGrossTotal.equals(revision.grossTotal)) {
+    throw new UnprocessableEntityError(
+      `BUDGET_SERVICE_TOTAL_MISMATCH: linhas=${structuredGrossTotal.toFixed(2)} bruto=${revision.grossTotal.toFixed(2)}.`,
+    );
+  }
+
+  return structured;
 }
 
 /**
@@ -541,49 +713,7 @@ export async function approveBudgetRevision(
         (budget as any).currencyCode ||
         "EUR";
 
-      // Constrói serviços estruturados canônicos a partir das linhas do orçamento
-      const structuredServices: any[] = [];
-      const extractItems = (list: any, defaultCat: string) => {
-        if (Array.isArray(list)) {
-          for (const it of list) {
-            const name = String(it?.name || it?.description || it?.serviceName || defaultCat).trim();
-            const qty = Number(it?.quantity ?? it?.qty ?? it?.hours ?? 1) || 1;
-            const unit = Number(it?.unitPrice ?? it?.price ?? it?.hourlyRate ?? it?.rate ?? 0) || 0;
-            const tot = Number(it?.total ?? (qty * unit)) || (qty * unit);
-            structuredServices.push({
-              id: it?.id || `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-              name,
-              description: String(it?.description || name).trim(),
-              category: defaultCat,
-              quantity: qty,
-              unitPrice: unit,
-              total: tot,
-              completed: false,
-              status: "pending",
-              currency: canonicalCurrency,
-            });
-          }
-        }
-      };
-      extractItems(revision.services, "service");
-      extractItems(revision.parts, "part");
-      extractItems(revision.labor, "labor");
-
-      if (structuredServices.length === 0) {
-        const tot = Number(revision.finalTotal ?? 0);
-        structuredServices.push({
-          id: `svc-${Date.now().toString(36)}`,
-          name: `Serviço Orçamento ${budget.code}`,
-          description: `Serviço aprovado conforme Orçamento ${budget.code}`,
-          category: "service",
-          quantity: 1,
-          unitPrice: tot,
-          total: tot,
-          completed: false,
-          status: "pending",
-          currency: canonicalCurrency,
-        });
-      }
+      const structuredServices = buildStructuredProductionServices(revision, canonicalCurrency);
 
       resolvedPO = await tx.productionOrder.update({
         where: { id: existingPO.id },
@@ -597,7 +727,7 @@ export async function approveBudgetRevision(
           vin: vehicleSnap.vin || existingPO.vin,
           clientId: clientSnap.id || existingPO.clientId,
           clientName: clientSnap.name || existingPO.clientName,
-          platform: `Orçamento ${budget.code} · Total ${revision.finalTotal} EUR`,
+          platform: `Orçamento ${budget.code} · Total ${revision.finalTotal} ${canonicalCurrency}`,
           dueAt: options?.dueAt ? new Date(options.dueAt) : existingPO.dueAt,
           operationalSiteKey: canonicalSiteKey || existingPO.operationalSiteKey,
           currencyCode: canonicalCurrency || existingPO.currencyCode,
@@ -627,49 +757,7 @@ export async function approveBudgetRevision(
         "EUR";
       const poCode = `PO-${Date.now().toString(36).toUpperCase()}`;
 
-      // Constrói serviços estruturados canônicos a partir das linhas do orçamento
-      const structuredServices: any[] = [];
-      const extractItems = (list: any, defaultCat: string) => {
-        if (Array.isArray(list)) {
-          for (const it of list) {
-            const name = String(it?.name || it?.description || it?.serviceName || defaultCat).trim();
-            const qty = Number(it?.quantity ?? it?.qty ?? it?.hours ?? 1) || 1;
-            const unit = Number(it?.unitPrice ?? it?.price ?? it?.hourlyRate ?? it?.rate ?? 0) || 0;
-            const tot = Number(it?.total ?? (qty * unit)) || (qty * unit);
-            structuredServices.push({
-              id: it?.id || `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-              name,
-              description: String(it?.description || name).trim(),
-              category: defaultCat,
-              quantity: qty,
-              unitPrice: unit,
-              total: tot,
-              completed: false,
-              status: "pending",
-              currency: canonicalCurrency,
-            });
-          }
-        }
-      };
-      extractItems(revision.services, "service");
-      extractItems(revision.parts, "part");
-      extractItems(revision.labor, "labor");
-
-      if (structuredServices.length === 0) {
-        const tot = Number(revision.finalTotal ?? 0);
-        structuredServices.push({
-          id: `svc-${Date.now().toString(36)}`,
-          name: `Serviço Orçamento ${budget.code}`,
-          description: `Serviço aprovado conforme Orçamento ${budget.code}`,
-          category: "service",
-          quantity: 1,
-          unitPrice: tot,
-          total: tot,
-          completed: false,
-          status: "pending",
-          currency: canonicalCurrency,
-        });
-      }
+      const structuredServices = buildStructuredProductionServices(revision, canonicalCurrency);
 
       resolvedPO = await tx.productionOrder.create({
         data: {
@@ -685,7 +773,7 @@ export async function approveBudgetRevision(
           licensePlate: vehicleSnap.plate || budget.vehiclePlate || "",
           vin: vehicleSnap.vin || budget.vehicleVin || "",
           color: vehicleSnap.color || null,
-          platform: `Orçamento ${budget.code} · Total ${revision.finalTotal} EUR`,
+          platform: `Orçamento ${budget.code} · Total ${revision.finalTotal} ${canonicalCurrency}`,
           status: "in_production",
           priority: "medium",
           notes: options?.notes || `Orçamento ${budget.code} (Rev ${revision.revisionNumber})`,

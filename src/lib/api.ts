@@ -71,7 +71,53 @@ export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promis
 
     return body as T;
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (
+      (error instanceof DOMException && error.name === "AbortError") ||
+      (controller.signal.aborted && !init?.signal)
+    ) {
+      throw new ApiError("A ligação ao servidor demorou demasiado tempo.", 408);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+export async function apiBlobRequest(path: string, init?: ApiRequestInit): Promise<Blob> {
+  const headers = new Headers(init?.headers ?? {});
+  const token = getAccessToken();
+  const controller = new AbortController();
+  const timeoutMs = typeof init?.timeoutMs === "number" ? init.timeoutMs : DEFAULT_API_TIMEOUT_MS;
+  const timer = window.setTimeout(() => controller.abort(new Error(`API timeout after ${timeoutMs}ms`)), timeoutMs);
+
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const selectedWs = typeof window !== "undefined" ? localStorage.getItem("selected_workspace_id") : null;
+  if (selectedWs && !headers.has("X-Workspace-Id")) {
+    headers.set("X-Workspace-Id", selectedWs);
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`, {
+      ...init,
+      headers,
+      signal: init?.signal ?? controller.signal,
+    });
+    if (!response.ok) {
+      const body = await parseResponseBody(response);
+      const message =
+        typeof body === "object" && body && "message" in body && typeof body.message === "string"
+          ? body.message
+          : `API request failed with status ${response.status}`;
+      throw new ApiError(message, response.status);
+    }
+    return response.blob();
+  } catch (error) {
+    if (
+      (error instanceof DOMException && error.name === "AbortError") ||
+      (controller.signal.aborted && !init?.signal)
+    ) {
       throw new ApiError("A ligação ao servidor demorou demasiado tempo.", 408);
     }
     throw error;

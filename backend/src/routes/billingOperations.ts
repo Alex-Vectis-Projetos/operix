@@ -5,9 +5,10 @@ import { prisma } from "../lib/prisma.js";
 import type { AuthenticatedRequest } from "../middleware/auth.js";
 import { requireAuth } from "../middleware/auth.js";
 import { resolveRequestContext } from "../middleware/requestContext.js";
-import { assertClientCapability, ForbiddenError, NotFoundError } from "../lib/objectAuth.js";
+import { assertClientCapability, ConflictError, ForbiddenError, NotFoundError, UnprocessableEntityError } from "../lib/objectAuth.js";
 import { buildSimplePdf } from "../lib/pdf/simplePdf.js";
 import { isEmailConfigured, sendEmail } from "../lib/email/resend.js";
+import { projectPaymentListItemInTransaction } from "../services/downstreamPaymentOrderAdapter.js";
 
 export const operationalBillingRouter = Router();
 
@@ -125,9 +126,7 @@ function requireAdmin(req: AuthenticatedRequest, res: Response) {
   const isInternalManager =
     ctx?.platformRole === "platform_admin" ||
     ctx?.membershipRole === "owner" ||
-    ctx?.membershipRole === "admin" ||
-    req.auth?.role === "admin" ||
-    req.auth?.role === "owner";
+    ctx?.membershipRole === "admin";
 
   if (!isInternalManager) {
     res.status(403).json({ message: "Forbidden." });
@@ -142,6 +141,19 @@ function parseDateInput(value: string | null | undefined) {
     return new Date(`${value}T12:00:00.000Z`);
   }
   return new Date(value);
+}
+
+function resolveInvoiceAmounts(totalInput: number, paidInput?: number | null) {
+  const totalDecimal = new Prisma.Decimal(String(totalInput));
+  const paidDecimal = new Prisma.Decimal(String(paidInput ?? 0));
+  const difference = totalDecimal.sub(paidDecimal);
+  const remainingDecimal = difference.gt(0) ? difference : new Prisma.Decimal(0);
+  return {
+    totalAmount: totalDecimal.toNumber(),
+    paidAmount: paidDecimal.toNumber(),
+    remainingAmount: remainingDecimal.toNumber(),
+    isFullyPaid: remainingDecimal.isZero(),
+  };
 }
 
 function toDateOnly(value: Date | null | undefined) {
@@ -218,38 +230,6 @@ async function lazyAssignDisplayIdsToExistingClients(workspaceId: string | null 
       });
       if (updated.count > 0) assigned += updated.count;
     });
-  }
-
-  // Sincronização canônica retroativa: garante que todo BillingClient possui registro correspondente em Client
-  const unlinkedBillingClients = await prisma.billingClient.findMany({
-    where: { workspaceId: wsSafe },
-  });
-  for (const bc of unlinkedBillingClients) {
-    try {
-      await prisma.client.upsert({
-        where: { id: bc.id },
-        create: {
-          id: bc.id,
-          workspaceId: bc.workspaceId,
-          visibilityScope: "workspace",
-          name: bc.name,
-          contactEmail: bc.email,
-          contactPhone: bc.phone,
-          address: [bc.address, bc.postalCode, bc.city, bc.country].filter(Boolean).join(", ") || null,
-          displayCode: bc.customerDisplayId,
-          notes: bc.notes,
-          createdBy: bc.createdBy,
-        },
-        update: {
-          name: bc.name,
-          contactEmail: bc.email,
-          contactPhone: bc.phone,
-          address: [bc.address, bc.postalCode, bc.city, bc.country].filter(Boolean).join(", ") || null,
-          displayCode: bc.customerDisplayId,
-          notes: bc.notes,
-        },
-      });
-    } catch {}
   }
 
   return assigned;
@@ -1007,9 +987,10 @@ operationalBillingRouter.post("/admin/ops/invoices", async (req: AuthenticatedRe
     const workspaceId = await resolveOperationalWorkspaceId(req, input.workspace_id);
     const issueDate = parseDateInput(input.issue_date);
     const dueDate = parseDateInput(input.due_date);
-    const paidAmount = Number(input.paid_amount ?? 0);
-    const totalAmount = Number(input.total_amount ?? 0);
-    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+    const { paidAmount, totalAmount, remainingAmount, isFullyPaid } = resolveInvoiceAmounts(input.total_amount, input.paid_amount);
+    if (input.status === "paid" && !isFullyPaid) {
+      throw new UnprocessableEntityError("INVOICE_NOT_FULLY_PAID: paid_amount deve cobrir total_amount antes do status paid.");
+    }
 
     const invoice = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const created = await tx.billingInvoice.create({
@@ -1071,9 +1052,10 @@ operationalBillingRouter.patch("/admin/ops/invoices/:invoiceId", async (req: Aut
     const workspaceId = await resolveOperationalWorkspaceId(req, input.workspace_id);
     const issueDate = parseDateInput(input.issue_date);
     const dueDate = parseDateInput(input.due_date);
-    const paidAmount = Number(input.paid_amount ?? 0);
-    const totalAmount = Number(input.total_amount ?? 0);
-    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+    const { paidAmount, totalAmount, remainingAmount, isFullyPaid } = resolveInvoiceAmounts(input.total_amount, input.paid_amount);
+    if (input.status === "paid" && !isFullyPaid) {
+      throw new UnprocessableEntityError("INVOICE_NOT_FULLY_PAID: paid_amount deve cobrir total_amount antes do status paid.");
+    }
 
     const invoice = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const existing = await tx.billingInvoice.findFirst({
@@ -1082,6 +1064,7 @@ operationalBillingRouter.patch("/admin/ops/invoices/:invoiceId", async (req: Aut
       if (!existing) {
         throw new NotFoundError("Invoice not found.");
       }
+      const canonicalPaymentListInvoice = existing.source === "payment_list";
 
       const updated = await tx.billingInvoice.update({
         where: { id: invoiceId },
@@ -1103,8 +1086,10 @@ operationalBillingRouter.patch("/admin/ops/invoices/:invoiceId", async (req: Aut
           remainingAmount,
           status: input.status,
           notes: input.notes?.trim() || null,
-          metadata: (input.metadata ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-          source: input.source?.trim() || "manual",
+          metadata: canonicalPaymentListInvoice
+            ? (existing.metadata ?? Prisma.JsonNull) as Prisma.InputJsonValue
+            : (input.metadata === undefined ? existing.metadata ?? Prisma.JsonNull : input.metadata ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          source: canonicalPaymentListInvoice ? existing.source : input.source?.trim() || existing.source,
           yearReference: (issueDate ?? new Date()).getUTCFullYear(),
         },
       });
@@ -1122,27 +1107,40 @@ operationalBillingRouter.patch("/admin/ops/invoices/:invoiceId", async (req: Aut
         } as Prisma.InputJsonValue,
       });
 
-      // Se a fatura foi marcada como paga, sincroniza a Lista de Pagamento correspondente se existir
-      if (input.status === "paid") {
-        const meta = (updated.metadata as Record<string, any>) || {};
-        if (typeof meta.paymentListId === "string" && meta.paymentListId && updated.workspaceId) {
-          const pl = await tx.paymentList.findFirst({
-            where: { id: meta.paymentListId, workspaceId: updated.workspaceId },
+      if (input.status === "paid" && existing.workspaceId) {
+        const paymentList = await tx.paymentList.findFirst({
+          where: {
+            workspaceId: existing.workspaceId,
+            invoiceId: existing.id,
+          },
+        });
+        if (canonicalPaymentListInvoice && !paymentList) {
+          throw new ConflictError("PAYMENT_LIST_INVOICE_LINK_NOT_FOUND");
+        }
+        if (canonicalPaymentListInvoice && paymentList) {
+          const meta = (existing.metadata as Record<string, unknown> | null) ?? {};
+          if (meta.paymentListId !== paymentList.id) {
+            throw new ConflictError("PAYMENT_LIST_INVOICE_PROVENANCE_INVALID");
+          }
+        }
+        if (paymentList && paymentList.status !== "pending" && paymentList.status !== "paid") {
+          throw new ConflictError("LIST_INVALID_STATE_TRANSITION");
+        }
+        if (paymentList?.status === "pending") {
+          await tx.paymentList.update({
+            where: { id: paymentList.id },
+            data: {
+              status: "paid",
+              paidAt: new Date(),
+              paidBy: req.auth?.userId ?? null,
+            },
           });
-          if (pl && pl.status !== "paid") {
-            const effTotal =
-              pl.recognizedTotal.isZero() && !pl.sourceDocumentTotal.isZero()
-                ? pl.sourceDocumentTotal
-                : pl.recognizedTotal;
-            await tx.paymentList.update({
-              where: { id: pl.id },
-              data: {
-                status: "paid",
-                paidAt: new Date(),
-                paidBy: req.auth?.userId ?? null,
-                recognizedTotal: effTotal,
-              },
-            });
+          const items = await tx.paymentListItem.findMany({
+            where: { paymentListId: paymentList.id, workspaceId: existing.workspaceId },
+            select: { id: true },
+          });
+          for (const item of items) {
+            await projectPaymentListItemInTransaction(tx, existing.workspaceId, item.id);
           }
         }
       }
@@ -1253,9 +1251,7 @@ operationalBillingRouter.post("/admin/ops/invoices/import", async (req: Authenti
     const workspaceId = await resolveOperationalWorkspaceId(req, input.workspace_id);
     const issueDate = parseDateInput(input.issue_date);
     const dueDate = parseDateInput(input.due_date);
-    const paidAmount = Number(input.paid_amount ?? 0);
-    const totalAmount = Number(input.total_amount ?? 0);
-    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+    const { paidAmount, totalAmount, remainingAmount } = resolveInvoiceAmounts(input.total_amount, input.paid_amount);
 
     const invoice = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const created = await tx.billingInvoice.create({

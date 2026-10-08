@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { uploadBudgetPhoto } from "@/lib/apiBudgets";
+import { getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto } from "@/lib/apiBudgets";
 import {
   Dialog,
   DialogContent,
@@ -52,11 +52,6 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/hooks/useLanguage";
 import { useExtractProductionOrder, type FieldConfidence } from "@/hooks/useExtractProductionOrder";
 import { FileUploadZone } from "@/components/service-orders/FileUploadZone";
-import {
-  buildPrintableBudget as sharedBuildPrintableBudget,
-  openBudgetPreview as sharedOpenBudgetPreview,
-  downloadBudgetHtml as sharedDownloadBudgetHtml,
-} from "@/lib/budgetPdfUtils";
 
 export type BudgetPartLine = {
   id: string;
@@ -143,7 +138,7 @@ export type BudgetSignature = {
   signerType: BudgetSignerType | "";
   signedAt: string | null;
   signatureData: string | null;
-  confirmationMethod: "DRAWN_SIGNATURE" | "EXPLICIT_CONFIRMATION" | "IMPLICIT_BY_SEND_TO_CLIENT" | null;
+  confirmationMethod: "DRAWN_SIGNATURE" | "EXPLICIT_CONFIRMATION" | null;
   budgetNumberAtMoment: string | null;
   finalValueAtMoment: number | null;
 };
@@ -1035,7 +1030,7 @@ export function emptyBudget(
   type?: BudgetType,
 ): Budget {
   return {
-    id: uid(),
+    id: `local-${uid()}`,
     number: "",
     issued_at: todayISO(),
     status: "draft",
@@ -1184,7 +1179,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   // ─── Integração Cliente → Orçamento ───
   type BudgetClient = {
     id: string;
-    kind?: "professional" | "particular" | "company";
+    kind?: "professional" | "particular";
     name: string;
     customer_display_num?: number | null;
     customer_display_id?: string | null;
@@ -1217,11 +1212,20 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
           list = [];
         }
       }
-      return list.map((c: any) => ({
+      return list.map((c: any): BudgetClient => ({
         id: c.id,
-        kind: (c.kind || (c.legal_name || c.siren || c.siret ? "company" : "particular")) as "particular" | "company",
+        kind: c.kind === "professional" ||
+          c.kind === "company" ||
+          c.legal_name ||
+          c.siren ||
+          c.siret
+          ? "professional"
+          : "particular",
         name: c.name || c.legal_name || "Cliente",
-        customer_display_num: c.display_code || c.displayCode || null,
+        customer_display_num:
+          typeof c.customer_display_num === "number"
+            ? c.customer_display_num
+            : null,
         customer_display_id: c.display_code || c.displayCode || null,
         siren: c.siren || c.document || null,
         siret: c.siret || null,
@@ -2002,9 +2006,13 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       },
       updated_at: signedAt,
     };
-    setFormSafe(finalDraft);
-    try { await onSave({ ...finalDraft, updated_at: new Date().toISOString() }); } catch {}
-    toast.success(langDisplay === "fr" ? "Devis approuvé · Bloqué" : "Orçamento aprovado · Bloqueado.");
+    try {
+      await onSave({ ...finalDraft, updated_at: new Date().toISOString() });
+      setFormSafe(finalDraft);
+      toast.success(langDisplay === "fr" ? "Devis approuvé · Bloqué" : "Orçamento aprovado · Bloqueado.");
+    } catch (error: any) {
+      toast.error(error?.message || (langDisplay === "fr" ? "Échec de l'approbation." : "Falha ao aprovar o orçamento."));
+    }
   };
 
   const approveWithExplicitConfirmation = async () => {
@@ -2038,11 +2046,15 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       },
       updated_at: signedAt,
     };
-    setFormSafe(finalDraft);
-    setConfirmNoSignatureOpen(false);
-    setConfirmNoSignatureChecked(false);
-    try { await onSave({ ...finalDraft, updated_at: new Date().toISOString() }); } catch {}
-    toast.success(langDisplay === "fr" ? "Devis approuvé · Bloqué" : "Orçamento aprovado · Bloqueado.");
+    try {
+      await onSave({ ...finalDraft, updated_at: new Date().toISOString() });
+      setFormSafe(finalDraft);
+      setConfirmNoSignatureOpen(false);
+      setConfirmNoSignatureChecked(false);
+      toast.success(langDisplay === "fr" ? "Devis approuvé · Bloqué" : "Orçamento aprovado · Bloqueado.");
+    } catch (error: any) {
+      toast.error(error?.message || (langDisplay === "fr" ? "Échec de l'approbation." : "Falha ao aprovar o orçamento."));
+    }
   };
 
   const rawPhone = (form.client_phone ?? "").trim();
@@ -2069,39 +2081,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const hasSmsConfigured = false;
   const hasAnyContact = hasValidPhone || hasValidEmail;
 
-  const markSentAndSave = () => {
-    if (isLocked) return;
-    const signedAt = new Date().toISOString();
-    const alreadyApproved =
-      form.status === "approved" && form.signature?.signed && !!form.signature?.finalValueAtMoment;
-    if (alreadyApproved) {
-      return;
-    }
-    const signerFromClient =
-      form.client_name?.trim() ||
-      confirmNoSignatureName.trim() ||
-      signatureSignerName.trim() ||
-      "Cliente";
-    const signerType: BudgetSignerType = confirmNoSignatureType || signatureSignerType || "authorized";
-    const finalDraft: Budget = {
-      ...form,
-      status: "approved",
-      signature: {
-        signed: true,
-        signerName: signerFromClient,
-        signerType,
-        signedAt,
-        signatureData: null,
-        confirmationMethod: "IMPLICIT_BY_SEND_TO_CLIENT",
-        budgetNumberAtMoment: form.number || null,
-        finalValueAtMoment: totals.total,
-      },
-      updated_at: signedAt,
-    };
-    setFormSafe(finalDraft);
-    try { onSave({ ...finalDraft, updated_at: new Date().toISOString() }); } catch {}
-  };
-
   const sendToClient = () => {
     if (isLocked) return;
     if (form.status === "sent") {
@@ -2119,42 +2098,51 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     setSendClientDialogOpen(true);
   };
 
-  const triggerBudgetBlobDownload = () => {
-    if (form.id && !form.id.startsWith("local-")) {
+  const triggerBudgetBlobDownload = async (): Promise<boolean> => {
+    if (!form.id || form.id.startsWith("local-")) {
+      toast.warning(langDisplay === "fr" ? "Enregistrez le devis avant de générer le PDF." : "Salve o orçamento antes de gerar o PDF.");
+      return false;
+    }
+    try {
+      const blob = await getBudgetPdf(form.id);
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = `/api/budgets/${form.id}/pdf`;
+      a.href = url;
       a.download = `Devis_${form.number || form.id}.pdf`;
-      a.target = "_blank";
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
+      a.remove();
+      URL.revokeObjectURL(url);
+      return true;
+    } catch (error: any) {
+      toast.error(error?.message || (langDisplay === "fr" ? "Échec du téléchargement PDF." : "Falha ao baixar o PDF."));
+      return false;
+    }
+  };
+
+  const viewBudgetPreview = async () => {
+    if (!form.id || form.id.startsWith("local-")) {
+      toast.warning(langDisplay === "fr" ? "Enregistrez le devis avant l'aperçu." : "Salve o orçamento antes da visualização.");
       return;
     }
-    try { sharedDownloadBudgetHtml(form, langDisplay); } catch {}
-  };
-
-  const viewBudgetPreview = () => {
-    if (form.id && !form.id.startsWith("local-")) {
-      window.open(`/api/budgets/${form.id}/pdf`, "_blank");
-      return;
-    }
-    try { sharedOpenBudgetPreview(form, langDisplay); } catch (err) {
-      toast.error(langDisplay === "fr" ? "Impossible d'ouvrir l'aperçu." : "Não foi possível abrir a visualização.");
+    try {
+      const blob = await getBudgetPdf(form.id);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error: any) {
+      toast.error(error?.message || (langDisplay === "fr" ? "Impossible d'ouvrir l'aperçu." : "Não foi possível abrir a visualização."));
     }
   };
 
-  const buildPrintableBudget = (b: Budget): string => {
-    return sharedBuildPrintableBudget(b, langDisplay);
-  };
-
-  const confirmSendByWhatsApp = () => {
+  const confirmSendByWhatsApp = async () => {
     setSendClientDialogOpen(false);
     if (!hasValidPhone) {
       toast.error(langDisplay === "fr" ? "Téléphone non valide" : "Telefone/WhatsApp não cadastrado.");
       return;
     }
-    markSentAndSave();
-    triggerBudgetBlobDownload();
+    const downloaded = await triggerBudgetBlobDownload();
+    if (!downloaded) return;
     const digits = (form.client_phone ?? "").replace(/\D/g, "");
     const text = encodeURIComponent(
       (langDisplay === "fr" ? "Devis n° " : "Orçamento nº ") + (form.number || "(sem número)") +
@@ -2176,50 +2164,28 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     }
     if (form.id && !form.id.startsWith("local-")) {
       try {
-        await apiRequest(`/budgets/${form.id}/send-email`, {
-          method: "POST",
-          body: JSON.stringify({ to: form.client_email }),
-        });
+        await sendBudgetEmail(form.id, form.client_email || "");
         toast.success(
           langDisplay === "fr"
             ? "Devis envoyé par e-mail avec succès."
             : "Orçamento enviado por e-mail com sucesso.",
         );
-        markSentAndSave();
+        setFormSafe({ ...form, status: "sent", updated_at: new Date().toISOString() });
+        qc.invalidateQueries({ queryKey: ["budgets"] });
         return;
       } catch (err: any) {
-        console.warn("Falha no envio transacional de e-mail:", err);
+        toast.error(err?.message || (langDisplay === "fr" ? "Échec de l'envoi transactionnel." : "Falha no envio transacional do e-mail."));
+        return;
       }
     }
-    markSentAndSave();
-    triggerBudgetBlobDownload();
-    const subject = encodeURIComponent(
-      (langDisplay === "fr" ? "Devis n° " : "Orçamento nº ") + (form.number || "(sem número)"),
-    );
-    const body = encodeURIComponent(
-      (langDisplay === "fr" ? "Bonjour,\n\nVeuillez trouver ci-joint votre devis.\nValeur finale : " : "Olá,\n\nSegue seu orçamento em anexo.\nValor final: ") +
-      formatMoney(totals.total, form.currency || "EUR") +
-      (langDisplay === "fr"
-        ? "\n\nLe document a été téléchargé localement et est prêt à être joint à cet e-mail.\n\nCordialement,"
-        : "\n\nO documento foi baixado localmente e está pronto para ser anexado a este e-mail.\n\nAtenciosamente,"),
-    );
-    const url = `mailto:${form.client_email ?? ""}?subject=${subject}&body=${body}`;
-    try { window.location.href = url; } catch {}
+    toast.warning(langDisplay === "fr" ? "Enregistrez le devis avant l'envoi." : "Salve o orçamento antes do envio.");
   };
 
-  const downloadPDF = () => {
-    if (form.id && !form.id.startsWith("local-")) {
-      const a = document.createElement("a");
-      a.href = `/api/budgets/${form.id}/pdf`;
-      a.download = `Devis_${form.number || form.id}.pdf`;
-      a.target = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      toast.success(langDisplay === "fr" ? "Téléchargement du PDF en cours..." : "Download do PDF em andamento...");
-      return;
+  const downloadPDF = async () => {
+    const downloaded = await triggerBudgetBlobDownload();
+    if (downloaded) {
+      toast.success(langDisplay === "fr" ? "PDF téléchargé." : "PDF baixado.");
     }
-    try { sharedDownloadBudgetHtml(form, langDisplay); } catch {}
   };
 
   const computeTotalsFor = (b: Budget) => {

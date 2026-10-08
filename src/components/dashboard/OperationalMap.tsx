@@ -224,21 +224,27 @@ export function OperationalMap() {
         apiRequest<{ events: any[] }>("/weather/backend-events?table_name=geolocation&action=CHECKIN&limit=300").catch(() => ({ events: [] })),
         apiRequest<any[]>("/locations").catch(() => []),
       ]);
-      const eventPoints = (eventsData.events ?? []).filter((d: any) => d.payload?.lat && d.payload?.lng);
+      const eventPoints = (eventsData.events ?? []).flatMap((event: any) => {
+        const lat = Number(event.payload?.lat);
+        const lng = Number(event.payload?.lng);
+        return Number.isFinite(lat) && Number.isFinite(lng)
+          ? [{ ...event, payload: { ...event.payload, lat, lng } }]
+          : [];
+      });
       const locationsList = Array.isArray(locData) ? locData : [];
-      const locPoints = locationsList.map((loc: any) => {
-        const text = [loc.city, loc.name, loc.address, loc.country].filter(Boolean).join(" ");
-        const cityKey = guessCityFromText(text) || (loc.city ? loc.city.toLowerCase() : "paris");
-        const coords = (CITY_COORDS as any)[cityKey] || [2.3522, 48.8566];
-        return {
+      const locPoints = locationsList.flatMap((loc: any) => {
+        const lat = Number(loc.latitude ?? loc.lat);
+        const lng = Number(loc.longitude ?? loc.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+        return [{
           id: loc.id,
           created_at: loc.created_at || new Date().toISOString(),
           payload: {
-            lat: Number(loc.latitude ?? coords[1]),
-            lng: Number(loc.longitude ?? coords[0]),
-            city: loc.name || loc.city || "Base Operacional",
+            lat,
+            lng,
+            city: loc.name || loc.address_city || loc.city || "Base Operacional",
           },
-        };
+        }];
       });
       return [...eventPoints, ...locPoints];
     },
@@ -586,6 +592,8 @@ export function OperationalMap() {
       // Isolated: tile/style/zoom errors won't crash the map
       const msg = e?.error?.message ?? String(e);
       if (/zoom|tile|404|aborted/i.test(msg)) return; // expected, ignore
+      setMapReady(false);
+      setMapError(msg || "Falha inesperada no mapa operacional.");
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
@@ -870,15 +878,18 @@ export function OperationalMap() {
       window.clearTimeout(fallbackReadyTimer);
       setMapReady(true);
       } catch (e) {
-        void e;
         window.clearTimeout(fallbackReadyTimer);
-        setMapReady(true);
+        setMapReady(false);
+        setMapError((e as Error)?.message || "Falha ao montar as camadas do mapa.");
       }
     });
 
     const fallbackReadyTimer = window.setTimeout(() => {
-      setMapReady(true);
-    }, 2000);
+      if (!map.loaded()) {
+        setMapReady(false);
+        setMapError("Tempo limite excedido ao inicializar o mapa. Verifique WebGL e a fonte cartográfica.");
+      }
+    }, 10_000);
 
     mapRef.current = map;
 

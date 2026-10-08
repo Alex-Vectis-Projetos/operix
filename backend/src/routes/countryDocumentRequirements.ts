@@ -21,7 +21,7 @@ function checkPermission(req: AuthenticatedRequest, action: "view" | "edit"): bo
   if (role === "client") return false;
 
   // Owner and admin of the active workspace have full management access
-  if (role === "owner" || role === "admin" || req.auth?.role === "owner" || req.auth?.role === "admin") {
+  if (role === "owner" || role === "admin") {
     return true;
   }
 

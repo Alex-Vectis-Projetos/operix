@@ -59,6 +59,7 @@ const createBudgetSchema = z.object({
   diagnosis: z.string().max(2000).optional().nullable(),
   technicalDescription: z.string().max(2000).optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
+  signature: z.record(z.any()).optional().nullable(),
   grossTotal: z.union([z.number(), z.string()]).optional(),
   discountPct: z.union([z.number(), z.string()]).optional(),
   taxPct: z.union([z.number(), z.string()]).optional(),
@@ -80,6 +81,7 @@ const updateRevisionSchema = z.object({
   dossierSnapshot: z.record(z.any()).optional().nullable(),
   currencyCode: z.string().optional(),
   budgetType: z.string().optional(),
+  signature: z.record(z.any()).optional().nullable(),
 });
 
 const approveRevisionSchema = z.object({
@@ -410,26 +412,6 @@ budgetsRouter.post("/", async (req: Request, res: Response, next: NextFunction) 
         });
       }
       input.legacyLocalId = idempotencyKey;
-    }
-
-    // Debounce automático de criação concorrente / duplo clique no mesmo workspace pelo mesmo usuário nos últimos 5 segundos
-    const fiveSecondsAgo = new Date(Date.now() - 5000);
-    const concurrentBudget = await prisma.budget.findFirst({
-      where: {
-        workspaceId: ctx.activeWorkspaceId,
-        createdById: ctx.actorUserId,
-        createdAt: { gte: fiveSecondsAgo },
-        clientId: input.clientId ?? undefined,
-        vehiclePlate: input.vehiclePlate ? { equals: input.vehiclePlate, mode: "insensitive" } : undefined,
-      },
-      include: { currentRevision: true, approvedRevision: true },
-    });
-    if (concurrentBudget) {
-      return res.status(200).json({
-        budget: formatBudget(concurrentBudget),
-        revision: formatRevision(concurrentBudget.currentRevision),
-        idempotent: true,
-      });
     }
 
     const { technicianUserId } = await validateTechnicianAssignment(
@@ -961,7 +943,10 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
     }
     assertObjectAccess(ctx, budget);
 
-    const rev = budget.approvedRevision || budget.currentRevision;
+    const rev = budget.currentRevision || budget.approvedRevision;
+    if (!rev) {
+      return res.status(409).json({ message: "Orçamento sem revisão corrente." });
+    }
     const clientSnap = (rev?.clientSnapshot as any) || {};
     const vehicleSnap = (rev?.vehicleSnapshot as any) || {};
     const currency = rev?.currencyCode || "EUR";
@@ -1051,15 +1036,18 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
     }
     assertObjectAccess(ctx, budget);
 
-    const rev = budget.approvedRevision || budget.currentRevision;
-    const clientSnap = (rev?.clientSnapshot as any) || {};
+    const rev = budget.currentRevision || budget.approvedRevision;
+    if (!rev) {
+      return res.status(409).json({ message: "Orçamento sem revisão corrente." });
+    }
+    const clientSnap = (rev.clientSnapshot as any) || {};
     const recipientEmail = String(req.body.to || clientSnap.email || "").trim();
     if (!recipientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
       return res.status(422).json({ message: "E-mail de destino inválido ou não informado." });
     }
 
-    const currency = rev?.currencyCode || "EUR";
-    const totalFormatted = `${Number(rev?.finalTotal ?? 0).toFixed(2)} ${currency}`;
+    const currency = rev.currencyCode || "EUR";
+    const totalFormatted = `${Number(rev.finalTotal ?? 0).toFixed(2)} ${currency}`;
     const subject = `Devis ${budget.code} · ${budget.clientName || clientSnap.name || "Client"}`;
     const htmlBody = `
       <div style="font-family: sans-serif; font-size: 14px; color: #1e293b; line-height: 1.6;">
@@ -1076,7 +1064,7 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
     `;
 
     const pdfLines = [
-      `Date: ${(rev?.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,
+      `Date: ${(rev.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,
       `Client: ${budget.clientName || clientSnap.name || "—"}`,
       `Vehicule: ${[budget.vehicleBrand, budget.vehicleModel, budget.vehiclePlate].filter(Boolean).join(" ") || "—"}`,
       `TOTAL: ${totalFormatted}`,
@@ -1092,14 +1080,29 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
       attachments: [{ filename: `${budget.code}.pdf`, contentBase64: pdfBase64 }],
     });
 
+    if (!emailResult.ok) {
+      return res.status(502).json({
+        ok: false,
+        delivered: false,
+        provider: emailResult.provider,
+        recipient: recipientEmail,
+        message: "Não foi possível entregar o e-mail transacional. O orçamento permanece no estado atual.",
+      });
+    }
+
+    if (rev.status === "draft") {
+      await prisma.budgetRevision.update({
+        where: { id: rev.id },
+        data: { status: "submitted" },
+      });
+    }
+
     return res.status(200).json({
       ok: true,
-      delivered: emailResult.ok,
+      delivered: true,
       provider: emailResult.provider,
       recipient: recipientEmail,
-      message: emailResult.ok
-        ? "E-mail enviado com sucesso com PDF anexado."
-        : `Tentativa de envio registrada no sistema (${emailResult.provider}).`,
+      message: "E-mail enviado com sucesso com PDF anexado.",
     });
   } catch (error) {
     return next(error);

@@ -1,4 +1,4 @@
-import { apiRequest } from "@/lib/api";
+import { apiBlobRequest, apiRequest } from "@/lib/api";
 
 export type BudgetStatus = "draft" | "submitted" | "approved" | "rejected";
 export type BudgetType = "pdr" | "smart" | "detailing" | "bodywork" | "mechanic" | "other";
@@ -24,6 +24,7 @@ export interface CreateBudgetInput {
   diagnosis?: string | null;
   technicalDescription?: string | null;
   notes?: string | null;
+  signature?: Record<string, any> | null;
   grossTotal?: number | string;
   discountPct?: number | string;
   taxPct?: number | string;
@@ -42,6 +43,7 @@ export interface UpdateBudgetRevisionInput {
   diagnosis?: string | null;
   technicalDescription?: string | null;
   notes?: string | null;
+  signature?: Record<string, any> | null;
   grossTotal?: number | string;
   discountPct?: number | string;
   taxPct?: number | string;
@@ -188,7 +190,10 @@ export function createBudget(payload: CreateBudgetInput): Promise<{
 }> {
   return apiRequest<{ budget: ApiBudget; revision: ApiBudgetRevision }>("/budgets", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(payload.legacyLocalId ? { "Idempotency-Key": payload.legacyLocalId } : {}),
+    },
     body: JSON.stringify(payload),
   });
 }
@@ -294,8 +299,27 @@ export function deleteBudget(id: string): Promise<{ success: boolean; id: string
   });
 }
 
+export function getBudgetPdf(id: string): Promise<Blob> {
+  return apiBlobRequest(`/budgets/${id}/pdf`);
+}
+
+export function sendBudgetEmail(id: string, to: string): Promise<{
+  ok: true;
+  delivered: true;
+  provider: string;
+  recipient: string;
+  message: string;
+}> {
+  return apiRequest(`/budgets/${id}/send-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to }),
+  });
+}
+
 export function apiBudgetToLocalBudget(api: ApiBudget): any {
   const rev = api.currentRevision || api.current_revision;
+  const canonicalStatus = rev?.status || "draft";
   const clientSnap = rev?.clientSnapshot || rev?.client_snapshot || {};
   const vehicleSnap = rev?.vehicleSnapshot || rev?.vehicle_snapshot || {};
   const dossierSnap = rev?.dossierSnapshot || rev?.dossier_snapshot || {};
@@ -304,7 +328,7 @@ export function apiBudgetToLocalBudget(api: ApiBudget): any {
     id: api.id,
     number: api.code,
     issued_at: rev?.createdAt || rev?.created_at || api.createdAt || api.created_at || new Date().toISOString(),
-    status: (rev?.status || "draft") as any,
+    status: (canonicalStatus === "submitted" ? "sent" : canonicalStatus) as any,
     budget_type: (rev?.budgetType || rev?.budget_type || "pdr") as any,
 
     client_id: api.clientId || api.client_id || clientSnap.id || undefined,
@@ -367,6 +391,7 @@ export function apiBudgetToLocalBudget(api: ApiBudget): any {
 
 export function localBudgetToApiPayload(b: any): CreateBudgetInput {
   return {
+    legacyLocalId: typeof b.id === "string" && b.id.startsWith("local-") ? b.id : null,
     clientId: b.client_id || null,
     clientName: b.client_name || null,
     vehiclePlate: b.vehicle_plate || null,
@@ -415,5 +440,6 @@ export function localBudgetToApiPayload(b: any): CreateBudgetInput {
     discountPct: b.discount_pct || 0,
     taxPct: b.iva_pct || 0,
     notes: b.notes || null,
+    signature: b.signature?.signed ? b.signature : null,
   };
 }

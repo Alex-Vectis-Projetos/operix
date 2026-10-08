@@ -29,17 +29,17 @@ import {
   type ProductionStatus,
 } from "@/hooks/useProductionOrders";
 import { useLanguage } from "@/hooks/useLanguage";
-import {
-  openBudgetPreview as sharedOpenBudgetPreview,
-  downloadBudgetHtml as sharedDownloadBudgetHtml,
-} from "@/lib/budgetPdfUtils";
 import { LocalBudgetsSyncBanner } from "./LocalBudgetsSyncBanner";
 import { useBudgets } from "@/hooks/useBudgets";
-import { apiBudgetToLocalBudget, localBudgetToApiPayload } from "@/lib/apiBudgets";
+import {
+  apiBudgetToLocalBudget,
+  getBudgetPdf,
+  localBudgetToApiPayload,
+} from "@/lib/apiBudgets";
 
 const STATUS_META: Record<BudgetStatus, { label: string; tone: string }> = {
   draft: { label: "Rascunho", tone: "bg-slate-500/10 text-slate-700 dark:text-slate-300" },
-  sent: { label: "Rascunho", tone: "bg-slate-500/10 text-slate-700 dark:text-slate-300" },
+  sent: { label: "Enviado", tone: "bg-blue-500/10 text-blue-700 dark:text-blue-300" },
   approved: {
     label: "Aprovado",
     tone: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
@@ -60,6 +60,8 @@ function visualBudgetStatusLabelAndTone(b: Budget): { label: string; tone: strin
       return STATUS_META.approved;
     case "rejected":
       return STATUS_META.rejected;
+    case "sent":
+      return STATUS_META.sent;
     default:
       return STATUS_META.draft;
   }
@@ -203,16 +205,20 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           return;
         }
 
-        await updateRevisionMutation.mutateAsync({
+        const updated = await updateRevisionMutation.mutateAsync({
           budgetId: b.id,
           revisionId: revId,
           patch: payload,
         });
+        const targetRevisionId = updated.revision.id;
 
-        if (b.status === "approved" && existing.approvedRevisionId !== revId) {
+        if (
+          b.status === "approved" &&
+          existing.approvedRevisionId !== targetRevisionId
+        ) {
           const res = await approveBudgetMutation.mutateAsync({
             budgetId: b.id,
-            revisionId: revId,
+            revisionId: targetRevisionId,
             options: { notes: b.diagnosis || undefined },
           });
           if (res?.productionOrder && onOpenOrder) {
@@ -238,6 +244,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       setEditing(null);
     } catch (err: any) {
       toast.error(err?.message || "Erro ao salvar orçamento.");
+      throw err;
     }
   };
 
@@ -263,43 +270,40 @@ export function BudgetPanel({ onOpenOrder }: Props) {
     setOpen(true);
   };
 
-  const openPreview = (b: Budget) => {
-    if (b.id && !b.id.startsWith("local-")) {
-      window.open(`/api/budgets/${b.id}/pdf`, "_blank");
+  const openPreview = async (b: Budget) => {
+    if (!b.id || b.id.startsWith("local-")) {
+      toast.warning(langDisplay === "fr" ? "Enregistrez le devis avant l'aperçu." : "Salve o orçamento antes da visualização.");
       return;
     }
     try {
-      sharedOpenBudgetPreview(b, langDisplay);
-    } catch {
-      toast.error(langDisplay === "fr" ? "Impossible d'ouvrir l'aperçu." : "Não foi possível abrir a visualização.");
+      const blob = await getBudgetPdf(b.id);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error: any) {
+      toast.error(error?.message || (langDisplay === "fr" ? "Impossible d'ouvrir l'aperçu." : "Não foi possível abrir a visualização."));
     }
   };
 
   const downloadBudgetFile = async (b: Budget) => {
     if (b.id && !b.id.startsWith("local-")) {
       try {
-        const res = await fetch(`/api/budgets/${b.id}/pdf`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
-        });
-        if (res.ok) {
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `${b.number || "orcamento"}.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-          return;
-        }
-      } catch (e) {
-        console.warn("Download PDF backend falhou, usando fallback HTML", e);
+        const blob = await getBudgetPdf(b.id);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${b.number || "orcamento"}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return;
+      } catch (error: any) {
+        toast.error(error?.message || "Falha ao baixar o PDF.");
+        return;
       }
     }
-    try {
-      sharedDownloadBudgetHtml(b, langDisplay);
-    } catch {}
+    toast.warning(langDisplay === "fr" ? "Enregistrez le devis avant le téléchargement." : "Salve o orçamento antes do download.");
   };
 
   const removeBudget = async (id: string) => {

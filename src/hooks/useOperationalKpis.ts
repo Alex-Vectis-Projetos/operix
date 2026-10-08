@@ -35,11 +35,10 @@ export function useOperationalKpis() {
     },
     queryFn: async (): Promise<OperationalKpis> => {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const [platData, eventsData, poData, clientsData, peopleData] = await withPromiseTimeout(
+      const [platData, eventsData, clientsData, peopleData] = await withPromiseTimeout(
         Promise.all([
           apiRequest<any>(`/platforms?workspace_id=${workspaceId}`).catch(() => []),
           apiRequest<{ count: number }>(`/weather/backend-events?count=true&since=${since}`).catch(() => ({ count: 0 })),
-          apiRequest<{ orders?: any[] } | any[]>(`/production-orders`).catch(() => []),
           apiRequest<{ clients?: any[] } | any[]>(`/billing/admin/ops/clients?active_only=false`).catch(() => []),
           apiRequest<{ people?: any[] } | any[]>(`/people`).catch(() => []),
         ]),
@@ -48,40 +47,19 @@ export function useOperationalKpis() {
       );
 
       const platforms: any[] = Array.isArray(platData) ? platData : platData?.platforms ?? [];
-      const orders: any[] = Array.isArray(poData) ? poData : poData?.orders ?? [];
       const clientsList: any[] = Array.isArray(clientsData) ? clientsData : clientsData?.clients ?? [];
       const peopleList: any[] = Array.isArray(peopleData) ? peopleData : peopleData?.people ?? [];
 
-      const openOrders = orders.filter((o: any) =>
-        ["pending", "in_production", "waiting_parts", "in_progress", "open"].includes(o.status)
-      );
-
-      const techSet = new Set<string>();
-      const cliSet = new Set<string>();
-
-      for (const o of openOrders) {
-        if (o.technician_user_id || o.technicianUserId) {
-          techSet.add(o.technician_user_id || o.technicianUserId);
-        }
-        if (o.client_id || o.clientId) {
-          cliSet.add(o.client_id || o.clientId);
-        }
-      }
-
-      for (const p of peopleList) {
-        if (p.role === "technician" || p.category === "technician") {
-          techSet.add(p.id);
-        }
-      }
-
-      const activeClientsCount = cliSet.size > 0 ? cliSet.size : clientsList.filter((c: any) => c.is_active !== false).length;
-      const activeTechniciansCount = techSet.size > 0 ? techSet.size : peopleList.filter((p: any) => p.is_active !== false && (p.role === "technician" || p.category === "technician")).length;
+      const activeClientsCount = clientsList.filter((client: any) => client.is_active !== false).length;
+      const activeTechniciansCount = peopleList.filter(
+        (person: any) => person.status !== "inactive" && person.type === "technician",
+      ).length;
 
       const activeIds = new Set<string>();
       for (const p of platforms) {
         if (p.state === "active" || p.status === "active") activeIds.add(p.id);
       }
-      const platformsActive = activeIds.size > 0 ? activeIds.size : (openOrders.length > 0 ? 1 : platforms.length);
+      const platformsActive = activeIds.size;
       const platformsInactive = Math.max(0, platforms.length - platformsActive);
       const platformsDegraded = platforms.filter((p: any) => p.state === "degraded").length;
 

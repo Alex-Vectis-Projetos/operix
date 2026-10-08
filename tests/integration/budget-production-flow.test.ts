@@ -82,6 +82,10 @@ const FIXTURES = {
   clientB: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 };
 
+const executableService = (amount: number, name = "Serviço de funilaria") => [
+  { name, quantity: 1, unit_price: amount },
+];
+
 describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
   let app: express.Express;
   let server: any;
@@ -772,6 +776,17 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
       expect(totals.finalTotal.toString()).toBe("1107");
     });
 
+    it("DECIMAL-02: calculateRevisionTotals aceita snake_case e não multiplica total já declarado", () => {
+      const totals = calculateRevisionTotals({
+        services: [{ quantity: 2, unit_price: 10 }],
+        labor: [{ hours: 1.5, hourly_rate: 20 }],
+        parts: [{ quantity: 3, total: 15 }],
+      });
+
+      expect(totals.grossTotal.toString()).toBe("65");
+      expect(totals.finalTotal.toString()).toBe("65");
+    });
+
     it("SERVICE-BUDGET-01: createBudget gera agregador Budget, Revision 1 (draft) e código sequencial", async () => {
       const res = await createBudget({
         workspaceId: FIXTURES.wsAlpha,
@@ -811,6 +826,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         clientId: FIXTURES.clientA,
         vehiclePlate: "IMMUT-01",
         grossTotal: 200.0,
+        services: executableService(200),
       });
 
       // 2. Edita draft -> in-place
@@ -819,11 +835,20 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         budget.id,
         revision.id,
         FIXTURES.ownerA.userId,
-        { grossTotal: 250.0 }
+        {
+          grossTotal: 250.0,
+          services: executableService(250),
+          signature: {
+            type: "drawn",
+            signedBy: "Owner A",
+            signedAt: "2026-10-08T12:00:00.000Z",
+          },
+        }
       );
       expect(draftUpdate.isNewRevision).toBe(false);
       expect(draftUpdate.revision.id).toBe(revision.id);
       expect(draftUpdate.revision.finalTotal.toString()).toBe("250");
+      expect((draftUpdate.revision.signature as any)?.signedBy).toBe("Owner A");
 
       // 3. Aprova revisão
       const approved = await approveBudgetRevision(
@@ -840,7 +865,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         budget.id,
         revision.id,
         FIXTURES.ownerA.userId,
-        { grossTotal: 400.0 }
+        { grossTotal: 400.0, services: executableService(400) }
       );
       expect(postApprUpdate.isNewRevision).toBe(true);
       expect(postApprUpdate.revision.revisionNumber).toBe(2);
@@ -863,6 +888,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         clientId: FIXTURES.clientA,
         vehiclePlate: "PO-TRAN-01",
         grossTotal: 300.0,
+        services: executableService(300),
       });
 
       // 2. Primeira aprovação -> Cria ProductionOrder (1:0..1)
@@ -885,7 +911,11 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         budget.id,
         rev1.id,
         FIXTURES.ownerA.userId,
-        { grossTotal: 600.0, vehicleSnapshot: { plate: "PO-TRAN-01-REV2" } }
+        {
+          grossTotal: 600.0,
+          services: executableService(600),
+          vehicleSnapshot: { plate: "PO-TRAN-01-REV2" },
+        }
       );
 
       // 4. Re-aprovação da revisão 2 -> Atualiza a MESMA OP conforme whitelist
@@ -911,6 +941,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         createdById: FIXTURES.ownerA.userId,
         vehiclePlate: "DELIV-01",
         grossTotal: 150.0,
+        services: executableService(150),
       });
 
       const appr = await approveBudgetRevision(
@@ -932,7 +963,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         budget.id,
         revision.id,
         FIXTURES.ownerA.userId,
-        { grossTotal: 300.0 }
+        { grossTotal: 300.0, services: executableService(300) }
       );
 
       // Tentativa de aprovar orçamento com OP já entregue deve lançar UnprocessableEntityError (422)
@@ -970,7 +1001,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
         budget.id,
         revision.id,
         FIXTURES.ownerA.userId,
-        { grossTotal: 50.0 }
+        { grossTotal: 50.0, services: executableService(50) }
       );
       await approveBudgetRevision(
         FIXTURES.wsAlpha,
@@ -989,6 +1020,26 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           "Motivo tardio"
         )
       ).rejects.toThrow(ConflictError);
+    });
+
+    it("SERVICE-NO-EXECUTABLE-LINES-01: aprovação sem linha executável não cria ProductionOrder", async () => {
+      const { budget, revision } = await createBudget({
+        workspaceId: FIXTURES.wsAlpha,
+        createdById: FIXTURES.ownerA.userId,
+        vehiclePlate: "NO-SVC-01",
+        grossTotal: 80,
+      });
+
+      await expect(
+        approveBudgetRevision(
+          FIXTURES.wsAlpha,
+          budget.id,
+          revision.id,
+          FIXTURES.ownerA.userId,
+        ),
+      ).rejects.toThrow(/BUDGET_NO_EXECUTABLE_SERVICES/);
+
+      expect(await prisma.productionOrder.count({ where: { budgetId: budget.id } })).toBe(0);
     });
 
     it("SERVICE-SYNC-LOCAL-01: syncLocalBudgets migra orçamentos legados com idempotência concorrente", async () => {
@@ -1285,6 +1336,10 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           status: "submitted",
           clientSnapshot: { name: "Cliente" },
           vehicleSnapshot: { plate: "ABC-1111" },
+          services: executableService(100),
+          grossTotal: 100,
+          netTotal: 100,
+          finalTotal: 100,
           createdById: FIXTURES.ownerA.userId,
         },
       });
@@ -1319,6 +1374,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           grossTotal: 800.0,
           netTotal: 800.0,
           finalTotal: 800.0,
+          services: executableService(800),
           createdById: FIXTURES.ownerA.userId,
         },
       });
@@ -1378,6 +1434,10 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           status: "submitted",
           clientSnapshot: { name: "Cliente" },
           vehicleSnapshot: { plate: "RACE-01" },
+          services: executableService(500),
+          grossTotal: 500,
+          netTotal: 500,
+          finalTotal: 500,
           createdById: FIXTURES.ownerA.userId,
         },
       });
@@ -1446,6 +1506,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           grossTotal: 1000.0,
           netTotal: 1000.0,
           finalTotal: 1000.0,
+          services: executableService(1000),
           createdById: FIXTURES.ownerA.userId,
         },
       });
@@ -1481,6 +1542,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           grossTotal: 1200.0,
           netTotal: 1200.0,
           finalTotal: 1200.0,
+          services: executableService(1200),
           createdById: FIXTURES.ownerA.userId,
         },
       });
@@ -1656,6 +1718,7 @@ describe("Spec 002 — Test-First Acceptance Suite (T02)", () => {
           grossTotal: 700.0,
           netTotal: 700.0,
           finalTotal: 700.0,
+          services: executableService(700),
           createdById: FIXTURES.techA1.userId,
         },
       });

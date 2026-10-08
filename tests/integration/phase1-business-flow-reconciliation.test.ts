@@ -1731,6 +1731,19 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
       });
       expect(clientResp.status).toBe(403);
 
+      const paymentListItem = await prisma.paymentListItem.create({
+        data: {
+          workspaceId: fixture.workspaceA,
+          paymentListId: readyListId,
+          weeklogEntryId: "entry-claim-ready-01",
+          technicianUserId: fixture.techA,
+          technicianName: "Technician A",
+          vehicleDescription: "VECTIS vehicle",
+          servicesSnapshot: [{ name: "Repair", total: "2500.00" }],
+          totalAmount: "2500.00",
+        },
+      });
+
       // 2. Authorized internal operator invokes create
       const response = await request(`/api/payment-lists/${readyListId}/invoice/create`, {
         method: "POST",
@@ -1759,6 +1772,51 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         body: JSON.stringify({ toStatus: "cancelled" }),
       });
       expect(cancelResp.status).toBe(409);
+
+      const canonicalInvoice = await prisma.billingInvoice.findUniqueOrThrow({
+        where: { id: body.invoiceId },
+      });
+      const invoicePatch = {
+        invoice_number: canonicalInvoice.invoiceNumber,
+        type: canonicalInvoice.type,
+        customer_name: canonicalInvoice.customerName,
+        customer_snapshot: { name: canonicalInvoice.customerName || "VECTIS Client" },
+        issue_date: canonicalInvoice.issueDate!.toISOString().slice(0, 10),
+        due_date: canonicalInvoice.dueDate?.toISOString().slice(0, 10) ?? null,
+        total_amount: 2500,
+        paid_amount: 2499.99,
+        status: "paid",
+        source: "manual",
+        metadata: { paymentListId: pendingListId },
+      };
+
+      const underpaid = await request(`/api/billing/admin/ops/invoices/${body.invoiceId}`, {
+        method: "PATCH",
+        headers: headers(fixture.ownerA, fixture.workspaceA),
+        body: JSON.stringify(invoicePatch),
+      });
+      const underpaidBody = await underpaid.json();
+      expect(underpaid.status, JSON.stringify(underpaidBody)).toBe(422);
+      expect((await prisma.paymentList.findUniqueOrThrow({ where: { id: readyListId } })).status).toBe("pending");
+
+      const paid = await request(`/api/billing/admin/ops/invoices/${body.invoiceId}`, {
+        method: "PATCH",
+        headers: headers(fixture.ownerA, fixture.workspaceA),
+        body: JSON.stringify({ ...invoicePatch, paid_amount: 2500 }),
+      });
+      expect(paid.status).toBe(200);
+
+      const paidList = await prisma.paymentList.findUniqueOrThrow({ where: { id: readyListId } });
+      const paidInvoice = await prisma.billingInvoice.findUniqueOrThrow({ where: { id: body.invoiceId } });
+      const projectedItem = await prisma.paymentListItem.findUniqueOrThrow({ where: { id: paymentListItem.id } });
+      expect(paidList.status).toBe("paid");
+      expect(paidInvoice.source).toBe("payment_list");
+      expect((paidInvoice.metadata as any).paymentListId).toBe(readyListId);
+      expect(projectedItem.legacyPaymentOrderId).toBeTruthy();
+
+      if (projectedItem.legacyPaymentOrderId) {
+        await prisma.paymentOrder.delete({ where: { id: projectedItem.legacyPaymentOrderId } });
+      }
     });
 
     it("LIST-INVOICE-CREATE-IDEMPOTENT-01: Repeated create command returns and reuses same handoff without duplicate invoice", async () => {
@@ -1941,6 +1999,24 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         body: JSON.stringify({ invoiceId: foreignInv.id }),
       });
       expect(foreignRes.status).toBe(404);
+
+      const payAssociatedInvoice = await request(`/api/billing/admin/ops/invoices/${existingInv.id}`, {
+        method: "PATCH",
+        headers: headers(fixture.ownerA, fixture.workspaceA),
+        body: JSON.stringify({
+          invoice_number: existingInv.invoiceNumber,
+          type: existingInv.type,
+          customer_name: existingInv.customerName,
+          customer_snapshot: { name: existingInv.customerName || "VECTIS Client" },
+          issue_date: existingInv.issueDate.toISOString().slice(0, 10),
+          total_amount: 1500,
+          paid_amount: 1500,
+          status: "paid",
+          source: "manual",
+        }),
+      });
+      expect(payAssociatedInvoice.status).toBe(200);
+      expect((await prisma.paymentList.findUniqueOrThrow({ where: { id: assocListId } })).status).toBe("paid");
     });
 
     it("LIST-INVOICE-ATOMIC-ROLLBACK-01: Transaction failure rolls back invoice, link, status, and claims together", async () => {
@@ -2100,6 +2176,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
           status: "draft",
           clientSnapshot: { name: "VECTIS Client" },
           vehicleSnapshot: { plate: "EW-621-GF" },
+          services: [{ name: "Serviço de funilaria", quantity: 1, unit_price: 700 }],
           grossTotal: 700.0,
           currencyCode: "EUR",
           createdById: fixture.ownerA,
@@ -2364,6 +2441,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
           status: "draft",
           clientSnapshot: { name: "VECTIS Client", siteKey: "site-lyon" },
           vehicleSnapshot: { plate: "LYON-01" },
+          services: [{ name: "Serviço de funilaria", quantity: 1, unit_price: 400 }],
           grossTotal: 400.0,
           currencyCode: "EUR",
           createdById: fixture.ownerA,
