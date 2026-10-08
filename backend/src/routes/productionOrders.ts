@@ -62,6 +62,12 @@ function mapOrder(o: any) {
     budgetRevisionId: o.budgetRevisionId,
     due_at: o.dueAt?.toISOString?.() ?? (o.dueAt ? String(o.dueAt) : null),
     dueAt: o.dueAt?.toISOString?.() ?? (o.dueAt ? String(o.dueAt) : null),
+    operational_site_key: o.operationalSiteKey,
+    operationalSiteKey: o.operationalSiteKey,
+    currency_code: o.currencyCode,
+    currencyCode: o.currencyCode,
+    performed_services: o.performedServices,
+    performedServices: o.performedServices,
     started_at: o.startedAt?.toISOString?.() ?? (o.startedAt ? String(o.startedAt) : null),
     startedAt: o.startedAt?.toISOString?.() ?? (o.startedAt ? String(o.startedAt) : null),
     finished_at: o.finishedAt?.toISOString?.() ?? (o.finishedAt ? String(o.finishedAt) : null),
@@ -1010,6 +1016,143 @@ productionOrdersRouter.post("/:id/finalize", async (req: Request, res: Response,
     const result = await finalizeProductionOrder(ctx, id);
 
     return res.status(200).json(result);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// PATCH /api/production-orders/:id/services/:serviceId — Conclui/marca serviço individual da OP
+productionOrdersRouter.patch("/:id/services/:serviceId", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params["id"] as string;
+    const serviceId = req.params["serviceId"] as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const order = await prisma.productionOrder.findUnique({ where: { id } });
+    if (!order || order.workspaceId !== ctx.activeWorkspaceId) {
+      return res.status(404).json({ message: "Ordem de produção não encontrada." });
+    }
+    assertObjectAccess(ctx, order);
+
+    const completed = req.body.completed !== undefined ? Boolean(req.body.completed) : true;
+    let list = Array.isArray(order.performedServices) ? [...(order.performedServices as any[])] : [];
+    let found = false;
+
+    list = list.map((s) => {
+      if (s.id === serviceId) {
+        found = true;
+        return {
+          ...s,
+          completed,
+          status: completed ? "completed" : "pending",
+          completedAt: completed ? new Date().toISOString() : null,
+          completedBy: completed ? ctx.actorUserId : null,
+        };
+      }
+      return s;
+    });
+
+    if (!found) {
+      return res.status(404).json({ message: "Serviço não encontrado na ordem de produção." });
+    }
+
+    const saved = await prisma.productionOrder.update({
+      where: { id },
+      data: { performedServices: list },
+    });
+
+    return res.json(mapOrder(saved));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// POST /api/production-orders/:id/request-budget-correction — Pausa OP e gera revisão N+1 no orçamento
+productionOrdersRouter.post("/:id/request-budget-correction", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params["id"] as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const order = await prisma.productionOrder.findUnique({
+      where: { id },
+      include: { budget: true },
+    });
+    if (!order || order.workspaceId !== ctx.activeWorkspaceId) {
+      return res.status(404).json({ message: "Ordem de produção não encontrada." });
+    }
+    assertObjectAccess(ctx, order);
+
+    const reason = String(req.body.reason || "Correção de orçamento solicitada pela produção").trim();
+
+    // 1. Pausa a ordem de produção
+    const updatedOrder = await prisma.productionOrder.update({
+      where: { id },
+      data: {
+        status: "paused",
+        notes: order.notes ? `${order.notes}\n[PAUSA/CORREÇÃO] ${reason}` : `[PAUSA/CORREÇÃO] ${reason}`,
+      },
+    });
+
+    // 2. Se houver orçamento vinculado, cria nova revisão de rascunho (N+1) preservando a aprovada
+    let nextRevision: any = null;
+    if (order.budgetId) {
+      const budget = await prisma.budget.findUnique({
+        where: { id: order.budgetId },
+        include: { currentRevision: true, approvedRevision: true },
+      });
+      if (budget) {
+        const baseRev = budget.approvedRevision || budget.currentRevision;
+        if (baseRev) {
+          const latestRev = await prisma.budgetRevision.findFirst({
+            where: { budgetId: budget.id },
+            orderBy: { revisionNumber: "desc" },
+          });
+          const nextRevNumber = (latestRev?.revisionNumber ?? 1) + 1;
+          nextRevision = await prisma.budgetRevision.create({
+            data: {
+              budgetId: budget.id,
+              revisionNumber: nextRevNumber,
+              status: "draft",
+              budgetType: baseRev.budgetType,
+              netTotal: baseRev.netTotal,
+              interventionTypes: baseRev.interventionTypes,
+              currencyCode: baseRev.currencyCode,
+              grossTotal: baseRev.grossTotal,
+              discountPct: baseRev.discountPct,
+              discountTotal: baseRev.discountTotal,
+              taxPct: baseRev.taxPct,
+              taxTotal: baseRev.taxTotal,
+              finalTotal: baseRev.finalTotal,
+              parts: baseRev.parts as any,
+              services: baseRev.services as any,
+              labor: baseRev.labor as any,
+              diagnosis: baseRev.diagnosis,
+              technicalDescription: `[Revisão gerada por solicitação de correção na produção]: ${reason}`,
+              vehicleSnapshot: baseRev.vehicleSnapshot as any,
+              clientSnapshot: baseRev.clientSnapshot as any,
+              dossierSnapshot: baseRev.dossierSnapshot as any,
+              createdById: ctx.actorUserId,
+            },
+          });
+          await prisma.budget.update({
+            where: { id: budget.id },
+            data: { currentRevisionId: nextRevision.id },
+          });
+        }
+      }
+    }
+
+    return res.json({
+      order: mapOrder(updatedOrder),
+      nextRevisionId: nextRevision?.id ?? null,
+      message: "Ordem pausada e nova revisão de orçamento iniciada com sucesso.",
+    });
   } catch (error) {
     return next(error);
   }

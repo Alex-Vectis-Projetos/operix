@@ -219,6 +219,39 @@ async function lazyAssignDisplayIdsToExistingClients(workspaceId: string | null 
       if (updated.count > 0) assigned += updated.count;
     });
   }
+
+  // Sincronização canônica retroativa: garante que todo BillingClient possui registro correspondente em Client
+  const unlinkedBillingClients = await prisma.billingClient.findMany({
+    where: { workspaceId: wsSafe },
+  });
+  for (const bc of unlinkedBillingClients) {
+    try {
+      await prisma.client.upsert({
+        where: { id: bc.id },
+        create: {
+          id: bc.id,
+          workspaceId: bc.workspaceId,
+          visibilityScope: "workspace",
+          name: bc.name,
+          contactEmail: bc.email,
+          contactPhone: bc.phone,
+          address: [bc.address, bc.postalCode, bc.city, bc.country].filter(Boolean).join(", ") || null,
+          displayCode: bc.customerDisplayId,
+          notes: bc.notes,
+          createdBy: bc.createdBy,
+        },
+        update: {
+          name: bc.name,
+          contactEmail: bc.email,
+          contactPhone: bc.phone,
+          address: [bc.address, bc.postalCode, bc.city, bc.country].filter(Boolean).join(", ") || null,
+          displayCode: bc.customerDisplayId,
+          notes: bc.notes,
+        },
+      });
+    } catch {}
+  }
+
   return assigned;
 }
 
@@ -579,6 +612,31 @@ operationalBillingRouter.post("/admin/ops/clients", async (req: AuthenticatedReq
         } as Prisma.InputJsonValue,
       });
 
+      // Sincroniza Client canônico compartilhado para orçamentos e operações
+      await tx.client.upsert({
+        where: { id: created.id },
+        create: {
+          id: created.id,
+          workspaceId,
+          visibilityScope: "workspace",
+          name: created.name,
+          contactEmail: created.email,
+          contactPhone: created.phone,
+          address: [created.address, created.postalCode, created.city, created.country].filter(Boolean).join(", ") || null,
+          displayCode: created.customerDisplayId,
+          notes: created.notes,
+          createdBy: req.auth?.userId ?? null,
+        },
+        update: {
+          name: created.name,
+          contactEmail: created.email,
+          contactPhone: created.phone,
+          address: [created.address, created.postalCode, created.city, created.country].filter(Boolean).join(", ") || null,
+          displayCode: created.customerDisplayId,
+          notes: created.notes,
+        },
+      });
+
       return created;
     });
 
@@ -642,6 +700,30 @@ operationalBillingRouter.patch("/admin/ops/clients/:clientId", async (req: Authe
           kind: updated.kind,
           is_active: updated.isActive,
         } as Prisma.InputJsonValue,
+      });
+
+      // Sincroniza atualização para Client canônico
+      await tx.client.upsert({
+        where: { id: updated.id },
+        create: {
+          id: updated.id,
+          workspaceId: updated.workspaceId,
+          visibilityScope: "workspace",
+          name: updated.name,
+          contactEmail: updated.email,
+          contactPhone: updated.phone,
+          address: [updated.address, updated.postalCode, updated.city, updated.country].filter(Boolean).join(", ") || null,
+          displayCode: updated.customerDisplayId,
+          notes: updated.notes,
+          createdBy: req.auth?.userId ?? null,
+        },
+        update: {
+          name: updated.name,
+          contactEmail: updated.email,
+          contactPhone: updated.phone,
+          address: [updated.address, updated.postalCode, updated.city, updated.country].filter(Boolean).join(", ") || null,
+          notes: updated.notes,
+        },
       });
 
       return updated;
@@ -1039,6 +1121,31 @@ operationalBillingRouter.patch("/admin/ops/invoices/:invoiceId", async (req: Aut
           status: updated.status,
         } as Prisma.InputJsonValue,
       });
+
+      // Se a fatura foi marcada como paga, sincroniza a Lista de Pagamento correspondente se existir
+      if (input.status === "paid") {
+        const meta = (updated.metadata as Record<string, any>) || {};
+        if (typeof meta.paymentListId === "string" && meta.paymentListId && updated.workspaceId) {
+          const pl = await tx.paymentList.findFirst({
+            where: { id: meta.paymentListId, workspaceId: updated.workspaceId },
+          });
+          if (pl && pl.status !== "paid") {
+            const effTotal =
+              pl.recognizedTotal.isZero() && !pl.sourceDocumentTotal.isZero()
+                ? pl.sourceDocumentTotal
+                : pl.recognizedTotal;
+            await tx.paymentList.update({
+              where: { id: pl.id },
+              data: {
+                status: "paid",
+                paidAt: new Date(),
+                paidBy: req.auth?.userId ?? null,
+                recognizedTotal: effTotal,
+              },
+            });
+          }
+        }
+      }
 
       return updated;
     });

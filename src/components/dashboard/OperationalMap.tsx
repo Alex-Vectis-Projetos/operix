@@ -196,20 +196,51 @@ export function OperationalMap() {
     staleTime: 60_000,
     placeholderData: (previousData) => previousData ?? [],
     queryFn: async () => {
-      const data = await apiRequest<{ orders: any[] }>("/service-orders?limit=500");
-      return data.orders ?? [];
+      const [soData, poData] = await Promise.all([
+        apiRequest<{ orders: any[] }>("/service-orders?limit=500").catch(() => ({ orders: [] })),
+        apiRequest<{ orders?: any[] } | any[]>("/production-orders").catch(() => []),
+      ]);
+      const legacyOrders = soData.orders ?? [];
+      const prodOrders: any[] = Array.isArray(poData) ? poData : (poData?.orders ?? []);
+      const mappedProdOrders = prodOrders.map((p) => ({
+        id: p.id,
+        platform: p.platform || p.client_name || p.clientName || "Operação",
+        car_name: [p.brand, p.model].filter(Boolean).join(" "),
+        license_plate: p.license_plate || p.licensePlate || "",
+        status: p.status,
+      }));
+      return [...legacyOrders, ...mappedProdOrders];
     },
   });
 
-  /* -------- data: geo checkins (teams) ------------------------------ */
+  /* -------- data: geo checkins and branch locations (teams) --------- */
   const { data: geoCheckins = [], isLoading: loadingGeo } = useQuery({
     queryKey: ["op-map-geo"],
     retry: 0,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData ?? [],
     queryFn: async () => {
-      const data = await apiRequest<{ events: any[] }>("/weather/backend-events?table_name=geolocation&action=CHECKIN&limit=300");
-      return (data.events ?? []).filter((d: any) => d.payload?.lat && d.payload?.lng);
+      const [eventsData, locData] = await Promise.all([
+        apiRequest<{ events: any[] }>("/weather/backend-events?table_name=geolocation&action=CHECKIN&limit=300").catch(() => ({ events: [] })),
+        apiRequest<any[]>("/locations").catch(() => []),
+      ]);
+      const eventPoints = (eventsData.events ?? []).filter((d: any) => d.payload?.lat && d.payload?.lng);
+      const locationsList = Array.isArray(locData) ? locData : [];
+      const locPoints = locationsList.map((loc: any) => {
+        const text = [loc.city, loc.name, loc.address, loc.country].filter(Boolean).join(" ");
+        const cityKey = guessCityFromText(text) || (loc.city ? loc.city.toLowerCase() : "paris");
+        const coords = (CITY_COORDS as any)[cityKey] || [2.3522, 48.8566];
+        return {
+          id: loc.id,
+          created_at: loc.created_at || new Date().toISOString(),
+          payload: {
+            lat: Number(loc.latitude ?? coords[1]),
+            lng: Number(loc.longitude ?? coords[0]),
+            city: loc.name || loc.city || "Base Operacional",
+          },
+        };
+      });
+      return [...eventPoints, ...locPoints];
     },
   });
 
@@ -836,12 +867,18 @@ export function OperationalMap() {
         map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
         map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
       });
+      window.clearTimeout(fallbackReadyTimer);
       setMapReady(true);
       } catch (e) {
         void e;
+        window.clearTimeout(fallbackReadyTimer);
         setMapReady(true);
       }
     });
+
+    const fallbackReadyTimer = window.setTimeout(() => {
+      setMapReady(true);
+    }, 2000);
 
     mapRef.current = map;
 
@@ -850,6 +887,7 @@ export function OperationalMap() {
     const radarStaggerTimer = radarStaggerTimerRef.current;
 
     return () => {
+      window.clearTimeout(fallbackReadyTimer);
       if (radarTimer) window.clearTimeout(radarTimer);
       if (initTimer) window.clearTimeout(initTimer);
       if (radarStaggerTimer) window.clearTimeout(radarStaggerTimer);

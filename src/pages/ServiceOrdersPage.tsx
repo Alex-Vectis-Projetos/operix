@@ -453,15 +453,15 @@ export default function ServiceOrdersPage() {
                                 <tr key={wl.id} className="hover:bg-muted/30 transition-colors">
                                   <td className="p-3 font-semibold text-foreground">
                                     <div className="flex items-center gap-1.5">
-                                      <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                                      {wl.week ?? `Início ${wl.startsOn}`}
+                                      <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                      <span>{wl.week ?? (wl.startsOn ? `Semana ${wl.startsOn.slice(0, 10)}` : "Semana")}</span>
                                     </div>
-                                    <div className="text-[10px] text-muted-foreground font-normal">
+                                    <div className="text-[10px] text-muted-foreground font-mono">
                                       ID: {wl.id.slice(0, 8)}
                                     </div>
                                   </td>
-                                  <td className="p-3 text-foreground font-medium">
-                                    {wl.clientId}
+                                  <td className="p-3 text-foreground font-medium max-w-[220px] truncate" title={wl.clientName || wl.clientId}>
+                                    {wl.clientName || wl.clientId}
                                   </td>
                                   <td className="p-3 text-muted-foreground">
                                     {wl.siteKey}

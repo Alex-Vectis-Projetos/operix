@@ -162,10 +162,55 @@ export interface CreateBudgetInput {
 export async function createBudget(input: CreateBudgetInput) {
   // 1. Validação estrita de vinculação cross-tenant de cliente (CLIENT-01)
   if (input.clientId) {
-    const client = await prisma.client.findUnique({
+    let client = await prisma.client.findUnique({
       where: { id: input.clientId },
       select: { id: true, workspaceId: true, name: true },
     });
+    if (!client) {
+      const billingClient = await prisma.billingClient.findUnique({
+        where: { id: input.clientId },
+        select: {
+          id: true,
+          workspaceId: true,
+          name: true,
+          customerDisplayId: true,
+          email: true,
+          phone: true,
+          address: true,
+          postalCode: true,
+          city: true,
+          country: true,
+          notes: true,
+          createdBy: true,
+        },
+      });
+      if (billingClient) {
+        if (billingClient.workspaceId !== input.workspaceId) {
+          throw new ForbiddenError("Cliente não pertence ao workspace ativo.");
+        }
+        client = await prisma.client.upsert({
+          where: { id: billingClient.id },
+          create: {
+            id: billingClient.id,
+            workspaceId: input.workspaceId,
+            visibilityScope: "workspace",
+            name: billingClient.name,
+            contactEmail: billingClient.email,
+            contactPhone: billingClient.phone,
+            address: [billingClient.address, billingClient.postalCode, billingClient.city, billingClient.country]
+              .filter(Boolean)
+              .join(", ") || null,
+            displayCode: billingClient.customerDisplayId,
+            notes: billingClient.notes,
+            createdBy: billingClient.createdBy,
+          },
+          update: {
+            name: billingClient.name,
+          },
+          select: { id: true, workspaceId: true, name: true },
+        });
+      }
+    }
     if (!client || client.workspaceId !== input.workspaceId) {
       throw new ForbiddenError("Cliente não pertence ao workspace ativo.");
     }
@@ -496,6 +541,50 @@ export async function approveBudgetRevision(
         (budget as any).currencyCode ||
         "EUR";
 
+      // Constrói serviços estruturados canônicos a partir das linhas do orçamento
+      const structuredServices: any[] = [];
+      const extractItems = (list: any, defaultCat: string) => {
+        if (Array.isArray(list)) {
+          for (const it of list) {
+            const name = String(it?.name || it?.description || it?.serviceName || defaultCat).trim();
+            const qty = Number(it?.quantity ?? it?.qty ?? it?.hours ?? 1) || 1;
+            const unit = Number(it?.unitPrice ?? it?.price ?? it?.hourlyRate ?? it?.rate ?? 0) || 0;
+            const tot = Number(it?.total ?? (qty * unit)) || (qty * unit);
+            structuredServices.push({
+              id: it?.id || `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+              name,
+              description: String(it?.description || name).trim(),
+              category: defaultCat,
+              quantity: qty,
+              unitPrice: unit,
+              total: tot,
+              completed: false,
+              status: "pending",
+              currency: canonicalCurrency,
+            });
+          }
+        }
+      };
+      extractItems(revision.services, "service");
+      extractItems(revision.parts, "part");
+      extractItems(revision.labor, "labor");
+
+      if (structuredServices.length === 0) {
+        const tot = Number(revision.finalTotal ?? 0);
+        structuredServices.push({
+          id: `svc-${Date.now().toString(36)}`,
+          name: `Serviço Orçamento ${budget.code}`,
+          description: `Serviço aprovado conforme Orçamento ${budget.code}`,
+          category: "service",
+          quantity: 1,
+          unitPrice: tot,
+          total: tot,
+          completed: false,
+          status: "pending",
+          currency: canonicalCurrency,
+        });
+      }
+
       resolvedPO = await tx.productionOrder.update({
         where: { id: existingPO.id },
         data: {
@@ -512,6 +601,7 @@ export async function approveBudgetRevision(
           dueAt: options?.dueAt ? new Date(options.dueAt) : existingPO.dueAt,
           operationalSiteKey: canonicalSiteKey || existingPO.operationalSiteKey,
           currencyCode: canonicalCurrency || existingPO.currencyCode,
+          performedServices: structuredServices,
           // Preservados intocados: status, startedAt, finishedAt, deliveredAt, technicianUserId, technicianName, priority
         },
       });
@@ -537,6 +627,50 @@ export async function approveBudgetRevision(
         "EUR";
       const poCode = `PO-${Date.now().toString(36).toUpperCase()}`;
 
+      // Constrói serviços estruturados canônicos a partir das linhas do orçamento
+      const structuredServices: any[] = [];
+      const extractItems = (list: any, defaultCat: string) => {
+        if (Array.isArray(list)) {
+          for (const it of list) {
+            const name = String(it?.name || it?.description || it?.serviceName || defaultCat).trim();
+            const qty = Number(it?.quantity ?? it?.qty ?? it?.hours ?? 1) || 1;
+            const unit = Number(it?.unitPrice ?? it?.price ?? it?.hourlyRate ?? it?.rate ?? 0) || 0;
+            const tot = Number(it?.total ?? (qty * unit)) || (qty * unit);
+            structuredServices.push({
+              id: it?.id || `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+              name,
+              description: String(it?.description || name).trim(),
+              category: defaultCat,
+              quantity: qty,
+              unitPrice: unit,
+              total: tot,
+              completed: false,
+              status: "pending",
+              currency: canonicalCurrency,
+            });
+          }
+        }
+      };
+      extractItems(revision.services, "service");
+      extractItems(revision.parts, "part");
+      extractItems(revision.labor, "labor");
+
+      if (structuredServices.length === 0) {
+        const tot = Number(revision.finalTotal ?? 0);
+        structuredServices.push({
+          id: `svc-${Date.now().toString(36)}`,
+          name: `Serviço Orçamento ${budget.code}`,
+          description: `Serviço aprovado conforme Orçamento ${budget.code}`,
+          category: "service",
+          quantity: 1,
+          unitPrice: tot,
+          total: tot,
+          completed: false,
+          status: "pending",
+          currency: canonicalCurrency,
+        });
+      }
+
       resolvedPO = await tx.productionOrder.create({
         data: {
           workspaceId: budget.workspaceId,
@@ -559,6 +693,7 @@ export async function approveBudgetRevision(
           dueAt: options?.dueAt ? new Date(options.dueAt) : null,
           operationalSiteKey: canonicalSiteKey,
           currencyCode: canonicalCurrency,
+          performedServices: structuredServices,
         },
       });
     }

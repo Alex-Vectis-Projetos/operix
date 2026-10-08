@@ -95,6 +95,7 @@ describe("Clients & People CRUD Persistence & Tenant Isolation Suite", () => {
             return createdClientRow;
           }),
         },
+        client: { upsert: vi.fn().mockResolvedValue({}) },
         backendEventLog: {
           create: vi.fn().mockResolvedValue({ id: "log-1" }),
         },
@@ -168,6 +169,7 @@ describe("Clients & People CRUD Persistence & Tenant Isolation Suite", () => {
             return createdClientRow;
           }),
         },
+        client: { upsert: vi.fn().mockResolvedValue({}) },
         backendEventLog: {
           create: vi.fn().mockResolvedValue({ id: "log-2" }),
         },

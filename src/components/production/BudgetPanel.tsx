@@ -247,11 +247,27 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   };
 
   const openEdit = (b: Budget) => {
-    setEditing(b);
+    if (b.status === "approved") {
+      const forked: Budget = {
+        ...b,
+        status: "draft",
+        signature: null,
+        rejection: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      setEditing(forked);
+    } else {
+      setEditing(b);
+    }
     setOpen(true);
   };
 
   const openPreview = (b: Budget) => {
+    if (b.id && !b.id.startsWith("local-")) {
+      window.open(`/api/budgets/${b.id}/pdf`, "_blank");
+      return;
+    }
     try {
       sharedOpenBudgetPreview(b, langDisplay);
     } catch {
@@ -259,7 +275,28 @@ export function BudgetPanel({ onOpenOrder }: Props) {
     }
   };
 
-  const downloadBudgetFile = (b: Budget) => {
+  const downloadBudgetFile = async (b: Budget) => {
+    if (b.id && !b.id.startsWith("local-")) {
+      try {
+        const res = await fetch(`/api/budgets/${b.id}/pdf`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${b.number || "orcamento"}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          return;
+        }
+      } catch (e) {
+        console.warn("Download PDF backend falhou, usando fallback HTML", e);
+      }
+    }
     try {
       sharedDownloadBudgetHtml(b, langDisplay);
     } catch {}
@@ -492,7 +529,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                         className="cursor-pointer text-right tabular-nums font-semibold"
                         onClick={() => openPreview(b)}
                       >
-                        {formatBRL(computeTotalsFor(b).total)}
+                        {formatBRL(computeTotalsFor(b).total, b.currency || "EUR")}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1.5">

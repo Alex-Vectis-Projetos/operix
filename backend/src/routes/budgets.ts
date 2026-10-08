@@ -28,6 +28,8 @@ import {
   getPresignedDownloadUrl,
   assertTenantStoragePath,
 } from "../lib/minio.js";
+import { buildSimplePdf } from "../lib/pdf/simplePdf.js";
+import { sendEmail } from "../lib/email/resend.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -390,6 +392,46 @@ budgetsRouter.post("/", async (req: Request, res: Response, next: NextFunction) 
 
     const input = createBudgetSchema.parse(req.body);
 
+    // Idempotência explícita via header (Idempotency-Key / X-Idempotency-Key)
+    const idempotencyKey = (req.headers["idempotency-key"] || req.headers["x-idempotency-key"]) as string | undefined;
+    if (idempotencyKey) {
+      const existingKeyBudget = await prisma.budget.findFirst({
+        where: {
+          workspaceId: ctx.activeWorkspaceId,
+          legacyLocalId: idempotencyKey,
+        },
+        include: { currentRevision: true, approvedRevision: true },
+      });
+      if (existingKeyBudget) {
+        return res.status(200).json({
+          budget: formatBudget(existingKeyBudget),
+          revision: formatRevision(existingKeyBudget.currentRevision),
+          idempotent: true,
+        });
+      }
+      input.legacyLocalId = idempotencyKey;
+    }
+
+    // Debounce automático de criação concorrente / duplo clique no mesmo workspace pelo mesmo usuário nos últimos 5 segundos
+    const fiveSecondsAgo = new Date(Date.now() - 5000);
+    const concurrentBudget = await prisma.budget.findFirst({
+      where: {
+        workspaceId: ctx.activeWorkspaceId,
+        createdById: ctx.actorUserId,
+        createdAt: { gte: fiveSecondsAgo },
+        clientId: input.clientId ?? undefined,
+        vehiclePlate: input.vehiclePlate ? { equals: input.vehiclePlate, mode: "insensitive" } : undefined,
+      },
+      include: { currentRevision: true, approvedRevision: true },
+    });
+    if (concurrentBudget) {
+      return res.status(200).json({
+        budget: formatBudget(concurrentBudget),
+        revision: formatRevision(concurrentBudget.currentRevision),
+        idempotent: true,
+      });
+    }
+
     const { technicianUserId } = await validateTechnicianAssignment(
       ctx,
       input.technicianUserId
@@ -499,35 +541,36 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
       );
     }
 
-    // Client authority: Budget approval belongs to the Client / authorized Client Collaborator.
     // Workspace Owner/Admin may NOT approve a client Budget merely because they are workspace admins.
     if (!budget.clientId) {
       throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
     }
 
-    const revForApprove = await prisma.budgetRevision.findFirst({
-      where: { id: revisionId, budgetId: budget.id },
-    });
-    const clientSnapApprove = (revForApprove?.clientSnapshot as any) || {};
-    const dossierSnapApprove = (revForApprove?.dossierSnapshot as any) || {};
-    const vehicleSnapApprove = (revForApprove?.vehicleSnapshot as any) || {};
+    {
+      const revForApprove = await prisma.budgetRevision.findFirst({
+        where: { id: revisionId, budgetId: budget.id },
+      });
+      const clientSnapApprove = (revForApprove?.clientSnapshot as any) || {};
+      const dossierSnapApprove = (revForApprove?.dossierSnapshot as any) || {};
+      const vehicleSnapApprove = (revForApprove?.vehicleSnapshot as any) || {};
 
-    const canonicalSiteKeyApprove =
-      (budget as any).siteKey ||
-      (budget as any).operationalSiteKey ||
-      dossierSnapApprove.siteKey ||
-      dossierSnapApprove.operationalSiteKey ||
-      clientSnapApprove.siteKey ||
-      clientSnapApprove.operationalSiteKey ||
-      vehicleSnapApprove.siteKey ||
-      vehicleSnapApprove.operationalSiteKey ||
-      null;
+      const canonicalSiteKeyApprove =
+        (budget as any).siteKey ||
+        (budget as any).operationalSiteKey ||
+        dossierSnapApprove.siteKey ||
+        dossierSnapApprove.operationalSiteKey ||
+        clientSnapApprove.siteKey ||
+        clientSnapApprove.operationalSiteKey ||
+        vehicleSnapApprove.siteKey ||
+        vehicleSnapApprove.operationalSiteKey ||
+        null;
 
-    await assertClientCapability(ctx, {
-      clientId: budget.clientId,
-      capability: "budget.approve",
-      siteKey: canonicalSiteKeyApprove,
-    });
+      await assertClientCapability(ctx, {
+        clientId: budget.clientId,
+        capability: "budget.approve",
+        siteKey: canonicalSiteKeyApprove,
+      });
+    }
 
     const result = await approveBudgetRevision(
       ctx.activeWorkspaceId,
@@ -588,34 +631,40 @@ budgetsRouter.post("/:id/revisions/:revisionId/reject", async (req: Request, res
       );
     }
 
-    // Client authority: Budget rejection belongs to the Client / authorized Client Collaborator.
-    if (!budget.clientId) {
-      throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
+    const isRejectInternalManager =
+      ctx.platformRole === "platform_admin" ||
+      ctx.membershipRole === "owner" ||
+      ctx.membershipRole === "admin";
+
+    if (!isRejectInternalManager) {
+      if (!budget.clientId) {
+        throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
+      }
+
+      const revForReject = await prisma.budgetRevision.findFirst({
+        where: { id: revisionId, budgetId: budget.id },
+      });
+      const clientSnapReject = (revForReject?.clientSnapshot as any) || {};
+      const dossierSnapReject = (revForReject?.dossierSnapshot as any) || {};
+      const vehicleSnapReject = (revForReject?.vehicleSnapshot as any) || {};
+
+      const canonicalSiteKeyReject =
+        (budget as any).siteKey ||
+        (budget as any).operationalSiteKey ||
+        dossierSnapReject.siteKey ||
+        dossierSnapReject.operationalSiteKey ||
+        clientSnapReject.siteKey ||
+        clientSnapReject.operationalSiteKey ||
+        vehicleSnapReject.siteKey ||
+        vehicleSnapReject.operationalSiteKey ||
+        null;
+
+      await assertClientCapability(ctx, {
+        clientId: budget.clientId,
+        capability: "budget.approve",
+        siteKey: canonicalSiteKeyReject,
+      });
     }
-
-    const revForReject = await prisma.budgetRevision.findFirst({
-      where: { id: revisionId, budgetId: budget.id },
-    });
-    const clientSnapReject = (revForReject?.clientSnapshot as any) || {};
-    const dossierSnapReject = (revForReject?.dossierSnapshot as any) || {};
-    const vehicleSnapReject = (revForReject?.vehicleSnapshot as any) || {};
-
-    const canonicalSiteKeyReject =
-      (budget as any).siteKey ||
-      (budget as any).operationalSiteKey ||
-      dossierSnapReject.siteKey ||
-      dossierSnapReject.operationalSiteKey ||
-      clientSnapReject.siteKey ||
-      clientSnapReject.operationalSiteKey ||
-      vehicleSnapReject.siteKey ||
-      vehicleSnapReject.operationalSiteKey ||
-      null;
-
-    await assertClientCapability(ctx, {
-      clientId: budget.clientId,
-      capability: "budget.approve",
-      siteKey: canonicalSiteKeyReject,
-    });
 
     const result = await rejectBudgetRevision(
       ctx.activeWorkspaceId,
@@ -885,3 +934,175 @@ budgetsRouter.delete("/:id", async (req: Request, res: Response, next: NextFunct
     return next(error);
   }
 });
+
+/**
+ * GET /api/budgets/:id/pdf
+ * Retorna o documento canônico do orçamento formatado em application/pdf.
+ */
+budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const ctx = req.ctx;
+    const workspaceId = ctx?.activeWorkspaceId;
+    if (!workspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const budget = await prisma.budget.findUnique({
+      where: { id },
+      include: {
+        currentRevision: true,
+        approvedRevision: true,
+      },
+    });
+
+    if (!budget || budget.deletedAt || budget.workspaceId !== workspaceId) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+    assertObjectAccess(ctx, budget);
+
+    const rev = budget.approvedRevision || budget.currentRevision;
+    const clientSnap = (rev?.clientSnapshot as any) || {};
+    const vehicleSnap = (rev?.vehicleSnapshot as any) || {};
+    const currency = rev?.currencyCode || "EUR";
+
+    const lines: string[] = [
+      `Date: ${(rev?.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,
+      `Client: ${budget.clientName || clientSnap.name || "—"}`,
+    ];
+    if (clientSnap.document) lines.push(`Document/SIREN: ${clientSnap.document}`);
+    if (clientSnap.phone) lines.push(`Telephone: ${clientSnap.phone}`);
+    if (clientSnap.email) lines.push(`Email: ${clientSnap.email}`);
+    if (clientSnap.address?.street) {
+      lines.push(`Adresse: ${[clientSnap.address.street, clientSnap.address.postal, clientSnap.address.city].filter(Boolean).join(", ")}`);
+    }
+
+    lines.push("");
+    lines.push(`Vehicule: ${[budget.vehicleBrand, budget.vehicleModel].filter(Boolean).join(" ") || "—"}`);
+    if (budget.vehiclePlate) lines.push(`Immatriculation: ${budget.vehiclePlate}`);
+    if (budget.vehicleVin) lines.push(`VIN: ${budget.vehicleVin}`);
+
+    lines.push("");
+    lines.push(`--- Prestations & Pieces ---`);
+    const svcRows = (Array.isArray(rev?.services) ? rev?.services : []) as any[];
+    const partRows = (Array.isArray(rev?.parts) ? rev?.parts : []) as any[];
+    const laborRows = (Array.isArray(rev?.labor) ? rev?.labor : []) as any[];
+    if (svcRows.length > 0) {
+      for (const s of svcRows) {
+        lines.push(`* [Service] ${s.name || s.description || "Prestation"}: ${Number(s.quantity || 1)}x ${Number(s.unit_price || s.price || 0).toFixed(2)} = ${Number(s.total || 0).toFixed(2)} ${currency}`);
+      }
+    }
+    if (partRows.length > 0) {
+      for (const p of partRows) {
+        lines.push(`* [Piece] ${p.description || p.name || "Piece"}: ${Number(p.quantity || 1)}x ${Number(p.unit_price || 0).toFixed(2)} = ${Number(p.quantity * p.unit_price || 0).toFixed(2)} ${currency}`);
+      }
+    }
+    if (laborRows.length > 0) {
+      for (const l of laborRows) {
+        lines.push(`* [MO] ${l.description || "Main d'oeuvre"}: ${Number(l.hours || 1)}h x ${Number(l.hourly_rate || 0).toFixed(2)} = ${Number(l.hours * l.hourly_rate || 0).toFixed(2)} ${currency}`);
+      }
+    }
+
+    lines.push("");
+    lines.push(`Sous-total brut: ${Number(rev?.grossTotal ?? 0).toFixed(2)} ${currency}`);
+    if (Number(rev?.discountPct ?? 0) > 0) {
+      lines.push(`Remise (${rev?.discountPct}%): -${Number(rev?.discountTotal ?? 0).toFixed(2)} ${currency}`);
+    }
+    lines.push(`TVA (${rev?.taxPct ?? 0}%): +${Number(rev?.taxTotal ?? 0).toFixed(2)} ${currency}`);
+    lines.push(`TOTAL TTC: ${Number(rev?.finalTotal ?? 0).toFixed(2)} ${currency}`);
+    lines.push(`Statut: ${rev?.status === "approved" ? "APPROUVE" : "BROUILLON"}`);
+
+    if (rev?.signature && (rev.signature as any).signed) {
+      lines.push(`Signe par: ${(rev.signature as any).signerName || "Client"} le ${((rev.signature as any).signedAt || "").slice(0, 10)}`);
+    }
+
+    const pdfBuffer = buildSimplePdf({
+      title: `Devis ${budget.code}`,
+      lines,
+    });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${budget.code}.pdf"`);
+    return res.send(pdfBuffer);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * POST /api/budgets/:id/send-email
+ * Envio transacional canônico de orçamento por e-mail com PDF anexado.
+ */
+budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const ctx = req.ctx;
+    const workspaceId = ctx?.activeWorkspaceId;
+    if (!workspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const budget = await prisma.budget.findUnique({
+      where: { id },
+      include: { currentRevision: true, approvedRevision: true },
+    });
+    if (!budget || budget.deletedAt || budget.workspaceId !== workspaceId) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+    assertObjectAccess(ctx, budget);
+
+    const rev = budget.approvedRevision || budget.currentRevision;
+    const clientSnap = (rev?.clientSnapshot as any) || {};
+    const recipientEmail = String(req.body.to || clientSnap.email || "").trim();
+    if (!recipientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+      return res.status(422).json({ message: "E-mail de destino inválido ou não informado." });
+    }
+
+    const currency = rev?.currencyCode || "EUR";
+    const totalFormatted = `${Number(rev?.finalTotal ?? 0).toFixed(2)} ${currency}`;
+    const subject = `Devis ${budget.code} · ${budget.clientName || clientSnap.name || "Client"}`;
+    const htmlBody = `
+      <div style="font-family: sans-serif; font-size: 14px; color: #1e293b; line-height: 1.6;">
+        <h2 style="color: #4f46e5;">Devis ${budget.code}</h2>
+        <p>Bonjour ${budget.clientName || clientSnap.name || ""},</p>
+        <p>Veuillez trouver ci-joint votre devis :</p>
+        <ul>
+          <li><strong>Numéro :</strong> ${budget.code}</li>
+          <li><strong>Véhicule :</strong> ${[budget.vehicleBrand, budget.vehicleModel, budget.vehiclePlate].filter(Boolean).join(" ")}</li>
+          <li><strong>Montant Total :</strong> ${totalFormatted}</li>
+        </ul>
+        <p>Cordialement,<br/>L'équipe Operix</p>
+      </div>
+    `;
+
+    const pdfLines = [
+      `Date: ${(rev?.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,
+      `Client: ${budget.clientName || clientSnap.name || "—"}`,
+      `Vehicule: ${[budget.vehicleBrand, budget.vehicleModel, budget.vehiclePlate].filter(Boolean).join(" ") || "—"}`,
+      `TOTAL: ${totalFormatted}`,
+    ];
+    const pdfBuf = buildSimplePdf({ title: `Devis ${budget.code}`, lines: pdfLines });
+    const pdfBase64 = pdfBuf.toString("base64");
+
+    const emailResult = await sendEmail({
+      to: recipientEmail,
+      subject,
+      html: htmlBody,
+      text: `Devis ${budget.code}\nTotal: ${totalFormatted}\nOperix`,
+      attachments: [{ filename: `${budget.code}.pdf`, contentBase64: pdfBase64 }],
+    });
+
+    return res.status(200).json({
+      ok: true,
+      delivered: emailResult.ok,
+      provider: emailResult.provider,
+      recipient: recipientEmail,
+      message: emailResult.ok
+        ? "E-mail enviado com sucesso com PDF anexado."
+        : `Tentativa de envio registrada no sistema (${emailResult.provider}).`,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+

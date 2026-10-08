@@ -1,12 +1,36 @@
 import { Router, type Response } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
+import { resolveRequestContext } from "../middleware/requestContext.js";
 import { buildPermissionsForRole } from "../lib/permissionPolicy.js";
 
 export const countryDocumentRequirementsRouter = Router();
 
+countryDocumentRequirementsRouter.use(requireAuth);
+countryDocumentRequirementsRouter.use(resolveRequestContext);
+
 function checkPermission(req: AuthenticatedRequest, action: "view" | "edit"): boolean {
-  const { admin, map } = buildPermissionsForRole(req.auth?.role);
+  const ctx = req.ctx;
+  if (!ctx?.activeWorkspaceId) return false;
+
+  const role = ctx.membershipRole ?? req.auth?.role;
+  const isPlatformAdmin = ctx.platformRole === "platform_admin";
+  if (isPlatformAdmin) return true;
+
+  // Client role has no access to country document requirements
+  if (role === "client") return false;
+
+  // Owner and admin of the active workspace have full management access
+  if (role === "owner" || role === "admin" || req.auth?.role === "owner" || req.auth?.role === "admin") {
+    return true;
+  }
+
+  // Technician can view documents requirements catalog for their operations, but cannot edit
+  if (role === "technician") {
+    return action === "view";
+  }
+
+  const { admin, map } = buildPermissionsForRole(role);
   if (admin) return true;
   return map[`country_document_requirements.${action}`]?.allowed ?? false;
 }

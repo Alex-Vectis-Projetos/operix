@@ -57,6 +57,7 @@ export interface Weeklog {
   weekNumber?: number;
   yearReference?: number;
   clientId: string;
+  clientName?: string | null;
   siteKey: string;
   status: WeeklogStatus;
   createdAt: string;

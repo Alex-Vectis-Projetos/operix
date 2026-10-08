@@ -452,6 +452,20 @@ export async function finalizeProductionOrder(
                 item.total !== undefined
                   ? new Prisma.Decimal(String(item.total))
                   : quantity.mul(unitPrice);
+            } else if (item.price !== undefined && item.price !== null && item.price !== "") {
+              unitPrice = new Prisma.Decimal(String(item.price));
+              quantity =
+                item.quantity !== undefined
+                  ? new Prisma.Decimal(String(item.quantity))
+                  : new Prisma.Decimal(1);
+              itemTotal =
+                item.total !== undefined
+                  ? new Prisma.Decimal(String(item.total))
+                  : quantity.mul(unitPrice);
+            } else if (item.total !== undefined && item.total !== null && item.total !== "") {
+              unitPrice = new Prisma.Decimal(String(item.total));
+              quantity = new Prisma.Decimal(1);
+              itemTotal = unitPrice;
             } else {
               throw new UnprocessableEntityError(
                 `DIRECT_OP_SERVICE_INVALID: Serviço no índice ${idx} sem valor monetário.`
@@ -738,7 +752,31 @@ export async function listWeeklogs(
     orderBy: [{ startsOn: "desc" }, { createdAt: "desc" }],
   });
 
-  return weeklogs;
+  const clientIds = [...new Set(weeklogs.map((w) => w.clientId).filter(Boolean))];
+  const [clients, billingClients] = await Promise.all([
+    prisma.client.findMany({
+      where: { id: { in: clientIds as string[] } },
+      select: { id: true, name: true, displayCode: true },
+    }),
+    prisma.billingClient.findMany({
+      where: { id: { in: clientIds as string[] } },
+      select: { id: true, name: true },
+    }),
+  ]);
+  const clientMap = new Map<string, string>();
+  for (const c of clients) {
+    if (c.name) clientMap.set(c.id, c.name);
+  }
+  for (const bc of billingClients) {
+    if (!clientMap.has(bc.id) && bc.name) {
+      clientMap.set(bc.id, bc.name);
+    }
+  }
+
+  return weeklogs.map((w) => ({
+    ...w,
+    clientName: clientMap.get(w.clientId) || w.clientId,
+  }));
 }
 
 /**
@@ -765,6 +803,12 @@ export async function getWeeklogById(ctx: RequestContext, id: string) {
     throw new NotFoundError("Lote de WEEKLOG não encontrado.");
   }
 
+  const client = await prisma.client.findUnique({
+    where: { id: weeklog.clientId },
+    select: { id: true, name: true, displayCode: true },
+  });
+  const clientName = client?.name || weeklog.clientId;
+
   const isTechnicianScope =
     ctx.membershipRole === "technician" && ctx.scope === "workspace";
 
@@ -777,11 +821,15 @@ export async function getWeeklogById(ctx: RequestContext, id: string) {
     }
     return {
       ...weeklog,
+      clientName,
       entries: ownEntries,
     };
   }
 
-  return weeklog;
+  return {
+    ...weeklog,
+    clientName,
+  };
 }
 
 /**
