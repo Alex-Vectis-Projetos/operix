@@ -115,36 +115,32 @@ function columnFor(status: ProductionStatus): BoardColumn | undefined {
   return BOARD_COLUMNS.find((c) => c.statuses.includes(status));
 }
 
-function extractTotalFromPlatform(platform?: string | null): string | null {
-  if (!platform) return null;
-  const m = platform.match(
-    /R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})|[0-9]+(?:,[0-9]{2})?)/,
-  );
-  if (m) return `R$ ${m[1]}`;
-  const m2 = platform.match(/Total\s*([0-9.,R$\s]+)$/i);
-  if (m2) {
-    const clean = m2[1].trim();
-    return clean.startsWith("R$") ? clean : `R$ ${clean}`;
+function getValidTransitions(currentStatus: ProductionStatus): ProductionStatus[] {
+  if (isOrderLocked(currentStatus)) {
+    return [];
   }
-  return null;
+  if (currentStatus === "paused") {
+    return ["in_production", "delivered"];
+  }
+  return ["paused", "delivered"];
 }
 
-function extractBudgetNumber(platform?: string | null): string | null {
-  if (!platform) return null;
-  const m = platform.match(/(BUD[-–][0-9-]+)/);
-  return m ? m[1] : null;
-}
-
-function formatCurrencyFromRaw(v: number | null | undefined): string {
-  if (v == null || Number.isNaN(v)) return "—";
+function formatCanonicalCurrency(
+  v: number | string | null | undefined,
+  currency = "EUR"
+): string {
+  if (v == null || v === "") return "—";
+  const num = typeof v === "number" ? v : Number(v);
+  if (Number.isNaN(num)) return "—";
   try {
-    return v.toLocaleString("pt-BR", {
+    const loc = currency === "BRL" ? "pt-BR" : "fr-FR";
+    return new Intl.NumberFormat(loc, {
       style: "currency",
-      currency: "BRL",
+      currency: currency || "EUR",
       minimumFractionDigits: 2,
-    });
+    }).format(num);
   } catch {
-    return `R$ ${v.toFixed(2)}`;
+    return `${num.toFixed(2)} ${currency}`;
   }
 }
 
@@ -160,7 +156,7 @@ function formatDate(iso?: string | null): string {
 }
 
 export function ProductionBoard({ onOpen }: Props) {
-  const { data: ordersRaw = [], isLoading, update, remove } = useProductionOrders();
+  const { data: ordersRaw = [], isLoading, update, remove, finalize } = useProductionOrders();
   const orders = Array.isArray(ordersRaw)
     ? (ordersRaw as ProductionOrder[]).filter((o: ProductionOrder) => !!o)
     : [];
@@ -188,15 +184,43 @@ export function ProductionBoard({ onOpen }: Props) {
   const applyStatusChange = (id: string, status: ProductionStatus) => {
     const order = orders.find((o) => o && o.id === id);
     if (!order) return;
-    if (isOrderLocked(order.status) && !isOrderLocked(status)) {
+    if (isOrderLocked(order.status)) {
+      toast.warning("Ordem finalizada não pode ter o status alterado.");
       return;
     }
     if (order.status === status) return;
-    update.mutate({ id, status });
+
+    const allowed = getValidTransitions(order.status);
+    if (!allowed.includes(status)) {
+      toast.warning(`Transição não permitida a partir de ${STATUS_LABEL[order.status] || order.status}.`);
+      return;
+    }
+
+    if (status === "delivered") {
+      const confirmFinalize = window.confirm(
+        `Finalizar e entregar ordem ${order.code || order.id}? Esta ação encerrará a execução e gerará o registro comercial no WEEKLOG.`
+      );
+      if (!confirmFinalize) return;
+      finalize.mutate(id);
+      return;
+    }
+
+    update.mutate(
+      { id, status },
+      {
+        onSuccess: () => {
+          toast.success(`Ordem ${order.code || id} atualizada com sucesso.`);
+        },
+        onError: (err: any) => {
+          toast.error(err?.message || "Falha ao atualizar status da ordem.");
+        },
+      }
+    );
   };
 
   const requestChangeStatus = (order: ProductionOrder, status: ProductionStatus) => {
-    if (status === "paused" && !isOrderLocked(order.status)) {
+    if (isOrderLocked(order.status)) return;
+    if (status === "paused") {
       setPauseModal({ open: true, order, targetStatus: "paused", reason: "" });
       return;
     }
@@ -221,8 +245,11 @@ export function ProductionBoard({ onOpen }: Props) {
       { id: order.id!, status: targetStatus, notes },
       {
         onSuccess: () => {
-          toast.success(`OS ${order.code || order.id?.slice(0, 8)} pausada.`);
+          toast.success(`OS ${order.code || order.id?.slice(0, 8)} pausada com sucesso.`);
           setPauseModal({ open: false, order: null, targetStatus: "paused", reason: "" });
+        },
+        onError: (err: any) => {
+          toast.error(err?.message || "Falha ao pausar a ordem.");
         },
       },
     );
@@ -242,8 +269,8 @@ export function ProductionBoard({ onOpen }: Props) {
       );
       await remove.mutateAsync(order.id);
       toast.success("Ordem removida da Produção · Orçamento retornado para Rascunho.");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Falha ao retornar ao orçamento.");
+    } catch (e: any) {
+      toast.error(e?.message || "Falha ao retornar ao orçamento.");
     } finally {
       setPauseModal({ open: false, order: null, targetStatus: "paused", reason: "" });
     }
@@ -272,20 +299,42 @@ export function ProductionBoard({ onOpen }: Props) {
     if (!id) return;
     const order = orders.find((o) => o && o.id === id);
     if (!order) return;
+    if (isOrderLocked(order.status)) return;
+
     let target: ProductionStatus | null = null;
-    if (column.key === "in_production") target = "in_production";
-    else if (column.key === "paused") target = "paused";
-    else if (column.key === "delivered") target = "delivered";
-    if (target) requestChangeStatus(order, target);
+    if (column.key === "in_production") {
+      if (order.status === "paused") {
+        target = "in_production";
+      } else {
+        return;
+      }
+    } else if (column.key === "paused") {
+      if (order.status !== "paused") {
+        target = "paused";
+      }
+    } else if (column.key === "delivered") {
+      if (order.status !== "delivered") {
+        target = "delivered";
+      }
+    }
+
+    if (target) {
+      const allowed = getValidTransitions(order.status);
+      if (!allowed.includes(target)) {
+        toast.warning(`Transição não permitida.`);
+        return;
+      }
+      requestChangeStatus(order, target);
+    }
   };
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 gap-4 pb-4 md:grid-cols-3 xl:gap-6">
+      <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory lg:grid lg:grid-cols-3 lg:gap-6 lg:overflow-visible">
         {BOARD_COLUMNS.map((col) => (
           <div
             key={col.key}
-            className="rounded-xl bg-muted/30 p-3 min-h-[200px] xl:min-h-[320px] xl:max-h-[calc(100svh-260px)] xl:overflow-y-auto"
+            className="min-w-[285px] max-w-[340px] flex-1 shrink-0 snap-start rounded-xl bg-muted/30 p-3 lg:min-w-0 lg:max-w-none min-h-[200px] xl:min-h-[320px] xl:max-h-[calc(100svh-260px)] xl:overflow-y-auto"
           >
             <div className="mb-3 flex items-center justify-between py-2 md:py-1">
               <div className="flex items-center gap-2">
@@ -307,7 +356,7 @@ export function ProductionBoard({ onOpen }: Props) {
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 pb-4 md:grid-cols-3 xl:gap-6">
+      <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory lg:grid lg:grid-cols-3 lg:gap-6 lg:overflow-visible">
         {BOARD_COLUMNS.map((col) => {
           const items = grouped.get(col.key) ?? [];
           const Icon = col.icon;
@@ -316,7 +365,7 @@ export function ProductionBoard({ onOpen }: Props) {
               key={col.key}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => onDrop(e, col)}
-              className="flex min-h-[260px] flex-col rounded-xl border border-border/70 bg-muted/30 p-3 xl:max-h-[calc(100svh-260px)] xl:overflow-y-auto"
+              className="flex min-w-[285px] max-w-[340px] flex-1 shrink-0 snap-start flex-col rounded-xl border border-border/70 bg-muted/30 p-3 lg:min-w-0 lg:max-w-none xl:max-h-[calc(100svh-260px)] xl:overflow-y-auto"
             >
               <div className="sticky top-0 z-10 mb-3 flex items-start justify-between gap-2 rounded-lg bg-muted/40 px-2 py-2 backdrop-blur">
                 <div className="flex min-w-0 items-center gap-2">
@@ -455,20 +504,37 @@ function OrderCard({
     PRIORITY_META[order.priority as ProductionPriority] ?? PRIORITY_META.normal;
 
   const col = columnFor(order.status);
-  const total = extractTotalFromPlatform(order.platform);
-  const budgetRef = extractBudgetNumber(order.platform);
-  const tipoServico = order.insurer && /Orçamento|BUD-|Total/i.test(order.insurer ?? "")
-    ? "Orçamento Aprovado"
-    : order.insurer ?? null;
-  const vehicle = [order.brand, order.model].filter(Boolean).join(" ") || null;
-  const displayNumber = budgetRef || order.code || "—";
+  const locked = isOrderLocked(order.status);
+
+  // Campos Canônicos
+  const clientName = order.client_name || order.clientName || "—";
+  const vehicle = [order.brand, order.model].filter(Boolean).join(" ") || "—";
+  const licensePlate = order.license_plate || order.licensePlate || order.vin || "—";
+  const operationalSite = order.operational_site_key || order.operationalSiteKey || null;
+
+  const budgetCode = order.budget_code || order.budgetCode || null;
+  const displayNumber = budgetCode ? `Devis ${budgetCode}` : `OS ${order.code || "—"}`;
+
+  const rawTotal = order.total ?? order.total_amount ?? order.recognized_total ?? null;
+  const currency = order.currency || order.currency_code || order.currencyCode || "EUR";
+  const formattedTotal = formatCanonicalCurrency(rawTotal, currency);
+
+  let tipoServico = "Serviço Operacional";
+  if (Array.isArray(order.performed_services) && order.performed_services.length > 0) {
+    tipoServico = `${order.performed_services.length} serviço(s) registrado(s)`;
+  } else if (order.insurer) {
+    tipoServico = order.insurer;
+  } else if (budgetCode || order.budgetId || order.budget_id) {
+    tipoServico = "Orçamento Aprovado";
+  }
 
   const dataISO = order.started_at || order.due_at || order.created_at;
   const isOverdue =
     !!order.due_at &&
     new Date(order.due_at).getTime() < Date.now() &&
-    !isOrderLocked(order.status);
-  const locked = isOrderLocked(order.status);
+    !locked;
+
+  const validTransitions = getValidTransitions(order.status);
 
   return (
     <Card
@@ -516,31 +582,34 @@ function OrderCard({
       </div>
 
       <div className="space-y-1.5 text-[11px] leading-snug text-foreground/90">
-        <InfoLine icon={User} label="Cliente" value={order.client_name || "—"} />
+        <InfoLine icon={User} label="Cliente" value={clientName} />
         <InfoLine
           icon={Car}
           label="Veículo"
-          value={
-            vehicle
-              ? vehicle + (order.color ? ` · ${order.color}` : "")
-              : "—"
-          }
+          value={vehicle + (order.color ? ` · ${order.color}` : "")}
         />
         <InfoLine
           icon={ClipboardList}
           label="Matrícula"
-          value={order.license_plate || order.vin ? order.license_plate || order.vin : "—"}
+          value={licensePlate}
         />
         <InfoLine
           icon={Wrench}
-          label="Tipo de serviço"
-          value={tipoServico || (order.platform ? "Orçamento Aprovado" : "Serviço Manual")}
+          label="Serviço"
+          value={tipoServico}
         />
+        {operationalSite ? (
+          <InfoLine
+            icon={ClipboardList}
+            label="Site"
+            value={operationalSite}
+          />
+        ) : null}
         <InfoLine
           icon={Coins}
           label="Valor total"
-          value={total || formatCurrencyFromRaw(null)}
-          valueClassName={total ? "text-emerald-700 dark:text-emerald-400 font-semibold" : undefined}
+          value={formattedTotal}
+          valueClassName={rawTotal != null ? "text-emerald-700 dark:text-emerald-400 font-semibold" : undefined}
         />
         <InfoLine
           icon={isOverdue ? AlertTriangle : CalendarDays}
@@ -561,7 +630,7 @@ function OrderCard({
       <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2">
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
           <Clock3 className="h-3 w-3" />
-          <span>
+          <span className="truncate">
             Atualizado{" "}
             {order.updated_at
               ? formatDistanceToNow(new Date(order.updated_at), {
@@ -576,54 +645,55 @@ function OrderCard({
             e.stopPropagation();
           }}
         >
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={locked}
-                className="h-7 gap-1 px-2 text-[11px]"
-              >
-                Status
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-56 p-2">
-              <div className="space-y-0.5 text-xs">
-                <p className="px-1 pb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Mover ordem para
-                </p>
-                <Select
-                  value={order.status}
-                  onValueChange={(v) => onChangeStatus(v as ProductionStatus)}
+          {validTransitions.length > 0 ? (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={locked}
+                  className="h-7 gap-1 px-2 text-[11px]"
                 >
-                  <SelectTrigger className="h-8">
-                    <SelectValue placeholder="Selecionar status..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PRODUCTION_STATUSES.map((s) => {
-                      const colMeta = columnFor(s.value);
-                      return (
-                        <SelectItem
-                          key={s.value}
-                          value={s.value}
-                          className="text-xs"
-                        >
-                          <span className="flex items-center gap-2">
-                            <span
-                              className={`h-1.5 w-1.5 rounded-full ${
-                                colMeta?.dot ?? s.color
-                              }`}
-                            />
-                            {s.label}
-                          </span>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-            </PopoverContent>
-          </Popover>
+                  Mover
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-56 p-2">
+                <div className="space-y-1.5 text-xs">
+                  <p className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Ação de Status
+                  </p>
+                  <div className="flex flex-col gap-1">
+                    {validTransitions.map((target) => (
+                      <Button
+                        key={target}
+                        size="sm"
+                        variant="ghost"
+                        className="justify-start h-8 px-2 text-xs"
+                        onClick={() => onChangeStatus(target)}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={`h-2 w-2 rounded-full ${
+                              columnFor(target)?.dot ?? "bg-slate-400"
+                            }`}
+                          />
+                          {target === "paused"
+                            ? "Pausar Ordem"
+                            : target === "in_production"
+                            ? "Retomar Produção"
+                            : "Finalizar Ordem"}
+                        </span>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+              Travado
+            </Badge>
+          )}
         </div>
       </div>
     </Card>

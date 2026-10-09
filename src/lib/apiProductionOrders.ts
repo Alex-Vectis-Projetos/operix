@@ -67,6 +67,7 @@ export function updateProductionOrderService(
 export interface RequestBudgetCorrectionResult {
   order: ProductionOrder;
   nextRevisionId: string | null;
+  revision?: { id: string; revisionNumber?: number; status: string } | null;
   notification?: {
     delivered: boolean;
     provider?: string;

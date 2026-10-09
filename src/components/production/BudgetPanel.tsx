@@ -244,8 +244,12 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           }
         }
       }
-      setOpen(false);
-      setEditing(null);
+      if (b.status === "approved") {
+        setEditing(b);
+      } else {
+        setOpen(false);
+        setEditing(null);
+      }
     } catch (err: any) {
       toast.error(err?.message || "Erro ao salvar orçamento.");
       throw err;
@@ -258,19 +262,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   };
 
   const openEdit = (b: Budget) => {
-    if (b.status === "approved") {
-      const forked: Budget = {
-        ...b,
-        status: "draft",
-        signature: null,
-        rejection: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      setEditing(forked);
-    } else {
-      setEditing(b);
-    }
+    setEditing(b);
     setOpen(true);
   };
 

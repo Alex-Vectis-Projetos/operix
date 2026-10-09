@@ -968,7 +968,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     setLoadingServiceId(serviceId);
     try {
       await updateProductionOrderService(order.id, serviceId, completed);
-      await qc.invalidateQueries({ queryKey: ["production-orders"] });
+      await qc.invalidateQueries({ queryKey: ["production_orders"] });
       toast.success(
         langDisplay === "fr"
           ? (completed ? "Prestation marquée comme terminée." : "Prestation remise en attente.")
@@ -1009,7 +1009,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     try {
       const res = await requestBudgetCorrection(order.id, reason.trim());
       await Promise.all([
-        qc.invalidateQueries({ queryKey: ["production-orders"] }),
+        qc.invalidateQueries({ queryKey: ["production_orders"] }),
         qc.invalidateQueries({ queryKey: ["budgets"] }),
       ]);
 
@@ -1081,7 +1081,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
   return (
     <Dialog open={!!order} onOpenChange={(o) => { if (!o) minimize(); }}>
-      <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="w-[96vw] sm:w-full max-w-6xl max-h-[92vh] overflow-y-auto p-3 sm:p-6">
         <DialogHeader className="space-y-2">
           <DialogTitle className="flex flex-wrap items-center gap-3">
             <span className="flex items-center gap-2">
@@ -1829,8 +1829,8 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
             </fieldset>
 
-            <div className="flex flex-wrap justify-between gap-2 pt-2 border-t border-border/50">
-              <div className="flex gap-2">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t border-border/50">
+              <div className="flex flex-wrap items-center gap-2">
                 {!isNew && (budgetHydrated || order?.budgetId || order?.budget_id) && !locked && !isClient && (
                   <Button
                     variant="outline"

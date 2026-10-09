@@ -28,7 +28,7 @@ import {
   getPresignedDownloadUrl,
   assertTenantStoragePath,
 } from "../lib/minio.js";
-import { buildSimplePdf } from "../lib/pdf/simplePdf.js";
+import { buildSimplePdf, generateBudgetPdfBuffer } from "../lib/pdf/simplePdf.js";
 import { sendEmail } from "../lib/email/resend.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -951,60 +951,7 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
     const vehicleSnap = (rev?.vehicleSnapshot as any) || {};
     const currency = rev?.currencyCode || "EUR";
 
-    const lines: string[] = [
-      `Date: ${(rev?.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,
-      `Client: ${budget.clientName || clientSnap.name || "—"}`,
-    ];
-    if (clientSnap.document) lines.push(`Document/SIREN: ${clientSnap.document}`);
-    if (clientSnap.phone) lines.push(`Telephone: ${clientSnap.phone}`);
-    if (clientSnap.email) lines.push(`Email: ${clientSnap.email}`);
-    if (clientSnap.address?.street) {
-      lines.push(`Adresse: ${[clientSnap.address.street, clientSnap.address.postal, clientSnap.address.city].filter(Boolean).join(", ")}`);
-    }
-
-    lines.push("");
-    lines.push(`Vehicule: ${[budget.vehicleBrand, budget.vehicleModel].filter(Boolean).join(" ") || "—"}`);
-    if (budget.vehiclePlate) lines.push(`Immatriculation: ${budget.vehiclePlate}`);
-    if (budget.vehicleVin) lines.push(`VIN: ${budget.vehicleVin}`);
-
-    lines.push("");
-    lines.push(`--- Prestations & Pieces ---`);
-    const svcRows = (Array.isArray(rev?.services) ? rev?.services : []) as any[];
-    const partRows = (Array.isArray(rev?.parts) ? rev?.parts : []) as any[];
-    const laborRows = (Array.isArray(rev?.labor) ? rev?.labor : []) as any[];
-    if (svcRows.length > 0) {
-      for (const s of svcRows) {
-        lines.push(`* [Service] ${s.name || s.description || "Prestation"}: ${Number(s.quantity || 1)}x ${Number(s.unit_price || s.price || 0).toFixed(2)} = ${Number(s.total || 0).toFixed(2)} ${currency}`);
-      }
-    }
-    if (partRows.length > 0) {
-      for (const p of partRows) {
-        lines.push(`* [Piece] ${p.description || p.name || "Piece"}: ${Number(p.quantity || 1)}x ${Number(p.unit_price || 0).toFixed(2)} = ${Number(p.quantity * p.unit_price || 0).toFixed(2)} ${currency}`);
-      }
-    }
-    if (laborRows.length > 0) {
-      for (const l of laborRows) {
-        lines.push(`* [MO] ${l.description || "Main d'oeuvre"}: ${Number(l.hours || 1)}h x ${Number(l.hourly_rate || 0).toFixed(2)} = ${Number(l.hours * l.hourly_rate || 0).toFixed(2)} ${currency}`);
-      }
-    }
-
-    lines.push("");
-    lines.push(`Sous-total brut: ${Number(rev?.grossTotal ?? 0).toFixed(2)} ${currency}`);
-    if (Number(rev?.discountPct ?? 0) > 0) {
-      lines.push(`Remise (${rev?.discountPct}%): -${Number(rev?.discountTotal ?? 0).toFixed(2)} ${currency}`);
-    }
-    lines.push(`TVA (${rev?.taxPct ?? 0}%): +${Number(rev?.taxTotal ?? 0).toFixed(2)} ${currency}`);
-    lines.push(`TOTAL TTC: ${Number(rev?.finalTotal ?? 0).toFixed(2)} ${currency}`);
-    lines.push(`Statut: ${rev?.status === "approved" ? "APPROUVE" : "BROUILLON"}`);
-
-    if (rev?.signature && (rev.signature as any).signed) {
-      lines.push(`Signe par: ${(rev.signature as any).signerName || "Client"} le ${((rev.signature as any).signedAt || "").slice(0, 10)}`);
-    }
-
-    const pdfBuffer = buildSimplePdf({
-      title: `Devis ${budget.code}`,
-      lines,
-    });
+    const pdfBuffer = generateBudgetPdfBuffer(budget, rev);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${budget.code}.pdf"`);
@@ -1063,13 +1010,18 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
       </div>
     `;
 
-    const pdfLines = [
-      `Date: ${(rev.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,
-      `Client: ${budget.clientName || clientSnap.name || "—"}`,
-      `Vehicule: ${[budget.vehicleBrand, budget.vehicleModel, budget.vehiclePlate].filter(Boolean).join(" ") || "—"}`,
-      `TOTAL: ${totalFormatted}`,
-    ];
-    const pdfBuf = buildSimplePdf({ title: `Devis ${budget.code}`, lines: pdfLines });
+    let pdfBuf: Buffer;
+    try {
+      pdfBuf = generateBudgetPdfBuffer(budget, rev);
+    } catch {
+      const pdfLines = [
+        `Date: ${(rev.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,
+        `Client: ${budget.clientName || clientSnap.name || "—"}`,
+        `Vehicule: ${[budget.vehicleBrand, budget.vehicleModel, budget.vehiclePlate].filter(Boolean).join(" ") || "—"}`,
+        `TOTAL: ${totalFormatted}`,
+      ];
+      pdfBuf = buildSimplePdf({ title: `Devis ${budget.code}`, lines: pdfLines });
+    }
     const pdfBase64 = pdfBuf.toString("base64");
 
     const emailResult = await sendEmail({

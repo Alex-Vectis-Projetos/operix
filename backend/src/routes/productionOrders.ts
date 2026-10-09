@@ -29,6 +29,23 @@ function genCode(): string {
 
 function mapOrder(o: any) {
   if (!o) return null;
+
+  let computedTotal: number | null = null;
+  if (o.budgetRevision?.finalTotal != null) {
+    computedTotal = Number(o.budgetRevision.finalTotal);
+  } else if (Array.isArray(o.performedServices) && o.performedServices.length > 0) {
+    computedTotal = o.performedServices.reduce((sum: number, s: any) => {
+      const q = Number(s.quantity ?? 1) || 1;
+      const pu = Number(s.unit_price ?? s.unitPrice ?? s.price ?? 0) || 0;
+      return sum + (Number(s.total) || (q * pu));
+    }, 0);
+  }
+
+  const effectiveCurrency =
+    o.currencyCode ||
+    o.budgetRevision?.currencyCode ||
+    "EUR";
+
   return {
     id: o.id,
     workspace_id: o.workspaceId,
@@ -59,14 +76,21 @@ function mapOrder(o: any) {
     serviceOrderId: o.serviceOrderId,
     budget_id: o.budgetId,
     budgetId: o.budgetId,
+    budget_code: o.budget?.code || null,
+    budgetCode: o.budget?.code || null,
     budget_revision_id: o.budgetRevisionId,
     budgetRevisionId: o.budgetRevisionId,
     due_at: o.dueAt?.toISOString?.() ?? (o.dueAt ? String(o.dueAt) : null),
     dueAt: o.dueAt?.toISOString?.() ?? (o.dueAt ? String(o.dueAt) : null),
     operational_site_key: o.operationalSiteKey,
     operationalSiteKey: o.operationalSiteKey,
-    currency_code: o.currencyCode,
-    currencyCode: o.currencyCode,
+    currency_code: effectiveCurrency,
+    currencyCode: effectiveCurrency,
+    currency: effectiveCurrency,
+    total: computedTotal,
+    total_amount: computedTotal,
+    recognized_total: o.status === "delivered" ? computedTotal : null,
+    recognizedTotal: o.status === "delivered" ? computedTotal : null,
     performed_services: o.performedServices,
     performedServices: o.performedServices,
     started_at: o.startedAt?.toISOString?.() ?? (o.startedAt ? String(o.startedAt) : null),
@@ -614,6 +638,8 @@ productionOrdersRouter.get("/", async (req: Request, res: Response, next: NextFu
       },
       include: {
         photos: true,
+        budget: { select: { id: true, code: true } },
+        budgetRevision: { select: { id: true, revisionNumber: true, finalTotal: true, currencyCode: true } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -1257,6 +1283,9 @@ productionOrdersRouter.post("/:id/request-budget-correction", async (req: Reques
     return res.json({
       order: mapOrder(updatedOrder),
       nextRevisionId: nextRevision?.id ?? null,
+      revision: nextRevision
+        ? { id: nextRevision.id, revisionNumber: nextRevision.revisionNumber, status: nextRevision.status }
+        : null,
       notification: notificationResult,
       message: "Ordem pausada e nova revisão de orçamento iniciada com sucesso.",
     });
