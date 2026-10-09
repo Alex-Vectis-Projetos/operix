@@ -184,48 +184,48 @@ function OperationCard({
 }) {
   const m = meta?.[it.status];
   return (
-    <Card className="group overflow-hidden border border-border/80 bg-card/95 transition-all duration-200 hover:shadow-lg hover:border-primary/30 flex flex-col justify-between">
-      <CardHeader className="p-4 pb-3 space-y-3">
+    <Card className="group overflow-hidden border border-border/80 bg-card/95 transition-all duration-200 hover:shadow-lg hover:border-primary/30 flex flex-col justify-between min-w-0">
+      <CardHeader className="p-3.5 sm:p-4 pb-3 space-y-3 min-w-0">
         {/* Top Badges & Total */}
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 sm:gap-3 min-w-0">
           <div className="space-y-1.5 min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               <StatusPill meta={m} status={it.status} />
               {it.list_name && (
-                <Badge variant="outline" className="h-5 gap-1 font-mono text-[11px] border-primary/25 bg-primary/5 text-primary">
+                <Badge variant="outline" className="h-5 gap-1 font-mono text-[11px] border-primary/25 bg-primary/5 text-primary shrink-0">
                   <HashIcon className="h-2.5 w-2.5" /> {it.list_name}
                 </Badge>
               )}
               {it.operational_unit && (
-                <Badge variant="secondary" className="h-5 gap-1 text-[10px] font-medium text-muted-foreground bg-muted">
+                <Badge variant="secondary" className="h-5 gap-1 text-[10px] font-medium text-muted-foreground bg-muted shrink-0">
                   <Building2 className="h-2.5 w-2.5 shrink-0" /> {it.operational_unit}
                 </Badge>
               )}
               {it.validation_retificativa && it.validation_retificativa !== "none" && (
                 <Badge
                   variant="secondary"
-                  className="h-5 gap-1 text-[10px] border-amber-400/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-semibold"
+                  className="h-5 gap-1 text-[10px] border-amber-400/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-semibold shrink-0"
                 >
                   <AlertTriangle className="h-2.5 w-2.5 shrink-0" /> Retificação · {it.validation_retificativa.toUpperCase()}
                 </Badge>
               )}
               {it.has_error && (
-                <Badge variant="destructive" className="h-5 gap-1 text-[10px]">
+                <Badge variant="destructive" className="h-5 gap-1 text-[10px] shrink-0">
                   <AlertTriangle className="h-2.5 w-2.5 shrink-0" /> Correção
                 </Badge>
               )}
             </div>
 
             {/* Client & Vehicle */}
-            <div className="pt-1">
+            <div className="pt-1 min-w-0">
               <h3 className="text-base font-bold text-foreground tracking-tight leading-snug truncate" title={it.client_name ?? "Cliente não informado"}>
                 {it.client_name || "Cliente não informado"}
               </h3>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground min-w-0">
                 {(it.car_name || (it.brand && it.model)) && (
-                  <span className="font-medium text-foreground/90 inline-flex items-center gap-1.5 truncate max-w-[220px]" title={it.car_name ?? `${it.brand} ${it.model}`}>
+                  <span className="font-medium text-foreground/90 inline-flex items-center gap-1.5 truncate max-w-full" title={it.car_name ?? `${it.brand} ${it.model}`}>
                     <Car className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    {it.car_name ?? `${it.brand} ${it.model}`}
+                    <span className="truncate">{it.car_name ?? `${it.brand} ${it.model}`}</span>
                   </span>
                 )}
                 {it.license_plate && (
@@ -243,7 +243,7 @@ function OperationCard({
           </div>
 
           {/* Monetary Total Block */}
-          <div className="shrink-0 text-right pl-2">
+          <div className="shrink-0 text-left sm:text-right pt-2 sm:pt-0 border-t sm:border-t-0 border-border/40">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block">
               Total Operacional
             </span>
@@ -264,7 +264,7 @@ function OperationCard({
 
         {/* Next Action Banner */}
         <div
-          className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-foreground/90 dark:text-primary-foreground"
+          className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-foreground/90 dark:text-primary-foreground min-w-0"
           role="note"
           aria-label="Próxima ação"
         >
@@ -273,30 +273,30 @@ function OperationCard({
             <span className="font-semibold uppercase tracking-wider text-[10px] text-primary block">
               Próxima ação
             </span>
-            <span className="leading-snug text-foreground/90 text-xs block">
+            <span className="leading-snug text-foreground/90 text-xs block break-words">
               {m?.next_action ?? it.next_action}
             </span>
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="p-4 pt-0 space-y-3 flex-1 flex flex-col justify-between">
+      <CardContent className="p-3.5 sm:p-4 pt-0 space-y-3 flex-1 flex flex-col justify-between min-w-0">
         {/* 3 Pipeline Stages Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 min-w-0">
           {/* STAGE 1: PRODUÇÃO */}
-          <div className="min-w-0 rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 space-y-2 transition-colors hover:border-border">
-            <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-indigo-500">
+          <div className="min-w-0 rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 space-y-2 transition-colors hover:border-border overflow-hidden">
+            <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5 min-w-0">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-indigo-500 shrink-0">
                 <Wrench className="h-3.5 w-3.5 shrink-0" /> Produção
               </div>
               {it.production_status && (
-                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded truncate max-w-[120px] ${
                   it.production_status === 'delivered' || it.production_status === 'finished'
                     ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                     : it.production_status === 'paused'
                     ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
                     : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
-                }`}>
+                }`} title={formatProductionStatus(it.production_status)}>
                   {formatProductionStatus(it.production_status)}
                 </span>
               )}
@@ -310,13 +310,13 @@ function OperationCard({
               </div>
               <div className="min-w-0">
                 <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Status</span>
-                <span className="block font-medium text-xs text-foreground truncate">
+                <span className="block font-medium text-xs text-foreground truncate" title={formatProductionStatus(it.production_status)}>
                   {formatProductionStatus(it.production_status)}
                 </span>
               </div>
               <div className="min-w-0">
                 <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Finalizado</span>
-                <span className="block font-medium text-xs text-foreground tabular-nums">
+                <span className="block font-medium text-xs text-foreground tabular-nums truncate">
                   {fmtDate(it.production_delivered_at)}
                 </span>
               </div>
@@ -324,21 +324,21 @@ function OperationCard({
           </div>
 
           {/* STAGE 2: WEEKLOG */}
-          <div className="min-w-0 rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 space-y-2 transition-colors hover:border-border">
-            <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-sky-500">
+          <div className="min-w-0 rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 space-y-2 transition-colors hover:border-border overflow-hidden">
+            <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5 min-w-0">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-sky-500 shrink-0">
                 <FileText className="h-3.5 w-3.5 shrink-0" /> WEEKLOG
               </div>
               {it.validation_situation === "oui" ? (
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
                   Validado
                 </span>
               ) : it.validation_situation === "non" ? (
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 shrink-0">
                   Recusado
                 </span>
               ) : it.week ? (
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400 shrink-0">
                   Em Aberto
                 </span>
               ) : null}
@@ -354,11 +354,11 @@ function OperationCard({
                 <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Validação</span>
                 <span className="block font-medium text-xs truncate">
                   {it.validation_situation === "oui" ? (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1">
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1 truncate">
                       <CheckCircle2 className="h-3 w-3 inline shrink-0" /> Sim {it.validation_assinado ? "· Assinado" : ""}
                     </span>
                   ) : it.validation_situation === "non" ? (
-                    <span className="text-rose-600 dark:text-rose-400 font-semibold inline-flex items-center gap-1">
+                    <span className="text-rose-600 dark:text-rose-400 font-semibold inline-flex items-center gap-1 truncate">
                       <AlertTriangle className="h-3 w-3 inline shrink-0" /> Não
                     </span>
                   ) : it.validation_assinado ? (
@@ -378,17 +378,17 @@ function OperationCard({
           </div>
 
           {/* STAGE 3: PAGAMENTO */}
-          <div className="min-w-0 rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 space-y-2 transition-colors hover:border-border">
-            <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-500">
+          <div className="min-w-0 rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 space-y-2 transition-colors hover:border-border overflow-hidden">
+            <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5 min-w-0">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-500 shrink-0">
                 <CreditCard className="h-3.5 w-3.5 shrink-0" /> Pagamento
               </div>
               {it.status === "pago" || it.status === "encerrado" ? (
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
                   Pago
                 </span>
               ) : it.valor_pendente && it.valor_pendente > 0 ? (
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
                   Pendente
                 </span>
               ) : null}
@@ -421,20 +421,20 @@ function OperationCard({
         </div>
 
         {/* Card Footer: Metadata and Links */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5 border-t border-border/50 pt-2.5 mt-auto">
-          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 border-t border-border/50 pt-2.5 mt-auto min-w-0">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground min-w-0">
             {it.technician_name && (
-              <span className="inline-flex items-center gap-1.5">
-                <User className="h-3.5 w-3.5" /> {it.technician_name}
+              <span className="inline-flex items-center gap-1.5 truncate max-w-[180px]" title={it.technician_name}>
+                <User className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{it.technician_name}</span>
               </span>
             )}
             {it.year_reference && (
-              <span className="inline-flex items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5" /> {it.year_reference}
+              <span className="inline-flex items-center gap-1.5 shrink-0">
+                <Calendar className="h-3.5 w-3.5 shrink-0" /> {it.year_reference}
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 shrink-0 w-full sm:w-auto justify-end">
             {(it.production_order_id || it.production_code) && (
               <NavLink to="/production" label="Produção" icon={Wrench} />
             )}
@@ -450,6 +450,7 @@ function OperationCard({
     </Card>
   );
 }
+
 
 export default function ProductionWorkflowPage() {
   const { t } = useLanguage();
@@ -505,7 +506,7 @@ export default function ProductionWorkflowPage() {
   const statusOptions = ALL_STATUSES.filter((k) => (byStatus[k] ?? 0) > 0);
 
   return (
-    <div className="animate-fade-in flex min-h-full w-full min-w-0 flex-col gap-3 overflow-visible md:gap-2">
+    <div className="animate-fade-in flex min-h-full w-full max-w-full min-w-0 flex-col gap-3 overflow-x-hidden md:gap-3">
       <header className="sticky top-0 z-30 -mx-3 flex shrink-0 flex-col gap-3 border-b border-border/40 bg-background/95 px-3 pb-3 pt-1 backdrop-blur sm:-mx-4 sm:px-4 md:static md:mx-0 md:flex-row md:items-center md:justify-between md:bg-transparent md:px-1 md:pb-2 md:pt-0 md:backdrop-blur-none">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
@@ -523,7 +524,7 @@ export default function ProductionWorkflowPage() {
       </header>
 
       {/* ==== KPIs ==== */}
-      <section className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         {isLoading && !s ? (
           <>
             {Array.from({ length: 4 }).map((_, i) => (
@@ -579,134 +580,151 @@ export default function ProductionWorkflowPage() {
           onValueChange={(v) => setTab(v as typeof tab)}
           className="w-full"
         >
-          <TabsList className="grid h-auto w-full grid-cols-4 gap-1 p-1 md:inline-flex md:w-auto">
-            <TabsTrigger value="all" className="min-h-9 text-xs md:text-sm">
-              Todas · <span className="tabular-nums">{s?.count ?? 0}</span>
+          <TabsList className="flex flex-wrap h-auto w-full gap-1 p-1 sm:inline-flex sm:w-auto">
+            <TabsTrigger value="all" className="min-h-9 flex-1 sm:flex-initial text-xs md:text-sm">
+              Todas · <span className="tabular-nums font-semibold ml-1">{s?.count ?? 0}</span>
             </TabsTrigger>
-            <TabsTrigger value="open" className="min-h-9 text-xs md:text-sm">
+            <TabsTrigger value="open" className="min-h-9 flex-1 sm:flex-initial text-xs md:text-sm">
               Em andamento ·{" "}
-              <span className="tabular-nums">{s?.aguardando_acao ?? 0}</span>
+              <span className="tabular-nums font-semibold ml-1">{s?.aguardando_acao ?? 0}</span>
             </TabsTrigger>
-            <TabsTrigger value="finance" className="min-h-9 text-xs md:text-sm">
+            <TabsTrigger value="finance" className="min-h-9 flex-1 sm:flex-initial text-xs md:text-sm">
               Financeiro
             </TabsTrigger>
-            <TabsTrigger value="done" className="min-h-9 text-xs md:text-sm">
+            <TabsTrigger value="done" className="min-h-9 flex-1 sm:flex-initial text-xs md:text-sm">
               Concluídas
             </TabsTrigger>
           </TabsList>
 
-          <div className="mt-2 grid gap-2 rounded-xl border bg-slate-50/60 p-2.5 dark:bg-slate-900/20 md:grid-cols-8">
-            <div className="space-y-1 md:col-span-2">
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Busca
-              </Label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+          <div className="mt-2 rounded-xl border bg-slate-50/60 p-3 dark:bg-slate-900/20">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-12 gap-2.5 items-end">
+              {/* Busca */}
+              <div className="space-y-1 sm:col-span-2 md:col-span-3 lg:col-span-2 xl:col-span-3">
+                <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                  Busca
+                </Label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Cliente, placa, código, VIN..."
+                    value={filters.search ?? ""}
+                    onChange={(e) =>
+                      setFilters((p) => ({ ...p, search: e.target.value }))
+                    }
+                    className="h-8 text-xs"
+                    style={{ paddingLeft: 28 }}
+                  />
+                </div>
+              </div>
+
+              {/* Ano */}
+              <div className="space-y-1 sm:col-span-1 md:col-span-1 lg:col-span-1 xl:col-span-1">
+                <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                  Ano
+                </Label>
                 <Input
-                  placeholder="Cliente, placa, código, VIN..."
-                  value={filters.search ?? ""}
+                  type="number"
+                  placeholder="2026"
+                  value={filters.year ?? ""}
                   onChange={(e) =>
-                    setFilters((p) => ({ ...p, search: e.target.value }))
+                    setFilters((p) => ({
+                      ...p,
+                      year: e.target.value
+                        ? parseInt(e.target.value, 10)
+                        : undefined,
+                    }))
                   }
-                  className="h-8 pl-7.5 text-sm [&:not(:placeholder-shown)]~.lucide-x:hidden"
-                  style={{ paddingLeft: 28 }}
+                  className="h-8 text-xs"
                 />
               </div>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Ano
-              </Label>
-              <Input
-                type="number"
-                placeholder="2026"
-                value={filters.year ?? ""}
-                onChange={(e) =>
-                  setFilters((p) => ({
-                    ...p,
-                    year: e.target.value
-                      ? parseInt(e.target.value, 10)
-                      : undefined,
-                  }))
-                }
-                className="h-8"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Semana
-              </Label>
-              <Input
-                placeholder="32 ou W32"
-                value={filters.week ?? ""}
-                onChange={(e) =>
-                  setFilters((p) => ({ ...p, week: e.target.value }))
-                }
-                className="h-8"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Status
-              </Label>
-              <Select
-                value={filters.status ?? ""}
-                onValueChange={(v) =>
-                  setFilters((p) => ({
-                    ...p,
-                    status: (v as OperationalWorkflowStatus) || undefined,
-                  }))
-                }
-              >
-                <SelectTrigger className="h-8">
-                  <SelectValue placeholder="Todos" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ALL_STATUSES.map((k) => {
-                    const m = meta?.[k];
-                    const n = byStatus[k] ?? 0;
-                    return (
-                      <SelectItem key={k} value={k}>
-                        <span className="flex items-center justify-between gap-2">
-                          <span>{m?.label ?? k}</span>
-                          <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] tabular-nums dark:bg-slate-800">
-                            {n}
+
+              {/* Semana */}
+              <div className="space-y-1 sm:col-span-1 md:col-span-1 lg:col-span-1 xl:col-span-1">
+                <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                  Semana
+                </Label>
+                <Input
+                  placeholder="32 ou W32"
+                  value={filters.week ?? ""}
+                  onChange={(e) =>
+                    setFilters((p) => ({ ...p, week: e.target.value }))
+                  }
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              {/* Status */}
+              <div className="space-y-1 sm:col-span-1 md:col-span-1 lg:col-span-1 xl:col-span-2">
+                <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                  Status
+                </Label>
+                <Select
+                  value={filters.status ?? "all"}
+                  onValueChange={(v) =>
+                    setFilters((p) => ({
+                      ...p,
+                      status: v === "all" ? undefined : (v as OperationalWorkflowStatus),
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Todos os status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os status</SelectItem>
+                    {ALL_STATUSES.map((k) => {
+                      const m = meta?.[k];
+                      const n = byStatus[k] ?? 0;
+                      return (
+                        <SelectItem key={k} value={k}>
+                          <span className="flex items-center justify-between gap-2">
+                            <span>{m?.label ?? k}</span>
+                            <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] tabular-nums dark:bg-slate-800">
+                              {n}
+                            </span>
                           </span>
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Cliente
-              </Label>
-              <Input
-                placeholder="Nome"
-                value={filters.client ?? ""}
-                onChange={(e) =>
-                  setFilters((p) => ({ ...p, client: e.target.value }))
-                }
-                className="h-8"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Técnico
-              </Label>
-              <Input
-                placeholder="Nome"
-                value={filters.technician ?? ""}
-                onChange={(e) =>
-                  setFilters((p) => ({ ...p, technician: e.target.value }))
-                }
-                className="h-8"
-              />
-            </div>
-            <div className="flex flex-col justify-end">
-              <div className="flex gap-2">
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Cliente */}
+              <div className="space-y-1 sm:col-span-1 md:col-span-1 lg:col-span-1 xl:col-span-2">
+                <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                  Cliente
+                </Label>
+                <Input
+                  placeholder="Nome do cliente"
+                  value={filters.client ?? ""}
+                  onChange={(e) =>
+                    setFilters((p) => ({ ...p, client: e.target.value }))
+                  }
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              {/* Técnico */}
+              <div className="space-y-1 sm:col-span-1 md:col-span-1 lg:col-span-1 xl:col-span-1">
+                <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                  Técnico
+                </Label>
+                <Input
+                  placeholder="Nome"
+                  value={filters.technician ?? ""}
+                  onChange={(e) =>
+                    setFilters((p) => ({ ...p, technician: e.target.value }))
+                  }
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              {/* Pagamento */}
+              <div className="space-y-1 sm:col-span-1 md:col-span-1 lg:col-span-1 xl:col-span-1">
+                <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                  Pagamento
+                </Label>
                 <Select
                   value={filters.pagamento ?? "any"}
                   onValueChange={(v) =>
@@ -716,24 +734,29 @@ export default function ProductionWorkflowPage() {
                     }))
                   }
                 >
-                  <SelectTrigger className="h-8">
-                    <SelectValue placeholder="Pagamento" />
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Qualquer" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="any">Qualquer</SelectItem>
                     <SelectItem value="pendente">Pendente</SelectItem>
                     <SelectItem value="pago">Pago</SelectItem>
-                    <SelectItem value="none">Sem Pagamento (ainda)</SelectItem>
+                    <SelectItem value="none">Sem Pagamento</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Botão Limpar Filtros */}
+              <div className="sm:col-span-1 md:col-span-1 lg:col-span-1 xl:col-span-1">
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 gap-1 px-2 text-[11px]"
+                  className="h-8 w-full gap-1 px-2.5 text-xs border-border/80 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-colors"
                   onClick={() => setFilters({})}
-                  title="Limpar filtros"
+                  title="Limpar todos os filtros"
                 >
-                  <FilterX className="h-3 w-3" /> Limpar
+                  <FilterX className="h-3.5 w-3.5 shrink-0" />
+                  <span>Limpar</span>
                 </Button>
               </div>
             </div>
@@ -790,7 +813,7 @@ function WorkflowGrid({
 }) {
   if (loading && (!items || items.length === 0)) {
     return (
-      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (
           <Card key={i} className="overflow-hidden">
             <CardHeader className="pb-3">
@@ -836,7 +859,7 @@ function WorkflowGrid({
     );
   }
   return (
-    <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+    <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
       {items.map((it) => (
         <OperationCard
           key={it.id}
