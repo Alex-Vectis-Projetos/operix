@@ -94,7 +94,55 @@ export function useExtractServiceOrder() {
         timeoutMs: 60000,
       });
 
-      return data;
+      const cleanStr = (v: string | null | undefined): string | null => {
+        if (!v) return null;
+        const s = v.trim();
+        if (!s || s.toLowerCase() === "null" || s.toLowerCase() === "undefined" || s === "-" || s === "--" || s.toLowerCase() === "n/a" || s.toLowerCase() === "none") {
+          return null;
+        }
+        return s;
+      };
+
+      const normalized: ExtractionResult = {
+        ...data,
+        orders: (data.orders || []).map((o) => {
+          const fc = { ...(o.field_confidence || {}) };
+          const client = cleanStr(o.client);
+          const platform = cleanStr(o.platform);
+          const technician = cleanStr(o.technician);
+          const week = cleanStr(o.week);
+          const car_name = cleanStr(o.car_name);
+          const license_plate = cleanStr(o.license_plate);
+          const s1 = cleanStr(o.service_1_name);
+          const s2 = cleanStr(o.service_2_name);
+          const s3 = cleanStr(o.service_3_name);
+          const s4 = cleanStr(o.service_4_name);
+
+          // Never flag empty optional fields as low confidence
+          if (!platform) delete fc.platform;
+          if (!license_plate) delete fc.license_plate;
+          if (!s2) delete fc.service_2_price;
+          if (!s3) delete fc.service_3_price;
+          if (!s4) delete fc.service_4_price;
+
+          return {
+            ...o,
+            client,
+            platform,
+            technician,
+            week,
+            car_name,
+            license_plate,
+            service_1_name: s1,
+            service_2_name: s2,
+            service_3_name: s3,
+            service_4_name: s4,
+            field_confidence: fc,
+          };
+        }),
+      };
+
+      return normalized;
     } finally {
       setIsExtracting(false);
     }

@@ -123,11 +123,14 @@ CONFIDENCE SCORING — be honest:
 - "high": clearly printed/typed, no ambiguity
 - "medium": readable but could be misread
 - "low": handwritten, blurry, or guessing. User MUST verify.
+- Note: If a field is not present in the document (e.g. platform, or missing license plate marked with '-'), return null (literal JSON null, NEVER the string "null" or "-"). Do not mark absent fields as "low" confidence.
 
 FIELD RULES:
 - "client" = COMPANY or PERSON who OWNS the vehicle (e.g. Uber, Bolt, a fleet company)
 - "technician" = PERSON who PERFORMS the work. These are NEVER the same.
-- If unsure about a text field → return null. Never fabricate data.
+- "platform" = service platform name if present (or null if not mentioned in document).
+- "license_plate" = plate number (or null if marked with '-' or absent).
+- If unsure or absent → return null. Never fabricate data and never return "null" as string.
 - Prices must be numbers (no currency symbols). If you can't read a price → return null.
 - Total should match sum of services.
 
@@ -216,20 +219,46 @@ A document may have MULTIPLE rows. Extract ALL of them.`,
     const data = await aiRes.json();
     const extracted = parseToolCall(data) as any;
 
-    // Post-processing: validate totals and flag sparse rows
-    if (extracted?.orders) {
+    function sanitizeExtracted(v: unknown): string | null {
+      if (v == null) return null;
+      if (typeof v !== "string") return String(v).trim() || null;
+      const s = v.trim();
+      if (!s) return null;
+      const lower = s.toLowerCase();
+      if (lower === "null" || lower === "undefined" || lower === "n/a" || lower === "none" || s === "-" || s === "--") {
+        return null;
+      }
+      return s;
+    }
+
+    // Post-processing: sanitize values, validate totals, and ensure optional fields are not flagged as low confidence
+    if (extracted?.orders && Array.isArray(extracted.orders)) {
       for (const order of extracted.orders) {
+        order.client = sanitizeExtracted(order.client);
+        order.platform = sanitizeExtracted(order.platform);
+        order.technician = sanitizeExtracted(order.technician);
+        order.week = sanitizeExtracted(order.week);
+        order.car_name = sanitizeExtracted(order.car_name);
+        order.license_plate = sanitizeExtracted(order.license_plate);
+        order.service_1_name = sanitizeExtracted(order.service_1_name);
+        order.service_2_name = sanitizeExtracted(order.service_2_name);
+        order.service_3_name = sanitizeExtracted(order.service_3_name);
+        order.service_4_name = sanitizeExtracted(order.service_4_name);
+
         if (!order.field_confidence) order.field_confidence = {};
+
         const computed = [1, 2, 3, 4].reduce((s: number, i: number) => s + (order[`service_${i}_price`] || 0), 0);
         if (order.total != null && Math.abs(computed - order.total) > 0.01) {
           order.total_mismatch = true;
           order.field_confidence.total = "low";
         }
-        const textFields = ["client", "platform", "technician", "week", "car_name", "license_plate"];
-        const filled = textFields.filter(f => order[f]?.trim()).length;
-        if (filled <= 2) {
-          for (const f of textFields) {
-            if (!order[f]?.trim() && !order.field_confidence[f]) order.field_confidence[f] = "low";
+
+        // Clean up field_confidence:
+        // Absent / optional fields (like platform, empty license plates, empty extra services) must NEVER be marked as low confidence.
+        const optionalFields = ["platform", "license_plate", "service_2_name", "service_3_name", "service_4_name", "service_2_price", "service_3_price", "service_4_price"];
+        for (const f of optionalFields) {
+          if (!order[f]) {
+            delete order.field_confidence[f];
           }
         }
       }

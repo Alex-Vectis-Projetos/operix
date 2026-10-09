@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+function cleanText(v: unknown): string {
+  if (v == null) return "";
+  const s = String(v).trim();
+  if (s.toLowerCase() === "null" || s.toLowerCase() === "undefined" || s === "-" || s === "--" || s.toLowerCase() === "n/a" || s.toLowerCase() === "none") {
+    return "";
+  }
+  return s;
+}
 
 interface TechnicianOption {
   /** auth.users.id — used as the value of the dropdown / `assigned_user_id`. */
@@ -95,7 +104,7 @@ export function ExtractedDataTable({
   // ensuring the Select component (which stores user_id) shows the correct selection.
   const resolveTechUserIdFromText = (text: string | null): string | null => {
     if (!text) return null;
-    const norm = text.trim().toLowerCase();
+    const norm = cleanText(text).toLowerCase();
     if (!norm) return null;
     const exact = technicians.find((t) => t.name.toLowerCase() === norm);
     if (exact) return exact.user_id ?? null;
@@ -106,17 +115,50 @@ export function ExtractedDataTable({
   };
 
   const [rows, setRows] = useState<ExtractedOrder[]>(() => {
-    if (lockTechnician && myTechnicianName) {
-      const myUserId = technicians.find((t) => t.name === myTechnicianName)?.user_id ?? null;
-      return initial.map((r) => ({ ...r, technician: myUserId ?? myTechnicianName }));
-    }
     return initial.map((r) => {
-      const resolvedUserId = resolveTechUserIdFromText(r.technician);
-      return { ...r, technician: resolvedUserId ?? r.technician };
+      const sanitized: ExtractedOrder = {
+        ...r,
+        client: cleanText(r.client) || null,
+        platform: cleanText(r.platform) || null,
+        technician: cleanText(r.technician) || null,
+        week: cleanText(r.week) || null,
+        car_name: cleanText(r.car_name) || null,
+        license_plate: cleanText(r.license_plate) || null,
+        service_1_name: cleanText(r.service_1_name) || null,
+        service_2_name: cleanText(r.service_2_name) || null,
+        service_3_name: cleanText(r.service_3_name) || null,
+        service_4_name: cleanText(r.service_4_name) || null,
+      };
+      if (lockTechnician && myTechnicianName) {
+        const myUserId = technicians.find((t) => t.name === myTechnicianName)?.user_id ?? null;
+        sanitized.technician = myUserId ?? myTechnicianName;
+      } else {
+        const resolvedUserId = resolveTechUserIdFromText(sanitized.technician);
+        if (resolvedUserId) sanitized.technician = resolvedUserId;
+      }
+      return sanitized;
     });
   });
+
+  useEffect(() => {
+    if (technicians.length === 0) return;
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.technician && !technicians.some((t) => t.user_id === r.technician)) {
+          const resolved = resolveTechUserIdFromText(r.technician);
+          if (resolved) return { ...r, technician: resolved };
+        }
+        if (!r.technician && technicians.length === 1) {
+          return { ...r, technician: technicians[0].user_id };
+        }
+        return r;
+      })
+    );
+  }, [technicians]);
+
   const [stage, setStage] = useState<Stage>("review");
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
   const [errorRows, setErrorRows] = useState<Set<number>>(new Set());
   // Map of `${rowIdx}:${field}` -> inline error message
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -136,6 +178,7 @@ export function ExtractedDataTable({
   const update = (idx: number, field: keyof ExtractedOrder, value: string | number | null) => {
     // Clear previous validation when user edits — fields always editable
     setValidationErrors([]);
+    setValidationWarnings([]);
     setErrorRows(new Set());
     setFieldErrors((prev) => {
       const key = `${idx}:${field as string}`;
@@ -190,45 +233,70 @@ export function ExtractedDataTable({
   const removeRow = (idx: number) => {
     setRows((prev) => prev.filter((_, i) => i !== idx));
     setValidationErrors([]);
+    setValidationWarnings([]);
     setErrorRows(new Set());
     setFieldErrors({});
     if (stage !== "review") setStage("review");
   };
 
   const runValidation = (): boolean => {
-    const errors: string[] = [];
+    const blockingErrors: string[] = [];
+    const reviewWarnings: string[] = [];
     const badRows = new Set<number>();
     const fErrors: Record<string, string> = {};
+
     rows.forEach((row, i) => {
       const n = String(i + 1);
-      if (!row.client?.trim()) {
-        errors.push(t("validate.missingClient").replace("{n}", n));
+      const client = cleanText(row.client);
+      const tech = cleanText(row.technician);
+      if (!client) {
+        blockingErrors.push(t("validate.missingClient").replace("{n}", n));
         badRows.add(i);
         fErrors[`${i}:client`] = "Cliente obrigatório";
       }
-      if (!row.technician?.trim()) {
-        errors.push(t("validate.missingTechnician").replace("{n}", n));
+      if (!tech) {
+        blockingErrors.push(t("validate.missingTechnician").replace("{n}", n));
         badRows.add(i);
         fErrors[`${i}:technician`] = "Selecione um técnico";
       }
-      const hasService = row.service_1_name?.trim() || row.service_2_name?.trim() || row.service_3_name?.trim() || row.service_4_name?.trim();
-      if (!hasService) { errors.push(t("validate.missingService").replace("{n}", n)); badRows.add(i); }
-      const computed = (Number(row.service_1_price) || 0) + (Number(row.service_2_price) || 0) + (Number(row.service_3_price) || 0) + (Number(row.service_4_price) || 0);
-      if (row.total != null && Math.abs(computed - row.total) > 0.01) {
-        errors.push(t("validate.totalMismatch").replace("{n}", n).replace("{expected}", String(computed)).replace("{actual}", String(row.total)));
+      const hasService = cleanText(row.service_1_name) || cleanText(row.service_2_name) || cleanText(row.service_3_name) || cleanText(row.service_4_name);
+      if (!hasService) {
+        blockingErrors.push(t("validate.missingService").replace("{n}", n));
         badRows.add(i);
       }
-      if ((row.total ?? 0) === 0) { errors.push(t("validate.zeroTotal").replace("{n}", n)); badRows.add(i); }
-      const lowFields = Object.entries(row.field_confidence || {}).filter(([, v]) => v === "low").map(([k]) => k);
+      const computed = (Number(row.service_1_price) || 0) + (Number(row.service_2_price) || 0) + (Number(row.service_3_price) || 0) + (Number(row.service_4_price) || 0);
+      if (row.total != null && Math.abs(computed - row.total) > 0.01) {
+        blockingErrors.push(t("validate.totalMismatch").replace("{n}", n).replace("{expected}", String(computed)).replace("{actual}", String(row.total)));
+        badRows.add(i);
+      }
+      if ((row.total ?? 0) <= 0) {
+        blockingErrors.push(t("validate.zeroTotal").replace("{n}", n));
+        badRows.add(i);
+      }
+
+      // Review warnings: only flag fields that HAVE values with low confidence, or required fields
+      const lowFields = Object.entries(row.field_confidence || {})
+        .filter(([k, v]) => {
+          if (v !== "low") return false;
+          // Ignore empty optional fields (like platform or license_plate without value)
+          if (["platform", "license_plate"].includes(k) && !cleanText(row[k as keyof ExtractedOrder])) {
+            return false;
+          }
+          return true;
+        })
+        .map(([k]) => k);
+
       if (lowFields.length > 0) {
-        errors.push(t("validate.lowConfidence").replace("{n}", n).replace("{fields}", lowFields.join(", ")));
+        reviewWarnings.push(t("validate.lowConfidence").replace("{n}", n).replace("{fields}", lowFields.join(", ")));
       }
     });
-    setValidationErrors(errors);
+
+    setValidationErrors(blockingErrors);
+    setValidationWarnings(reviewWarnings);
     setErrorRows(badRows);
     setFieldErrors(fErrors);
-    const blocking = errors.filter(e => !e.includes(t("validate.lowConfidencePrefix")));
-    if (blocking.length === 0) {
+
+    if (blockingErrors.length === 0) {
       setStage("save");
       return true;
     } else {
@@ -240,7 +308,7 @@ export function ExtractedDataTable({
   const handleSave = () => {
     const passed = runValidation();
     if (!passed) {
-      // Show override dialog — user can still force save
+      // Show override dialog — user can still force save if desired
       setShowOverrideDialog(true);
       return;
     }
@@ -359,11 +427,26 @@ export function ExtractedDataTable({
             Corrija os erros antes de salvar
           </div>
           <p className="text-xs text-destructive/80">
-            {validationErrors.length} {validationErrors.length === 1 ? "problema encontrado" : "problemas encontrados"}. Revise os campos destacados abaixo:
+            {validationErrors.length} {validationErrors.length === 1 ? "problema obrigatório encontrado" : "problemas obrigatórios encontrados"}. Revise os campos destacados abaixo:
           </p>
           <ul className="list-disc list-inside text-xs text-destructive/90 space-y-0.5">
             {validationErrors.map((e, i) => <li key={i}>{e}</li>)}
           </ul>
+        </div>
+      )}
+
+      {validationErrors.length === 0 && validationWarnings.length > 0 && (
+        <div
+          role="status"
+          className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-1 shadow-sm text-amber-500 dark:text-amber-400"
+        >
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            Revisão recomendada ({validationWarnings.length} {validationWarnings.length === 1 ? "campo" : "campos"} com baixa confiança)
+          </div>
+          <p className="text-[11px] opacity-90">
+            Campos opcionais vazios foram aceitos. Você pode salvar normalmente.
+          </p>
         </div>
       )}
 
@@ -404,18 +487,18 @@ export function ExtractedDataTable({
                 <TableRow key={idx} className={cn("group", row.total_mismatch && "bg-red-500/5", errorRows.has(idx) && "bg-destructive/10 ring-1 ring-inset ring-destructive/30")}>
                   <TableCell className={cn("text-muted-foreground text-xs", errorRows.has(idx) && "text-destructive font-bold")}>{idx + 1}</TableCell>
                   <ConfidenceCell value={row.client} confidence={fc.client} onChange={(v) => update(idx, "client", v)} />
-                  <ConfidenceCell value={row.platform} confidence={fc.platform} onChange={(v) => update(idx, "platform", v)} />
+                  <ConfidenceCell value={row.platform} confidence={fc.platform} onChange={(v) => update(idx, "platform", v)} isOptional />
                   <TechnicianSelectCell value={row.technician} confidence={fc.technician} technicians={technicians} disabled={!canEditTechnician} error={fieldErrors[`${idx}:technician`]} onChange={(v) => update(idx, "technician", v)} />
                   <ConfidenceCell value={row.week} confidence={fc.week} onChange={(v) => update(idx, "week", v)} />
                   <ConfidenceCell value={row.car_name} confidence={fc.car_name} onChange={(v) => update(idx, "car_name", v)} />
-                  <ConfidenceCell value={row.license_plate} confidence={fc.license_plate} onChange={(v) => update(idx, "license_plate", v)} />
+                  <ConfidenceCell value={row.license_plate} confidence={fc.license_plate} onChange={(v) => update(idx, "license_plate", v)} isOptional />
                   <ConfidenceCell value={row.service_1_name} confidence={fc.service_1_name} onChange={(v) => update(idx, "service_1_name", v)} />
                   <ConfidenceNumCell value={row.service_1_price} confidence={fc.service_1_price} onChange={(v) => update(idx, "service_1_price", v)} />
-                  <ConfidenceCell value={row.service_2_name} confidence={fc.service_2_name} onChange={(v) => update(idx, "service_2_name", v)} />
+                  <ConfidenceCell value={row.service_2_name} confidence={fc.service_2_name} onChange={(v) => update(idx, "service_2_name", v)} isOptional />
                   <ConfidenceNumCell value={row.service_2_price} confidence={fc.service_2_price} onChange={(v) => update(idx, "service_2_price", v)} />
-                  <ConfidenceCell value={row.service_3_name} confidence={fc.service_3_name} onChange={(v) => update(idx, "service_3_name", v)} />
+                  <ConfidenceCell value={row.service_3_name} confidence={fc.service_3_name} onChange={(v) => update(idx, "service_3_name", v)} isOptional />
                   <ConfidenceNumCell value={row.service_3_price} confidence={fc.service_3_price} onChange={(v) => update(idx, "service_3_price", v)} />
-                  <ConfidenceCell value={row.service_4_name} confidence={fc.service_4_name} onChange={(v) => update(idx, "service_4_name", v)} />
+                  <ConfidenceCell value={row.service_4_name} confidence={fc.service_4_name} onChange={(v) => update(idx, "service_4_name", v)} isOptional />
                   <ConfidenceNumCell value={row.service_4_price} confidence={fc.service_4_price} onChange={(v) => update(idx, "service_4_price", v)} />
                   <TableCell className={cn("font-semibold tabular-nums", row.total_mismatch ? "text-destructive" : "text-primary")}>
                     <Tooltip>
@@ -466,24 +549,35 @@ export function ExtractedDataTable({
   );
 }
 
-function ConfidenceCell({ value, confidence, onChange }: { value: string | null; confidence?: FieldConfidence; onChange: (v: string) => void }) {
-  const conf = confidence || "high";
+function ConfidenceCell({
+  value,
+  confidence,
+  onChange,
+  isOptional = false,
+}: {
+  value: string | null;
+  confidence?: FieldConfidence;
+  onChange: (v: string) => void;
+  isOptional?: boolean;
+}) {
+  const displayVal = cleanText(value);
+  const conf = (!displayVal && isOptional) ? "high" : (confidence || "high");
   const borderClass = fieldConfBorder[conf];
   return (
     <TableCell className="p-1">
       <Tooltip>
         <TooltipTrigger asChild>
           <Input
-            value={value || ""}
+            value={displayVal}
             onChange={(e) => onChange(e.target.value)}
             className={cn("h-8 text-xs bg-transparent hover:border-border focus:border-primary", borderClass)}
           />
         </TooltipTrigger>
-        {conf !== "high" && (
+        {conf !== "high" && displayVal ? (
           <TooltipContent className="text-xs">
-            {conf === "low" ? "⚠️ Low confidence — please verify" : "⚡ Medium confidence — review recommended"}
+            {conf === "low" ? "⚠️ Baixa confiança — favor verificar" : "⚡ Média confiança — revisão recomendada"}
           </TooltipContent>
-        )}
+        ) : null}
       </Tooltip>
     </TableCell>
   );
@@ -504,9 +598,9 @@ function ConfidenceNumCell({ value, confidence, onChange }: { value: number | nu
             className={cn("h-8 text-xs bg-transparent hover:border-border focus:border-primary tabular-nums w-20", borderClass)}
           />
         </TooltipTrigger>
-        {conf !== "high" && (
+        {conf !== "high" && value != null && (
           <TooltipContent className="text-xs">
-            {conf === "low" ? "⚠️ Low confidence — please verify" : "⚡ Medium confidence — review recommended"}
+            {conf === "low" ? "⚠️ Baixa confiança — favor verificar" : "⚡ Média confiança — revisão recomendada"}
           </TooltipContent>
         )}
       </Tooltip>
@@ -529,9 +623,18 @@ function TechnicianSelectCell({
   error?: string;
   onChange: (v: string) => void;
 }) {
+  const byId = technicians.find((t) => t.user_id === value);
+  const byName = !byId && value ? technicians.find((t) => t.name.toLowerCase() === cleanText(value).toLowerCase()) : undefined;
+  const current = byId?.user_id || byName?.user_id || "";
+
+  useEffect(() => {
+    if (byName && byName.user_id !== value) {
+      onChange(byName.user_id);
+    }
+  }, [byName, value, onChange]);
+
   const conf = confidence || "high";
   const borderClass = fieldConfBorder[conf];
-  const current = value || "";
   const isMissing = !current;
   const showError = !!error || (isMissing && !disabled);
 
@@ -591,7 +694,7 @@ function TechnicianSelectCell({
           </TooltipContent>
         ) : conf !== "high" ? (
           <TooltipContent className="text-xs">
-            {conf === "low" ? "⚠️ Low confidence — please verify" : "⚡ Medium confidence — review recommended"}
+            {conf === "low" ? "⚠️ Baixa confiança — favor verificar" : "⚡ Média confiança — revisão recomendada"}
           </TooltipContent>
         ) : null}
       </Tooltip>

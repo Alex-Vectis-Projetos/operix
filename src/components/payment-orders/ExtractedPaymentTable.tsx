@@ -177,30 +177,58 @@ export function ExtractedPaymentTable({ orders, confidence, notes, onSave, onDis
     if (stage !== "review") setStage("review");
   };
 
+  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
+
   const runValidation = (): boolean => {
-    const errors: string[] = [];
+    const blockingErrors: string[] = [];
+    const reviewWarnings: string[] = [];
     const badRows = new Set<number>();
+
     rows.forEach((row, i) => {
       const n = String(i + 1);
-      if (!row.client?.trim()) { errors.push(t("validate.missingClient").replace("{n}", n)); badRows.add(i); }
-      if (!row.technician?.trim()) { errors.push(t("validate.missingTechnician").replace("{n}", n)); badRows.add(i); }
-      const hasService = (row.services || []).some(s => s.name?.trim());
-      if (!hasService) { errors.push(t("validate.missingService").replace("{n}", n)); badRows.add(i); }
-      const computed = computeTotal(row.services || []);
-      if (row.total != null && Math.abs(computed - (row.total || 0)) > 0.01) {
-        errors.push(t("validate.totalMismatch").replace("{n}", n).replace("{expected}", String(computed)).replace("{actual}", String(row.total)));
+      const client = row.client?.trim();
+      const tech = row.technician?.trim();
+      if (!client || client.toLowerCase() === "null") {
+        blockingErrors.push(t("validate.missingClient").replace("{n}", n));
         badRows.add(i);
       }
-      if ((row.total ?? 0) === 0) { errors.push(t("validate.zeroTotal").replace("{n}", n)); badRows.add(i); }
-      const lowFields = Object.entries(row.field_confidence || {}).filter(([, v]) => v === "low").map(([k]) => k);
+      if (!tech || tech.toLowerCase() === "null") {
+        blockingErrors.push(t("validate.missingTechnician").replace("{n}", n));
+        badRows.add(i);
+      }
+      const hasService = (row.services || []).some(s => s.name?.trim() && s.name.toLowerCase() !== "null");
+      if (!hasService) {
+        blockingErrors.push(t("validate.missingService").replace("{n}", n));
+        badRows.add(i);
+      }
+      const computed = computeTotal(row.services || []);
+      if (row.total != null && Math.abs(computed - (row.total || 0)) > 0.01) {
+        blockingErrors.push(t("validate.totalMismatch").replace("{n}", n).replace("{expected}", String(computed)).replace("{actual}", String(row.total)));
+        badRows.add(i);
+      }
+      if ((row.total ?? 0) <= 0) {
+        blockingErrors.push(t("validate.zeroTotal").replace("{n}", n));
+        badRows.add(i);
+      }
+
+      const lowFields = Object.entries(row.field_confidence || {})
+        .filter(([k, v]) => {
+          if (v !== "low") return false;
+          if (["platform", "license_plate", "list_name"].includes(k) && !row[k as keyof typeof row]) return false;
+          return true;
+        })
+        .map(([k]) => k);
+
       if (lowFields.length > 0) {
-        errors.push(t("validate.lowConfidence").replace("{n}", n).replace("{fields}", lowFields.join(", ")));
+        reviewWarnings.push(t("validate.lowConfidence").replace("{n}", n).replace("{fields}", lowFields.join(", ")));
       }
     });
-    setValidationErrors(errors);
+
+    setValidationErrors(blockingErrors);
+    setValidationWarnings(reviewWarnings);
     setErrorRows(badRows);
-    const blocking = errors.filter(e => !e.includes(t("validate.lowConfidencePrefix")));
-    if (blocking.length === 0) {
+
+    if (blockingErrors.length === 0) {
       setStage("save");
       return true;
     } else {
