@@ -17,6 +17,13 @@ import {
 import { toast } from "sonner";
 import { format, subMonths, startOfMonth, endOfMonth, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -121,6 +128,8 @@ export default function ReportsScreen() {
   const [view, setView] = useState<"overview" | "fleet" | "trends">("overview");
   const [exportingPdf, setExportingPdf] = useState(false);
   const [emailingPdf, setEmailingPdf] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailRecipient, setEmailRecipient] = useState("");
 
   const [distMetric, setDistMetric] = useState<"amount" | "count">("amount");
 
@@ -279,44 +288,133 @@ export default function ReportsScreen() {
     toast.success("CSV exportado");
   }
 
-  async function exportPDF() {
-    if (exportingPdf) return;
-    setExportingPdf(true);
+  function exportPDF() {
     try {
-      const data = await apiRequest<{ signedUrl: string }>("/billing/reports/financial/pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          periodMonths,
-          generatedAt: new Date().toISOString(),
-          kpis,
-          monthly,
-        }),
+      const doc = new jsPDF({ orientation: "portrait" });
+      const nowFormatted = format(new Date(), "dd/MM/yyyy HH:mm");
+
+      // Header banner
+      doc.setFillColor(15, 23, 42);
+      doc.rect(0, 0, 210, 26, "F");
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "bold");
+      doc.text("OPERIX — RELATÓRIO FINANCEIRO EXECUTIVO", 14, 11);
+
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Período apurado: últimos ${periodMonths} meses  ·  Gerado em: ${nowFormatted}`, 14, 19);
+
+      // Section: KPIs
+      doc.setTextColor(30, 41, 59);
+      doc.setFontSize(10.5);
+      doc.setFont("helvetica", "bold");
+      doc.text("Indicadores Principais (KPIs)", 14, 34);
+
+      const marginPct = kpis.totalRevenue > 0 ? ((kpis.profit / kpis.totalRevenue) * 100).toFixed(1) : "0.0";
+      autoTable(doc, {
+        startY: 38,
+        head: [["Métrica", "Montante / Percentagem"]],
+        body: [
+          ["Faturamento Total", eurFull(kpis.totalRevenue)],
+          ["Despesas Operacionais", eurFull(kpis.totalExpenses)],
+          ["Lucro Líquido", `${eurFull(kpis.profit)} (${marginPct}% margem)`],
+          ["Montante Recebido (Quitado)", eurFull(kpis.totalReceived)],
+          ["Inadimplência / Em atraso", `${eurFull(kpis.overdueAmount)} (${kpis.inadimplenciaPct.toFixed(1)}%)`],
+          ["Faturamento Pendente", eurFull(kpis.pendingAmount)],
+        ],
+        theme: "striped",
+        styles: { fontSize: 8.5, cellPadding: 2.6 },
+        headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: "bold" },
+        columnStyles: { 0: { cellWidth: 100 }, 1: { fontStyle: "bold" } },
       });
-      if (!data?.signedUrl) throw new Error("PDF indisponível");
-      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+
+      // Section: Detalhamento Mensal
+      const nextY = (doc as any).lastAutoTable.finalY + 8;
+      doc.setFontSize(10.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 41, 59);
+      doc.text("Detalhamento Mensal", 14, nextY);
+
+      autoTable(doc, {
+        startY: nextY + 4,
+        head: [["Mês", "Faturamento", "Despesas", "Recebido", "Lucro", "Em atraso"]],
+        body: monthly.slice(0, periodMonths).map((m) => [
+          m.label,
+          eurFull(m.revenue),
+          eurFull(m.expenses),
+          eurFull(m.received),
+          eurFull(m.profit),
+          eurFull(m.overdue),
+        ]),
+        styles: { fontSize: 8, cellPadding: 2.2 },
+        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: "bold" },
+      });
+
+      // Section: Distribuição por Estado das Faturas
+      if (statusDist.length > 0) {
+        const nextY2 = (doc as any).lastAutoTable.finalY + 8;
+        if (nextY2 < 240) {
+          doc.setFontSize(10.5);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(30, 41, 59);
+          doc.text("Distribuição por Estado das Faturas", 14, nextY2);
+
+          autoTable(doc, {
+            startY: nextY2 + 4,
+            head: [["Estado", "Qtd", "% Qtd", "Valor Total", "% Valor"]],
+            body: statusDist.map((s) => [
+              s.name,
+              String(s.count),
+              `${s.countPct.toFixed(1)}%`,
+              eurFull(s.amount),
+              `${s.amountPct.toFixed(1)}%`,
+            ]),
+            styles: { fontSize: 8, cellPadding: 2.2 },
+            headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontStyle: "bold" },
+          });
+        }
+      }
+
+      // Page numbering
+      const totalPages = (doc as any).internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `Operix ERP · Relatório Financeiro Executivo · Página ${i} de ${totalPages}`,
+          14,
+          doc.internal.pageSize.height - 8
+        );
+      }
+
+      doc.save(`relatorio-financeiro-${format(new Date(), "yyyy-MM-dd")}.pdf`);
+      toast.success("PDF do relatório exportado com sucesso");
     } catch (e: any) {
       toast.error("Falha ao gerar PDF", { description: e?.message ?? "Erro desconhecido" });
-    } finally {
-      setExportingPdf(false);
     }
   }
 
-  async function emailPDF() {
+  async function handleSendEmail() {
     if (emailingPdf) return;
     setEmailingPdf(true);
     try {
-      await apiRequest("/billing/reports/financial/email", {
+      const res = await apiRequest<{ ok: boolean; simulated?: boolean; message?: string; recipient?: string }>("/billing/reports/financial/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          recipient: emailRecipient.trim() || undefined,
           periodMonths,
           generatedAt: new Date().toISOString(),
           kpis,
           monthly,
         }),
       });
-      toast.success("Relatório enviado por email");
+      toast.success(res?.message || "Relatório financeiro enviado com sucesso!");
+      setEmailModalOpen(false);
     } catch (e: any) {
       toast.error("Falha ao enviar relatório", { description: e?.message ?? "Erro desconhecido" });
     } finally {
@@ -350,12 +448,12 @@ export default function ReportsScreen() {
             <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
             CSV
           </Button>
-          <Button variant="outline" size="sm" className="h-8" onClick={exportPDF} disabled={exportingPdf}>
+          <Button variant="outline" size="sm" className="h-8" onClick={exportPDF}>
             <FileText className="h-3.5 w-3.5 mr-1.5" />
             PDF
           </Button>
-          <Button variant="outline" size="sm" className="h-8" onClick={emailPDF} disabled={emailingPdf}>
-            {emailingPdf ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <FileText className="h-3.5 w-3.5 mr-1.5" />}
+          <Button variant="outline" size="sm" className="h-8" onClick={() => setEmailModalOpen(true)}>
+            <FileText className="h-3.5 w-3.5 mr-1.5" />
             Email
           </Button>
         </div>
@@ -691,6 +789,40 @@ export default function ReportsScreen() {
           </Card>
         </div>
       )}
+
+      {/* Modal de envio de email */}
+      <Dialog open={emailModalOpen} onOpenChange={setEmailModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Enviar relatório financeiro por email</DialogTitle>
+            <DialogDescription className="text-xs">
+              Envie o sumário executivo e o relatório financeiro consolidado dos últimos {periodMonths} meses.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-xs">
+            <div>
+              <Label className="text-xs">Email de destino</Label>
+              <Input
+                type="email"
+                placeholder="ex: financeiro@empresa.com"
+                value={emailRecipient}
+                onChange={(e) => setEmailRecipient(e.target.value)}
+                className="mt-1 text-xs"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Deixe em branco para enviar diretamente para o email associado à sua conta Operix.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEmailModalOpen(false)}>Cancelar</Button>
+            <Button size="sm" onClick={handleSendEmail} disabled={emailingPdf}>
+              {emailingPdf && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+              Enviar relatório
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

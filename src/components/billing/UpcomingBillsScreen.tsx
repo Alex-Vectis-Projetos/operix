@@ -85,7 +85,7 @@ export default function UpcomingBillsScreen() {
   const { data: invoices = [], isLoading } = useQuery({
     queryKey: ["billing-invoices-upcoming"],
     queryFn: async () => {
-      const data = await apiRequest<{ invoices: Invoice[] }>("/billing/admin/invoices");
+      const data = await apiRequest<{ invoices: Invoice[] }>("/billing/admin/ops/invoices");
       return data.invoices ?? [];
     },
   });
@@ -162,8 +162,7 @@ export default function UpcomingBillsScreen() {
       setPayDialog(null);
       qc.invalidateQueries({ queryKey: ["billing-invoices-upcoming"] });
       qc.invalidateQueries({ queryKey: ["admin-payments-ledger"] });
-      qc.invalidateQueries({ queryKey: ["platform-payments"] });
-      qc.invalidateQueries({ queryKey: ["platform-invoices"] });
+      qc.invalidateQueries({ queryKey: ["admin-invoices-ops"] });
     } catch (e: any) {
       toast({ title: "Erro ao registrar pagamento", description: e.message, variant: "destructive" });
     } finally {
@@ -175,17 +174,20 @@ export default function UpcomingBillsScreen() {
     try {
       const targets = grouped.overdue.concat(grouped.today);
       if (!targets.length) {
-        toast({ title: "Nenhuma fatura crítica", description: "Sem vencimentos urgentes." });
+        toast({ title: "Nenhuma fatura crítica", description: "Não existem faturas vencidas ou a vencer hoje." });
         return;
       }
-      const data = await apiRequest<{ sent: number }>("/billing/admin/invoices/remind-critical", {
+      const data = await apiRequest<{ sent: number; total: number }>("/billing/admin/ops/invoices/remind-critical", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           invoice_ids: targets.map((invoice) => invoice.id),
         }),
       });
-      toast({ title: `${data.sent ?? targets.length} alertas enviados` });
+      toast({
+        title: `${data.sent ?? targets.length} alertas de cobrança emitidos`,
+        description: "Notificações registradas e enviadas para os clientes com faturas críticas.",
+      });
     } catch (e: any) {
       toast({ title: "Erro ao notificar", description: e.message, variant: "destructive" });
     }

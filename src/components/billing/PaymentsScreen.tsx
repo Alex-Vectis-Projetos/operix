@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Search, Plus, Filter, Download, MoreHorizontal, Eye, Pencil, Trash2,
-  ChevronLeft, ChevronRight, Loader2, Upload, FileText, CreditCard,
+  ChevronLeft, ChevronRight, Loader2, Upload, FileText, FileSpreadsheet, CreditCard,
 } from "lucide-react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import { format } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -168,7 +171,7 @@ export default function PaymentsScreen() {
   const { data: invoices = [] } = useQuery({
     queryKey: ["admin-invoices-for-payments"],
     queryFn: async () => {
-      const data = await apiRequest<{ invoices: Invoice[] }>("/billing/admin/invoices");
+      const data = await apiRequest<{ invoices: Invoice[] }>("/billing/admin/ops/invoices");
       return data.invoices ?? [];
     },
   });
@@ -335,29 +338,101 @@ export default function PaymentsScreen() {
 
   // Export CSV
   const exportCSV = () => {
+    if (!filtered.length) {
+      toast({ title: "Nenhum pagamento para exportar", description: "A lista de pagamentos está vazia com os filtros atuais." });
+      return;
+    }
     const rows = [
-      ["Data", "Fatura", "Cliente", "Método", "Valor", "Estado", "Referência", "Notas"],
+      ["Data do Pagamento", "Referência", "Nº da Fatura", "Cliente", "Método", "Valor (€)", "Estado", "Conta Bancária", "Notas"],
       ...filtered.map((p) => {
         const inv = p.invoice_id ? invoiceMap[p.invoice_id] : null;
         return [
           p.payment_date,
-          inv?.invoice_number ?? "",
-          inv?.customer_name ?? "",
-          p.payment_method_id ? methodMap[p.payment_method_id]?.name ?? "" : "",
-          String(p.amount ?? 0),
-          STATUS_LABEL[p.status],
           p.reference ?? "",
-          (p.notes ?? "").replace(/\n/g, " "),
+          inv?.invoice_number ?? p.invoice_number ?? "",
+          inv?.customer_name ?? p.customer_name ?? "",
+          p.payment_method_id ? methodMap[p.payment_method_id]?.name ?? p.payment_method_id : "Transferência",
+          (Number(p.amount) || 0).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+          STATUS_LABEL[p.status] || p.status,
+          p.account ?? "",
+          (p.notes ?? "").replace(/\r?\n/g, " "),
         ];
       }),
     ];
-    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const csv = "\uFEFF" + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `pagamentos_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
+    toast({ title: "CSV de pagamentos exportado com sucesso" });
+  };
+
+  // Export PDF
+  const exportPDF = () => {
+    if (!filtered.length) {
+      toast({ title: "Nenhum pagamento para exportar", description: "A lista de pagamentos está vazia com os filtros atuais." });
+      return;
+    }
+    try {
+      const doc = new jsPDF({ orientation: "landscape" });
+      const nowFormatted = format(new Date(), "dd/MM/yyyy HH:mm");
+
+      doc.setFillColor(15, 23, 42);
+      doc.rect(0, 0, 297, 24, "F");
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "bold");
+      doc.text("OPERIX — RELATÓRIO DE PAGAMENTOS", 14, 11);
+
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Total de registros: ${filtered.length}  ·  Gerado em: ${nowFormatted}`, 14, 18);
+
+      const totalAmount = filtered.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+
+      autoTable(doc, {
+        startY: 30,
+        head: [["Data", "Referência", "Fatura", "Cliente", "Método", "Valor", "Estado", "Notas"]],
+        body: filtered.map((p) => {
+          const inv = p.invoice_id ? invoiceMap[p.invoice_id] : null;
+          return [
+            p.payment_date,
+            p.reference ?? "—",
+            inv?.invoice_number ?? p.invoice_number ?? "—",
+            inv?.customer_name ?? p.customer_name ?? "—",
+            p.payment_method_id ? methodMap[p.payment_method_id]?.name ?? p.payment_method_id : "Transferência",
+            fmt(p.amount),
+            STATUS_LABEL[p.status] || p.status,
+            (p.notes ?? "").replace(/\r?\n/g, " "),
+          ];
+        }),
+        foot: [["Total Consolidado", "", "", "", "", fmt(totalAmount), "", ""]],
+        styles: { fontSize: 8, cellPadding: 2.2 },
+        headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: "bold" },
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: "bold" },
+      });
+
+      const totalPages = (doc as any).internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `Operix ERP · Página ${i} de ${totalPages}`,
+          14,
+          doc.internal.pageSize.height - 6
+        );
+      }
+
+      doc.save(`pagamentos_${format(new Date(), "yyyyMMdd_HHmm")}.pdf`);
+      toast({ title: "PDF de pagamentos exportado com sucesso" });
+    } catch (e: any) {
+      toast({ title: "Erro ao gerar PDF", description: e?.message ?? "Falha desconhecida", variant: "destructive" });
+    }
   };
 
   const detailPayment = detailId ? payments.find((p) => p.id === detailId) : null;
@@ -394,8 +469,12 @@ export default function PaymentsScreen() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="h-8" onClick={exportCSV}>
-            <Download className="h-3.5 w-3.5 mr-1.5" />
-            Exportar
+            <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+            CSV
+          </Button>
+          <Button variant="outline" size="sm" className="h-8" onClick={exportPDF}>
+            <FileText className="h-3.5 w-3.5 mr-1.5" />
+            PDF
           </Button>
           <Button size="sm" className="h-8" onClick={openCreate}>
             <Plus className="h-3.5 w-3.5 mr-1.5" />

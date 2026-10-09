@@ -1424,6 +1424,67 @@ operationalBillingRouter.get("/admin/ops/invoices/:invoiceId/send-log", async (r
   }
 });
 
+operationalBillingRouter.post("/admin/ops/invoices/remind-critical", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const workspaceId = await resolveOperationalWorkspaceId(req);
+    const bodySchema = z.object({
+      invoice_ids: z.array(z.string().uuid()).optional().default([]),
+    });
+    const input = bodySchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
+    const invoices = await prisma.billingInvoice.findMany({
+      where: {
+        workspaceId,
+        deletedAt: null,
+        ...(input.invoice_ids.length > 0
+          ? { id: { in: input.invoice_ids } }
+          : { status: { in: ["pending", "overdue", "partial"] } }),
+      },
+      include: { client: true },
+      take: 100,
+    });
+
+    let sent = 0;
+    for (const inv of invoices) {
+      const snap = inv.customerSnapshot as Record<string, any> | null;
+      const recipient = (snap?.email as string) || inv.client?.email || "financeiro@operix-pro.com";
+      const subject = `Lembrete de Vencimento - Fatura ${inv.invoiceNumber}`;
+      const remaining = inv.remainingAmount ?? inv.totalAmount;
+      const body = `Estimado cliente, lembramos que a fatura ${inv.invoiceNumber} no montante de ${remaining.toFixed(2)} EUR encontra-se pendente ou com prazo de vencimento próximo.`;
+
+      let provider = "simulated";
+      if (isEmailConfigured() && recipient) {
+        provider = "smtp";
+        await sendEmail({
+          to: recipient,
+          subject,
+          html: `<p>${body}</p>`,
+          text: body,
+        });
+      }
+
+      await prisma.invoiceSendLog.create({
+        data: {
+          invoiceId: inv.id,
+          recipient,
+          subject,
+          body,
+          provider,
+          status: "sent",
+          kind: "reminder",
+          sentBy: req.auth?.userId ?? null,
+          sentAt: new Date(),
+        },
+      });
+      sent++;
+    }
+
+    return res.json({ sent, total: invoices.length });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 operationalBillingRouter.post("/admin/ops/invoices/:invoiceId/send", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     if (!requireAdmin(req, res)) return;

@@ -529,16 +529,24 @@ export default function ReconciliationScreen() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
             <div className="space-y-2">
               <label className="text-xs font-medium">Pagamento</label>
-              <Select value={pickPayment} onValueChange={setPickPayment}>
-                <SelectTrigger className="text-xs"><SelectValue placeholder="Escolher pagamento..." /></SelectTrigger>
-                <SelectContent>
-                  {payments.filter((p) => !p.reconciliation_id).map((p) => (
-                    <SelectItem key={p.id} value={p.id} className="text-xs">
-                      {(p.reference || p.id.slice(0, 8))} · {fmt(Number(p.amount))} · {p.payment_date}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {payments.length === 0 ? (
+                <div className="rounded border border-dashed border-border/70 p-2 text-center text-xs text-muted-foreground bg-muted/20">
+                  <p>Nenhum pagamento registado.</p>
+                  <p className="text-[10px] mt-0.5">Registe recebimentos no separador <strong>Pagamentos</strong> para conciliar.</p>
+                </div>
+              ) : (
+                <Select value={pickPayment} onValueChange={setPickPayment}>
+                  <SelectTrigger className="text-xs"><SelectValue placeholder="Escolher pagamento..." /></SelectTrigger>
+                  <SelectContent>
+                    {payments.map((p) => (
+                      <SelectItem key={p.id} value={p.id} className="text-xs">
+                        {(p.reference || p.id.slice(0, 8))} · {fmt(Number(p.amount))} · {p.payment_date}
+                        {p.reconciliation_id ? " (Já vinculado)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-2">
               <label className="text-xs font-medium">Fatura</label>

@@ -6,6 +6,7 @@ import { prisma } from "../lib/prisma.js";
 import { operationalBillingRouter } from "./billingOperations.js";
 import { createStripeClient, getConfiguredStripeEnvironment, type StripeEnv, verifyStripeWebhookSignature } from "../lib/stripe.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
+import { resolveRequestContext } from "../middleware/requestContext.js";
 import { WORKSPACE_TIERS, findWorkspaceTier } from "../lib/subscription.js";
 import { buildSimplePdf } from "../lib/pdf/simplePdf.js";
 import { isEmailConfigured, sendEmail } from "../lib/email/resend.js";
@@ -106,7 +107,7 @@ const adminLifecycleTransitionSchema = z.object({
 });
 
 const adminPaymentUpsertSchema = z.object({
-  invoice_id: z.string().uuid(),
+  invoice_id: z.string().uuid().optional().nullable(),
   payment_method_id: z.string().max(120).optional().nullable(),
   amount: z.number().positive(),
   payment_date: z.string().min(10).max(40),
@@ -401,7 +402,18 @@ billingRouter.post("/webhooks/stripe", async (req: Request, res: Response, next:
 });
 
 billingRouter.use(requireAuth);
+billingRouter.use(resolveRequestContext);
 billingRouter.use(operationalBillingRouter);
+
+export function isAuthorizedAdminOrManager(req: AuthenticatedRequest): boolean {
+  const ctx = req.ctx;
+  return Boolean(
+    req.auth?.role === "admin" ||
+    ctx?.platformRole === "platform_admin" ||
+    ctx?.membershipRole === "owner" ||
+    ctx?.membershipRole === "admin"
+  );
+}
 
 const VAT_RULES = [
   { id: "PT", country: "PT", standard_rate: 23, eu_member: true, reverse_charge_when_business: false },
@@ -2050,11 +2062,12 @@ billingRouter.post("/reports/financial/pdf", async (req: AuthenticatedRequest, r
 
 billingRouter.post("/reports/financial/email", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    if (!isEmailConfigured()) {
-      return res.status(503).json({ message: "Email provider not configured." });
+    if (!isAuthorizedAdminOrManager(req)) {
+      return res.status(403).json({ message: "Forbidden." });
     }
 
     const schema = z.object({
+      recipient: z.string().email().optional(),
       periodMonths: z.number().int().min(1).max(36).default(6),
       generatedAt: z.string().optional(),
       kpis: z.object({
@@ -2083,9 +2096,7 @@ billingRouter.post("/reports/financial/email", async (req: AuthenticatedRequest,
       where: { id: req.auth!.userId },
       select: { id: true, email: true, fullName: true, appUser: { select: { workspaceId: true } } },
     });
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
-    }
+    const targetEmail = input.recipient || user?.email || "financeiro@operix-pro.com";
 
     const money = (v: number) => (Number.isFinite(v) ? v : 0).toFixed(2) + " EUR";
     const lines: string[] = [
@@ -2108,12 +2119,36 @@ billingRouter.post("/reports/financial/email", async (req: AuthenticatedRequest,
       title: "Relatório Financeiro",
       lines,
     });
+
+    if (!isEmailConfigured()) {
+      await prisma.backendEventLog.create({
+        data: {
+          tableName: "reports",
+          rowId: null,
+          action: "report.financial.email.simulated",
+          actorUserId: user?.id ?? req.auth!.userId,
+          workspaceId: req.ctx?.activeWorkspaceId ?? user?.appUser?.workspaceId ?? null,
+          payload: {
+            recipient: targetEmail,
+            period_months: input.periodMonths,
+            provider: "simulated",
+          } as Prisma.InputJsonValue,
+        },
+      });
+      return res.json({
+        ok: true,
+        simulated: true,
+        recipient: targetEmail,
+        message: `Relatório financeiro registrado para envio simulado para ${targetEmail}.`,
+      });
+    }
+
     const tpl = reportEmail({
       title: "Relatório Financeiro Operix",
       body: `Segue o relatório financeiro dos últimos ${input.periodMonths} meses.`,
     });
     const sendResult = await sendEmail({
-      to: user.email,
+      to: targetEmail,
       subject: tpl.subject,
       html: tpl.html,
       text: tpl.text,
@@ -2131,17 +2166,18 @@ billingRouter.post("/reports/financial/email", async (req: AuthenticatedRequest,
         tableName: "reports",
         rowId: null,
         action: "report.financial.email.sent",
-        actorUserId: user.id,
-        workspaceId: user.appUser?.workspaceId ?? null,
+        actorUserId: user?.id ?? req.auth!.userId,
+        workspaceId: req.ctx?.activeWorkspaceId ?? user?.appUser?.workspaceId ?? null,
         payload: {
           provider: sendResult.provider,
           email_id: sendResult.id,
+          recipient: targetEmail,
           period_months: input.periodMonths,
         } as Prisma.InputJsonValue,
       },
     });
 
-    return res.status(204).send();
+    return res.json({ ok: true, recipient: targetEmail });
   } catch (error) {
     return next(error);
   }
@@ -2356,11 +2392,13 @@ billingRouter.get("/admin/subscriptions", async (req: AuthenticatedRequest, res:
 
 billingRouter.get("/admin/payments", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.auth!.role !== "admin") {
+    if (!isAuthorizedAdminOrManager(req)) {
       return res.status(403).json({ message: "Forbidden." });
     }
 
+    const workspaceId = req.ctx?.activeWorkspaceId;
     const transfers = await prisma.manualBankTransfer.findMany({
+      where: workspaceId ? { workspaceId } : undefined,
       include: {
         workspace: {
           include: {
@@ -2375,62 +2413,77 @@ billingRouter.get("/admin/payments", async (req: AuthenticatedRequest, res: Resp
     const invoiceIds = transfers
       .map((transfer: (typeof transfers)[number]) => transfer.invoiceId)
       .filter((invoiceId: string | null): invoiceId is string => !!invoiceId);
-    const invoices = invoiceIds.length
-      ? await prisma.platformInvoice.findMany({
-          where: { id: { in: invoiceIds } },
-          select: { id: true, invoiceNumber: true, total: true, subtotal: true, vatAmount: true, status: true, metadata: true },
-        })
-      : [];
-    const invoicesById = new Map<string, (typeof invoices)[number]>(
-      invoices.map((invoice: (typeof invoices)[number]) => [invoice.id, invoice]),
-    );
+    const [platformInvoices, billingInvoices] = await Promise.all([
+      invoiceIds.length
+        ? prisma.platformInvoice.findMany({
+            where: { id: { in: invoiceIds } },
+            select: { id: true, invoiceNumber: true, total: true, subtotal: true, vatAmount: true, status: true, metadata: true },
+          })
+        : [],
+      invoiceIds.length
+        ? prisma.billingInvoice.findMany({
+            where: { id: { in: invoiceIds } },
+            select: { id: true, invoiceNumber: true, totalAmount: true, customerName: true, status: true, metadata: true },
+          })
+        : [],
+    ]);
+    const invoicesById = new Map<string, { id: string; invoiceNumber: string; total: number; subtotal?: number | null; vatAmount?: number | null; customerName?: string | null; status: string; metadata?: any }>();
+    for (const inv of platformInvoices) {
+      invoicesById.set(inv.id, { id: inv.id, invoiceNumber: inv.invoiceNumber, total: inv.total, subtotal: inv.subtotal, vatAmount: inv.vatAmount, customerName: null, status: inv.status, metadata: inv.metadata });
+    }
+    for (const inv of billingInvoices) {
+      invoicesById.set(inv.id, { id: inv.id, invoiceNumber: inv.invoiceNumber, total: inv.totalAmount, customerName: inv.customerName, status: inv.status, metadata: inv.metadata });
+    }
 
     return res.json({
       methods: listAdminPaymentMethods(),
-      payments: transfers.map((transfer: (typeof transfers)[number]) => ({
-        id: transfer.id,
-        workspace_id: transfer.workspaceId,
-        workspace_name: transfer.workspace?.name ?? null,
-        method: transfer.paymentMethod ?? "bank_transfer",
-        payment_method_id: transfer.paymentMethod ?? "bank_transfer",
-        amount: transfer.amount,
-        currency: transfer.currency,
-        status: mapTransferStatusToAdmin(transfer.status),
-        external_ref: transfer.referenceCode,
-        reference: transfer.referenceCode,
-        invoice_id: transfer.invoiceId,
-        invoice_number: transfer.invoiceId ? invoicesById.get(transfer.invoiceId)?.invoiceNumber ?? null : null,
-        customer_name: transfer.workspace?.billingProfile?.legalName ?? transfer.workspace?.name ?? null,
-        payment_date: (transfer.transferDate ?? transfer.reviewedAt ?? transfer.createdAt).toISOString().slice(0, 10),
-        notes: sanitizePaymentNotes(transfer.notes),
-        account: extractAccountFromNotes(transfer.notes),
-        proof_path: transfer.proofPath,
-        proof_name: transfer.proofName,
-        attachments: transfer.proofPath
-          ? [
-              {
-                id: `${transfer.id}-proof`,
-                file_name: transfer.proofName ?? "comprovante",
-                mime_type: transfer.proofPath.startsWith("data:") ? transfer.proofPath.slice(5, transfer.proofPath.indexOf(";")) : null,
-                size_bytes: null,
-                signed_url: transfer.proofPath,
-              },
-            ]
-          : [],
-        invoice:
-          transfer.invoiceId && invoicesById.get(transfer.invoiceId)
-            ? {
-                id: transfer.invoiceId,
-                invoice_number: invoicesById.get(transfer.invoiceId)!.invoiceNumber,
-                total_amount: invoicesById.get(transfer.invoiceId)!.total,
-                subtotal: invoicesById.get(transfer.invoiceId)!.subtotal,
-                vat_amount: invoicesById.get(transfer.invoiceId)!.vatAmount,
-                status: invoicesById.get(transfer.invoiceId)!.status,
-                metadata: invoicesById.get(transfer.invoiceId)!.metadata,
-              }
-            : null,
-        created_at: transfer.createdAt.toISOString(),
-      })),
+      payments: transfers.map((transfer: (typeof transfers)[number]) => {
+        const inv = transfer.invoiceId ? invoicesById.get(transfer.invoiceId) : null;
+        return {
+          id: transfer.id,
+          workspace_id: transfer.workspaceId,
+          workspace_name: transfer.workspace?.name ?? null,
+          method: transfer.paymentMethod ?? "bank_transfer",
+          payment_method_id: transfer.paymentMethod ?? "bank_transfer",
+          amount: transfer.amount,
+          currency: transfer.currency,
+          status: mapTransferStatusToAdmin(transfer.status),
+          external_ref: transfer.referenceCode,
+          reference: transfer.referenceCode,
+          invoice_id: transfer.invoiceId,
+          invoice_number: inv?.invoiceNumber ?? null,
+          customer_name: inv?.customerName ?? transfer.workspace?.billingProfile?.legalName ?? transfer.workspace?.name ?? null,
+          payment_date: (transfer.transferDate ?? transfer.reviewedAt ?? transfer.createdAt).toISOString().slice(0, 10),
+          notes: sanitizePaymentNotes(transfer.notes),
+          account: extractAccountFromNotes(transfer.notes),
+          proof_path: transfer.proofPath,
+          proof_name: transfer.proofName,
+          attachments: transfer.proofPath
+            ? [
+                {
+                  id: `${transfer.id}-proof`,
+                  file_name: transfer.proofName ?? "comprovante",
+                  mime_type: transfer.proofPath.startsWith("data:") ? transfer.proofPath.slice(5, transfer.proofPath.indexOf(";")) : null,
+                  size_bytes: null,
+                  signed_url: transfer.proofPath,
+                },
+              ]
+            : [],
+          invoice:
+            transfer.invoiceId && inv
+              ? {
+                  id: transfer.invoiceId,
+                  invoice_number: inv.invoiceNumber,
+                  total_amount: inv.total,
+                  subtotal: inv.subtotal ?? inv.total,
+                  vat_amount: inv.vatAmount ?? 0,
+                  status: inv.status,
+                  metadata: inv.metadata,
+                }
+              : null,
+          created_at: transfer.createdAt.toISOString(),
+        };
+      }),
     });
   } catch (error) {
     return next(error);
@@ -2439,7 +2492,7 @@ billingRouter.get("/admin/payments", async (req: AuthenticatedRequest, res: Resp
 
 billingRouter.get("/admin/payment-methods", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.auth!.role !== "admin") {
+    if (!isAuthorizedAdminOrManager(req)) {
       return res.status(403).json({ message: "Forbidden." });
     }
 
@@ -2453,25 +2506,42 @@ billingRouter.get("/admin/payment-methods", async (req: AuthenticatedRequest, re
 
 billingRouter.post("/admin/payments", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.auth!.role !== "admin") {
+    if (!isAuthorizedAdminOrManager(req)) {
       return res.status(403).json({ message: "Forbidden." });
     }
 
     const input = adminPaymentUpsertSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
-    const invoice = await prisma.platformInvoice.findUnique({
-      where: { id: input.invoice_id },
-      select: { id: true, workspaceId: true },
-    });
+    const workspaceId = req.ctx?.activeWorkspaceId;
+    let targetWorkspaceId = workspaceId;
+    let targetBillingInvoice: any = null;
+    let targetPlatformInvoice: any = null;
 
-    if (!invoice) {
-      return res.status(404).json({ message: "Invoice not found." });
+    if (input.invoice_id) {
+      targetBillingInvoice = await prisma.billingInvoice.findFirst({
+        where: { id: input.invoice_id, ...(workspaceId ? { workspaceId } : {}) },
+      });
+      if (targetBillingInvoice) {
+        targetWorkspaceId = targetBillingInvoice.workspaceId || targetWorkspaceId;
+      } else {
+        targetPlatformInvoice = await prisma.platformInvoice.findUnique({
+          where: { id: input.invoice_id },
+          select: { id: true, workspaceId: true },
+        });
+        if (targetPlatformInvoice) {
+          targetWorkspaceId = targetPlatformInvoice.workspaceId;
+        }
+      }
+    }
+
+    if (!targetWorkspaceId) {
+      return res.status(400).json({ message: "Workspace context required." });
     }
 
     const created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const payment = await tx.manualBankTransfer.create({
         data: {
-          workspaceId: invoice.workspaceId,
-          invoiceId: invoice.id,
+          workspaceId: targetWorkspaceId!,
+          invoiceId: input.invoice_id ?? null,
           referenceCode: input.reference?.trim() || `PMT-${Date.now().toString(36).toUpperCase()}`,
           amount: input.amount,
           currency: "EUR",
@@ -2485,13 +2555,42 @@ billingRouter.post("/admin/payments", async (req: AuthenticatedRequest, res: Res
         },
       });
 
-      await syncPlatformInvoicePaymentState(tx, invoice.id);
-      await logSubscriptionEvent(tx, invoice.workspaceId, {
+      if (targetBillingInvoice && input.status === "confirmed") {
+        const newPaidAmount = (targetBillingInvoice.paidAmount || 0) + input.amount;
+        const isFullyPaid = newPaidAmount >= targetBillingInvoice.totalAmount;
+        const newRemaining = Math.max(0, targetBillingInvoice.totalAmount - newPaidAmount);
+        await tx.billingInvoice.update({
+          where: { id: targetBillingInvoice.id },
+          data: {
+            paidAmount: newPaidAmount,
+            remainingAmount: newRemaining,
+            status: isFullyPaid ? "paid" : (newPaidAmount > 0 ? "partial" : targetBillingInvoice.status),
+          },
+        });
+        if (isFullyPaid && targetBillingInvoice.workspaceId) {
+          const paymentList = await tx.paymentList.findFirst({
+            where: {
+              workspaceId: targetBillingInvoice.workspaceId,
+              invoiceId: targetBillingInvoice.id,
+            },
+          });
+          if (paymentList && paymentList.status === "pending") {
+            await tx.paymentList.update({
+              where: { id: paymentList.id },
+              data: { status: "paid" },
+            });
+          }
+        }
+      } else if (targetPlatformInvoice) {
+        await syncPlatformInvoicePaymentState(tx, targetPlatformInvoice.id);
+      }
+
+      await logSubscriptionEvent(tx, targetWorkspaceId!, {
         eventType: "admin.payment.created",
         severity: input.status === "confirmed" ? "success" : input.status === "failed" ? "warning" : "info",
         message: `Pagamento administrativo registado (${input.status}).`,
         metadata: {
-          invoice_id: invoice.id,
+          invoice_id: input.invoice_id ?? null,
           amount: input.amount,
           method: input.payment_method_id || "bank_transfer",
           reference: payment.referenceCode,
@@ -2513,7 +2612,7 @@ billingRouter.post("/admin/payments", async (req: AuthenticatedRequest, res: Res
 
 billingRouter.patch("/admin/payments/:paymentId", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.auth!.role !== "admin") {
+    if (!isAuthorizedAdminOrManager(req)) {
       return res.status(403).json({ message: "Forbidden." });
     }
 
@@ -2523,28 +2622,41 @@ billingRouter.patch("/admin/payments/:paymentId", async (req: AuthenticatedReque
 
     const existing = await prisma.manualBankTransfer.findUnique({
       where: { id: paymentId },
-      select: { id: true, workspaceId: true, invoiceId: true, referenceCode: true },
+      select: { id: true, workspaceId: true, invoiceId: true, referenceCode: true, amount: true, status: true },
     });
 
     if (!existing) {
       return res.status(404).json({ message: "Payment not found." });
     }
 
-    const invoice = await prisma.platformInvoice.findUnique({
-      where: { id: input.invoice_id },
-      select: { id: true, workspaceId: true },
-    });
+    const workspaceId = req.ctx?.activeWorkspaceId || existing.workspaceId;
+    let targetWorkspaceId = workspaceId;
+    let targetBillingInvoice: any = null;
+    let targetPlatformInvoice: any = null;
 
-    if (!invoice) {
-      return res.status(404).json({ message: "Invoice not found." });
+    if (input.invoice_id) {
+      targetBillingInvoice = await prisma.billingInvoice.findFirst({
+        where: { id: input.invoice_id, ...(workspaceId ? { workspaceId } : {}) },
+      });
+      if (targetBillingInvoice) {
+        targetWorkspaceId = targetBillingInvoice.workspaceId || targetWorkspaceId;
+      } else {
+        targetPlatformInvoice = await prisma.platformInvoice.findUnique({
+          where: { id: input.invoice_id },
+          select: { id: true, workspaceId: true },
+        });
+        if (targetPlatformInvoice) {
+          targetWorkspaceId = targetPlatformInvoice.workspaceId;
+        }
+      }
     }
 
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.manualBankTransfer.update({
         where: { id: paymentId },
         data: {
-          workspaceId: invoice.workspaceId,
-          invoiceId: invoice.id,
+          workspaceId: targetWorkspaceId,
+          invoiceId: input.invoice_id ?? null,
           referenceCode: input.reference?.trim() || existing.referenceCode,
           amount: input.amount,
           paymentMethod: input.payment_method_id || "bank_transfer",
@@ -2557,16 +2669,64 @@ billingRouter.patch("/admin/payments/:paymentId", async (req: AuthenticatedReque
         },
       });
 
-      if (existing.invoiceId) {
-        await syncPlatformInvoicePaymentState(tx, existing.invoiceId);
+      // Handle old billing invoice if unlinked or replaced
+      if (existing.invoiceId && existing.invoiceId !== input.invoice_id && existing.status === "reviewed") {
+        const oldBilling = await tx.billingInvoice.findUnique({ where: { id: existing.invoiceId } });
+        if (oldBilling) {
+          const revertedPaid = Math.max(0, (oldBilling.paidAmount || 0) - existing.amount);
+          const revertedRemaining = Math.max(0, oldBilling.totalAmount - revertedPaid);
+          await tx.billingInvoice.update({
+            where: { id: oldBilling.id },
+            data: {
+              paidAmount: revertedPaid,
+              remainingAmount: revertedRemaining,
+              status: revertedPaid >= oldBilling.totalAmount ? "paid" : (revertedPaid > 0 ? "partial" : "pending"),
+            },
+          });
+        } else {
+          await syncPlatformInvoicePaymentState(tx, existing.invoiceId);
+        }
       }
-      await syncPlatformInvoicePaymentState(tx, invoice.id);
-      await logSubscriptionEvent(tx, invoice.workspaceId, {
+
+      // Handle new billing invoice if confirmed
+      if (targetBillingInvoice && input.status === "confirmed") {
+        const isReaffirmingSame = existing.invoiceId === input.invoice_id && existing.status === "reviewed";
+        const delta = isReaffirmingSame ? (input.amount - existing.amount) : input.amount;
+        const newPaid = Math.max(0, (targetBillingInvoice.paidAmount || 0) + delta);
+        const isFullyPaid = newPaid >= targetBillingInvoice.totalAmount;
+        const newRemaining = Math.max(0, targetBillingInvoice.totalAmount - newPaid);
+        await tx.billingInvoice.update({
+          where: { id: targetBillingInvoice.id },
+          data: {
+            paidAmount: newPaid,
+            remainingAmount: newRemaining,
+            status: isFullyPaid ? "paid" : (newPaid > 0 ? "partial" : targetBillingInvoice.status),
+          },
+        });
+        if (isFullyPaid && targetBillingInvoice.workspaceId) {
+          const paymentList = await tx.paymentList.findFirst({
+            where: {
+              workspaceId: targetBillingInvoice.workspaceId,
+              invoiceId: targetBillingInvoice.id,
+            },
+          });
+          if (paymentList && paymentList.status === "pending") {
+            await tx.paymentList.update({
+              where: { id: paymentList.id },
+              data: { status: "paid" },
+            });
+          }
+        }
+      } else if (targetPlatformInvoice) {
+        await syncPlatformInvoicePaymentState(tx, targetPlatformInvoice.id);
+      }
+
+      await logSubscriptionEvent(tx, targetWorkspaceId, {
         eventType: "admin.payment.updated",
         severity: "info",
         message: `Pagamento administrativo atualizado (${input.status}).`,
         metadata: {
-          invoice_id: invoice.id,
+          invoice_id: input.invoice_id ?? null,
           payment_id: paymentId,
           amount: input.amount,
           method: input.payment_method_id || "bank_transfer",
@@ -2582,7 +2742,7 @@ billingRouter.patch("/admin/payments/:paymentId", async (req: AuthenticatedReque
 
 billingRouter.delete("/admin/payments/:paymentId", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.auth!.role !== "admin") {
+    if (!isAuthorizedAdminOrManager(req)) {
       return res.status(403).json({ message: "Forbidden." });
     }
 
@@ -2592,7 +2752,7 @@ billingRouter.delete("/admin/payments/:paymentId", async (req: AuthenticatedRequ
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const existing = await tx.manualBankTransfer.findUnique({
         where: { id: paymentId },
-        select: { invoiceId: true, workspaceId: true, referenceCode: true },
+        select: { invoiceId: true, workspaceId: true, referenceCode: true, amount: true, status: true },
       });
 
       if (!existing) {
@@ -2603,8 +2763,22 @@ billingRouter.delete("/admin/payments/:paymentId", async (req: AuthenticatedRequ
         where: { id: paymentId },
       });
 
-      if (existing.invoiceId) {
-        await syncPlatformInvoicePaymentState(tx, existing.invoiceId);
+      if (existing.invoiceId && existing.status === "reviewed") {
+        const billingInv = await tx.billingInvoice.findUnique({ where: { id: existing.invoiceId } });
+        if (billingInv) {
+          const revertedPaid = Math.max(0, (billingInv.paidAmount || 0) - existing.amount);
+          const revertedRemaining = Math.max(0, billingInv.totalAmount - revertedPaid);
+          await tx.billingInvoice.update({
+            where: { id: billingInv.id },
+            data: {
+              paidAmount: revertedPaid,
+              remainingAmount: revertedRemaining,
+              status: revertedPaid >= billingInv.totalAmount ? "paid" : (revertedPaid > 0 ? "partial" : "pending"),
+            },
+          });
+        } else {
+          await syncPlatformInvoicePaymentState(tx, existing.invoiceId);
+        }
       }
 
       await logSubscriptionEvent(tx, existing.workspaceId, {
@@ -2640,7 +2814,7 @@ billingRouter.get("/admin/vat-rules", async (req: AuthenticatedRequest, res: Res
 
 billingRouter.get("/admin/invoices", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.auth!.role !== "admin") {
+    if (!isAuthorizedAdminOrManager(req)) {
       return res.status(403).json({ message: "Forbidden." });
     }
 
@@ -2693,7 +2867,7 @@ billingRouter.get("/admin/invoices", async (req: AuthenticatedRequest, res: Resp
 
 billingRouter.post("/admin/invoices/remind-critical", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.auth!.role !== "admin") {
+    if (!isAuthorizedAdminOrManager(req)) {
       return res.status(403).json({ message: "Forbidden." });
     }
 
