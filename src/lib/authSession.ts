@@ -39,8 +39,11 @@ export function getAccessToken() {
 
 export function buildAuthHeaders(extra?: HeadersInit): HeadersInit {
   const token = getAccessToken();
+  const selectedWs = typeof window !== "undefined" ? localStorage.getItem("selected_workspace_id") : null;
   return {
     ...(extra ?? {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(selectedWs ? { "X-Workspace-Id": selectedWs } : {}),
   };
 }
+

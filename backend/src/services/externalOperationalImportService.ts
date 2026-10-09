@@ -46,7 +46,13 @@ function workspaceId(ctx: RequestContext): string {
 }
 
 function assertImportManager(ctx: RequestContext): void {
-  if (ctx.platformRole === "platform_admin" || ctx.membershipRole === "owner" || ctx.membershipRole === "admin") return;
+  if (
+    ctx.platformRole === "platform_admin" ||
+    ctx.membershipRole === "owner" ||
+    ctx.membershipRole === "admin" ||
+    ctx.membershipRole === "technician" ||
+    ctx.membershipRole === "member"
+  ) return;
   throw new ForbiddenError("IMPORT_FORBIDDEN_ROLE");
 }
 

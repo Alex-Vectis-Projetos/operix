@@ -4,7 +4,7 @@ import { useAuth } from "./useAuth";
 import { useCan } from "./usePermission";
 import { useWorkspace } from "./useWorkspace";
 import { toast } from "sonner";
-import { withPromiseTimeout } from "@/lib/asyncGuard";
+import { apiRequest } from "@/lib/api";
 import { pdfFirstPageToImageBase64 } from "@/lib/pdfUtils";
 import {
   listServiceOrders,
@@ -76,8 +76,6 @@ export function useServiceOrders(filters?: {
   return query;
 }
 
-const EXTRACT_API_URL = (import.meta.env.VITE_API_URL ?? "/api") + "/extract/service-order";
-
 export function useExtractServiceOrder() {
   const [isExtracting, setIsExtracting] = useState(false);
 
@@ -89,22 +87,14 @@ export function useExtractServiceOrder() {
         ? await pdfFirstPageToImageBase64(file, { maxWidth: 1600, quality: 0.9 })
         : { base64: await fileToBase64(file), mimeType: (file.type || "application/octet-stream") as string };
 
-      const res = await withPromiseTimeout<Response>(
-        fetch(EXTRACT_API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: input.base64, mimeType: input.mimeType, fileName: file.name }),
-        }),
-        30000,
-        "extract_service_order",
-      );
+      const data = await apiRequest<ExtractionResult>("/extract/service-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: input.base64, mimeType: input.mimeType, fileName: file.name }),
+        timeoutMs: 60000,
+      });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(err.error ?? `Erro ${res.status}`);
-      }
-
-      return res.json() as Promise<ExtractionResult>;
+      return data;
     } finally {
       setIsExtracting(false);
     }

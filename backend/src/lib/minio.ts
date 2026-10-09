@@ -164,12 +164,16 @@ export function assertAllowedBucket(bucket: string): void {
 }
 
 /**
- * Garante que um caminho de storage sob o prefixo 'tenants/{wsId}/...' pertença
- * estritamente ao workspace ativo no RequestContext.
- * Deny-by-default: rejeita caminhos sem tenants/, caminhos de outros tenants,
- * path traversal, caracteres nulos e workspaces vazios.
+ * Garante que um caminho de storage pertença estritamente ao workspace ativo no RequestContext.
+ * Deny-by-default: rejeita caminhos de outros tenants, path traversal, caracteres nulos e workspaces vazios.
+ * Se o caminho fornecido for relativo (sem prefixo 'tenants/'), canonicaliza adicionando 'tenants/{wsId}/'.
+ * Se for bucket público, permite caminhos sem prefixo de tenant.
  */
-export function assertTenantStoragePath(ctx: RequestContext, storagePath: string): void {
+export function resolveCanonicalTenantStoragePath(
+  ctx: RequestContext,
+  bucket: string,
+  storagePath: string
+): string {
   if (!ctx.activeWorkspaceId || typeof ctx.activeWorkspaceId !== "string" || !ctx.activeWorkspaceId.trim()) {
     throw new ForbiddenError("Workspace ativo não definido no contexto.");
   }
@@ -191,11 +195,30 @@ export function assertTenantStoragePath(ctx: RequestContext, storagePath: string
   const normalized = storagePath.startsWith("/") ? storagePath.slice(1) : storagePath;
   const expectedPrefix = `tenants/${ctx.activeWorkspaceId}/`;
 
-  if (!normalized.startsWith(expectedPrefix)) {
+  if (normalized.startsWith("tenants/")) {
+    if (normalized.startsWith(expectedPrefix)) {
+      return normalized;
+    }
     throw new ForbiddenError(
       "Acesso negado: o caminho de storage solicitado não pertence ao workspace ativo."
     );
   }
+
+  if (PUBLIC_BUCKETS.includes(bucket)) {
+    return normalized;
+  }
+
+  return `${expectedPrefix}${normalized}`;
+}
+
+/**
+ * Garante que um caminho de storage sob o prefixo 'tenants/{wsId}/...' pertença
+ * estritamente ao workspace ativo no RequestContext.
+ * Deny-by-default: rejeita caminhos de outros tenants,
+ * path traversal, caracteres nulos e workspaces vazios.
+ */
+export function assertTenantStoragePath(ctx: RequestContext, storagePath: string): void {
+  resolveCanonicalTenantStoragePath(ctx, "uploads", storagePath);
 }
 
 export { PUBLIC_BUCKETS };

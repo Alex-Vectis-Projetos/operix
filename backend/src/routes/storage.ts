@@ -10,6 +10,7 @@ import {
   PUBLIC_BUCKETS,
   getPresignedDownloadUrl,
   assertTenantStoragePath,
+  resolveCanonicalTenantStoragePath,
   assertAllowedBucket,
 } from "../lib/minio.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -30,9 +31,25 @@ function bucketParam(req: Request): string {
   return Array.isArray(raw) ? raw[0] : (raw ?? "");
 }
 
-async function streamObject(bucket: string, filePath: string, res: Response, cacheControl: string) {
+async function streamObject(
+  bucket: string,
+  filePath: string,
+  res: Response,
+  cacheControl: string,
+  fallbackKey?: string
+) {
   try {
-    const obj = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: filePath }));
+    let obj;
+    try {
+      obj = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: filePath }));
+    } catch (err: unknown) {
+      const code = (err as { name?: string })?.name;
+      if ((code === "NoSuchKey" || code === "NotFound") && fallbackKey) {
+        obj = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: fallbackKey }));
+      } else {
+        throw err;
+      }
+    }
     if (obj.ContentType) res.setHeader("Content-Type", obj.ContentType);
     if (obj.ContentLength) res.setHeader("Content-Length", obj.ContentLength);
     res.setHeader("Cache-Control", cacheControl);
@@ -74,26 +91,26 @@ storageRouter.post(
 
       const file = req.file;
       const bucket = req.body.bucket as string | undefined;
-      const path = req.body.path as string | undefined;
+      const rawPath = req.body.path as string | undefined;
 
-      if (!file || !bucket || !path) {
+      if (!file || !bucket || !rawPath) {
         return res.status(400).json({ message: "Campos obrigatórios: file, bucket, path." });
       }
 
       // Validação estrita de bucket allowlist e fronteira de tenant (deny-by-default)
       assertAllowedBucket(bucket);
-      assertTenantStoragePath(ctx, path);
+      const canonicalKey = resolveCanonicalTenantStoragePath(ctx, bucket, rawPath);
 
       await s3.send(
         new PutObjectCommand({
           Bucket: bucket,
-          Key: path,
+          Key: canonicalKey,
           Body: file.buffer,
           ContentType: file.mimetype || "application/octet-stream",
         })
       );
 
-      return res.json({ path, bucket });
+      return res.json({ path: canonicalKey, bucket });
     } catch (err) {
       return next(err);
     }
@@ -111,22 +128,25 @@ storageRouter.post(
         return res.status(403).json({ message: "Workspace ativo não definido." });
       }
 
-      const { bucket, path, expiresInSeconds = 900 } = req.body as {
+      const { bucket, path: rawPath, expiresInSeconds = 900 } = req.body as {
         bucket?: string;
         path?: string;
         expiresInSeconds?: number;
       };
 
-      if (!bucket || !path) {
+      if (!bucket || !rawPath) {
         return res.status(400).json({ message: "Campos obrigatórios: bucket, path." });
       }
 
       // Validação estrita de bucket allowlist e fronteira de tenant (deny-by-default)
       assertAllowedBucket(bucket);
-      assertTenantStoragePath(ctx, path);
+      const canonicalKey = resolveCanonicalTenantStoragePath(ctx, bucket, rawPath);
 
       const ttl = Math.min(Math.max(Number(expiresInSeconds) || 900, 60), 900); // máx 15 min (900s)
-      const url = await getPresignedDownloadUrl(bucket, path, ttl);
+      let url = await getPresignedDownloadUrl(bucket, canonicalKey, ttl);
+      if (!url && canonicalKey !== rawPath) {
+        url = await getPresignedDownloadUrl(bucket, rawPath.replace(/^\//, ""), ttl);
+      }
 
       return res.json({ url, expiresInSeconds: ttl });
     } catch (err) {
@@ -150,9 +170,15 @@ storageRouter.get(
 
       // Validação estrita de bucket allowlist e fronteira de tenant (deny-by-default)
       assertAllowedBucket(bucket);
-      assertTenantStoragePath(ctx, filePath);
+      const canonicalKey = resolveCanonicalTenantStoragePath(ctx, bucket, filePath);
 
-      await streamObject(bucket, filePath, res, "private, max-age=900");
+      await streamObject(
+        bucket,
+        canonicalKey,
+        res,
+        "private, max-age=900",
+        canonicalKey !== filePath ? filePath : undefined
+      );
     } catch (err) {
       return next(err);
     }
@@ -175,18 +201,17 @@ storageRouter.delete("/files", async (req: Request, res: Response, next: NextFun
 
     // Validação estrita de bucket allowlist e fronteira de tenant (deny-by-default)
     assertAllowedBucket(bucket);
-    for (const p of paths) {
-      assertTenantStoragePath(ctx, p);
-    }
+    const resolvedKeys = paths.map((p) => resolveCanonicalTenantStoragePath(ctx, bucket, p));
 
     await s3.send(
       new DeleteObjectsCommand({
         Bucket: bucket,
-        Delete: { Objects: paths.map((Key) => ({ Key })) },
+        Delete: { Objects: resolvedKeys.map((Key) => ({ Key })) },
       })
     );
-    return res.json({ deleted: paths.length });
+    return res.json({ deleted: resolvedKeys.length });
   } catch (err) {
     return next(err);
   }
 });
+

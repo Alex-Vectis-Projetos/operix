@@ -4,6 +4,23 @@ const API_URL = import.meta.env.VITE_API_URL as string;
 
 const PUBLIC_BUCKETS = new Set(["avatars", "hail-reports", "marketplace", "logos"]);
 
+function getActiveWorkspaceId(): string | null {
+  try {
+    return localStorage.getItem("selected_workspace_id");
+  } catch {
+    return null;
+  }
+}
+
+export function qualifyTenantPath(path: string, bucket?: string): string {
+  if (bucket && PUBLIC_BUCKETS.has(bucket)) return path;
+  const clean = path.startsWith("/") ? path.slice(1) : path;
+  if (clean.startsWith("tenants/")) return clean;
+  const wsId = getActiveWorkspaceId();
+  if (wsId) return `tenants/${wsId}/${clean}`;
+  return clean;
+}
+
 /**
  * Retorna a URL de acesso a um arquivo armazenado no MinIO via backend.
  * Buckets públicos: sem autenticação (/storage/public/:bucket/*).
@@ -13,7 +30,8 @@ export function getFileUrl(bucket: string, path: string): string {
   if (PUBLIC_BUCKETS.has(bucket)) {
     return `${API_URL}/storage/public/${bucket}/${path}`;
   }
-  return `${API_URL}/storage/file/${bucket}/${path}`;
+  const resolvedPath = qualifyTenantPath(path, bucket);
+  return `${API_URL}/storage/file/${bucket}/${resolvedPath}`;
 }
 
 /**
@@ -26,12 +44,13 @@ export async function uploadFile(
   file: File | Blob,
   contentType?: string
 ): Promise<{ path: string; bucket: string }> {
+  const resolvedPath = qualifyTenantPath(path, bucket);
   const form = new FormData();
   form.append("bucket", bucket);
-  form.append("path", path);
+  form.append("path", resolvedPath);
   form.append(
     "file",
-    file instanceof File ? file : new File([file], path.split("/").pop() ?? "file", {
+    file instanceof File ? file : new File([file], resolvedPath.split("/").pop() ?? "file", {
       type: contentType ?? "application/octet-stream",
     })
   );
@@ -55,11 +74,12 @@ export async function uploadFile(
  */
 export async function deleteFiles(bucket: string, paths: string[]): Promise<void> {
   if (paths.length === 0) return;
+  const resolvedPaths = paths.map((p) => qualifyTenantPath(p, bucket));
 
   const res = await fetch(`${API_URL}/storage/files`, {
     method: "DELETE",
     headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ bucket, paths }),
+    body: JSON.stringify({ bucket, paths: resolvedPaths }),
   });
 
   if (!res.ok) {
