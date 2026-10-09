@@ -129,16 +129,11 @@ export default function ReportsScreen() {
   async function load() {
     setLoading(true);
     try {
-      const [inv, pay] = await Promise.all([
-        apiRequest<{ invoices: Invoice[] }>("/billing/admin/ops/invoices").then((d) => ({ data: d?.invoices ?? [], error: null })).catch((e) => ({ data: [] as Invoice[], error: e })),
-        apiRequest<{ payments: Payment[] }>("/billing/admin/payments").then((d) => ({ data: d?.payments ?? [], error: null })).catch((e) => ({ data: [] as Payment[], error: e })),
-      ]);
-      if (inv.error) throw inv.error;
-      if (pay.error) throw pay.error;
-      setInvoices((inv.data || []) as any);
-      setPayments((pay.data || []) as any);
+      const data = await apiRequest<{ invoices: Invoice[] }>("/billing/admin/ops/invoices");
+      setInvoices((data?.invoices || []) as any);
+      setPayments([]);
     } catch (e: any) {
-      toast.error("Erro ao carregar relatórios", { description: e.message });
+      toast.error("Erro ao carregar relatórios", { description: e?.message ?? "Falha de comunicação" });
     } finally {
       setLoading(false);
     }
@@ -162,13 +157,9 @@ export default function ReportsScreen() {
         const d = parseISO(i.issue_date);
         return d >= b.start && d <= b.end;
       });
-      const monthPay = payments.filter((p) => {
-        const d = parseISO(p.payment_date);
-        return d >= b.start && d <= b.end;
-      });
       const revenue = monthInv.filter((i) => i.type === "outgoing").reduce((s, i) => s + Number(i.total_amount), 0);
       const expenses = monthInv.filter((i) => i.type === "incoming").reduce((s, i) => s + Number(i.total_amount), 0);
-      const received = monthPay.reduce((s, p) => s + Number(p.amount), 0);
+      const received = monthInv.filter((i) => i.type === "outgoing").reduce((s, i) => s + Number(i.paid_amount || 0), 0);
       const overdue = monthInv.filter((i) => i.status === "overdue").reduce((s, i) => s + Number(i.remaining_amount ?? i.total_amount), 0);
       return {
         label: b.label,
@@ -179,7 +170,7 @@ export default function ReportsScreen() {
         overdue,
       };
     });
-  }, [invoices, payments, periodMonths]);
+  }, [invoices, periodMonths]);
 
   // KPIs (current period totals)
   const kpis = useMemo(() => {
