@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { format, subMonths, startOfMonth, endOfMonth, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { apiRequest } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────
 // Types & helpers
@@ -44,11 +45,53 @@ type Payment = {
   invoice_id: string;
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  paid: "Pago",
+  pending: "Pendente",
+  overdue: "Atrasado",
+  partial: "Parcial",
+  draft: "Rascunho",
+  cancelled: "Cancelado",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  paid: "hsl(142 76% 45%)",
+  pending: "hsl(38 92% 55%)",
+  overdue: "hsl(0 84% 60%)",
+  partial: "hsl(217 91% 60%)",
+  draft: "hsl(215 16% 50%)",
+  cancelled: "hsl(280 50% 60%)",
+};
+
 const eur = (n: number) =>
   new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n || 0);
 
 const eurFull = (n: number) =>
   new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(n || 0);
+
+function StatusPieTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const data = payload[0]?.payload;
+  if (!data) return null;
+  return (
+    <div className="rounded-md border border-border/60 bg-popover/95 backdrop-blur-sm px-3 py-2 text-xs shadow-xl min-w-[170px]">
+      <div className="flex items-center gap-2 mb-1.5 pb-1 border-b border-border/50">
+        <span className="h-2.5 w-2.5 rounded-full" style={{ background: data.color }} />
+        <span className="font-semibold text-foreground">{data.name}</span>
+      </div>
+      <div className="space-y-1 text-muted-foreground text-[11px]">
+        <div className="flex justify-between gap-4">
+          <span>Quantidade:</span>
+          <span className="font-mono font-medium text-foreground">{data.count} ({data.countPct.toFixed(1)}%)</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span>Valor total:</span>
+          <span className="font-mono font-medium text-foreground">{eurFull(data.amount)} ({data.amountPct.toFixed(1)}%)</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Tooltip themed
 function ChartTooltip({ active, payload, label }: any) {
@@ -79,6 +122,8 @@ export default function ReportsScreen() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [emailingPdf, setEmailingPdf] = useState(false);
 
+  const [distMetric, setDistMetric] = useState<"amount" | "count">("amount");
+
   useEffect(() => { void load(); }, []);
 
   async function load() {
@@ -86,7 +131,7 @@ export default function ReportsScreen() {
     try {
       const [inv, pay] = await Promise.all([
         apiRequest<{ invoices: Invoice[] }>("/billing/admin/ops/invoices").then((d) => ({ data: d?.invoices ?? [], error: null })).catch((e) => ({ data: [] as Invoice[], error: e })),
-        Promise.resolve({ data: [] as Payment[], error: null }),
+        apiRequest<{ payments: Payment[] }>("/billing/admin/payments").then((d) => ({ data: d?.payments ?? [], error: null })).catch((e) => ({ data: [] as Payment[], error: e })),
       ]);
       if (inv.error) throw inv.error;
       if (pay.error) throw pay.error;
@@ -160,14 +205,42 @@ export default function ReportsScreen() {
     return { totalRevenue, totalExpenses, totalReceived, profit, overdueAmount, pendingAmount, inadimplenciaPct, trendPct };
   }, [monthly, invoices]);
 
+  const totalAmountInvoices = useMemo(() => {
+    return invoices.reduce((s, i) => s + Number(i.total_amount || 0), 0);
+  }, [invoices]);
+
   // Status distribution for pie
   const statusDist = useMemo(() => {
-    const groups: Record<string, number> = {};
+    const groups: Record<string, { count: number; amount: number }> = {};
     invoices.forEach((i) => {
-      groups[i.status] = (groups[i.status] || 0) + Number(i.total_amount);
+      const st = i.status || "draft";
+      if (!groups[st]) {
+        groups[st] = { count: 0, amount: 0 };
+      }
+      groups[st].count += 1;
+      groups[st].amount += Number(i.total_amount || 0);
     });
-    return Object.entries(groups).map(([name, value]) => ({ name, value }));
-  }, [invoices]);
+
+    const totalInvoices = invoices.length;
+    const totalAmount = Object.values(groups).reduce((acc, g) => acc + g.amount, 0);
+
+    return Object.entries(groups).map(([statusKey, data]) => {
+      const label = STATUS_LABELS[statusKey] || statusKey;
+      const countPct = totalInvoices > 0 ? (data.count / totalInvoices) * 100 : 0;
+      const amountPct = totalAmount > 0 ? (data.amount / totalAmount) * 100 : 0;
+      return {
+        key: statusKey,
+        name: label,
+        status: statusKey,
+        count: data.count,
+        amount: data.amount,
+        value: totalAmount > 0 ? (distMetric === "amount" ? (data.amount > 0 ? data.amount : 0.001) : data.count) : data.count,
+        countPct,
+        amountPct,
+        color: STATUS_COLORS[statusKey] || "hsl(220 9% 60%)",
+      };
+    });
+  }, [invoices, distMetric]);
 
   // Expenses by fleet/vehicle
   const fleetExpenses = useMemo(() => {
@@ -259,15 +332,6 @@ export default function ReportsScreen() {
       setEmailingPdf(false);
     }
   }
-
-  const STATUS_COLORS: Record<string, string> = {
-    paid: "hsl(142 76% 45%)",
-    pending: "hsl(38 92% 55%)",
-    overdue: "hsl(0 84% 60%)",
-    partial: "hsl(217 91% 60%)",
-    draft: "hsl(220 9% 60%)",
-    cancelled: "hsl(280 50% 60%)",
-  };
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -388,28 +452,75 @@ export default function ReportsScreen() {
 
           {/* Status distribution */}
           <Card className="border-border/50">
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-sm">Distribuição por estado</CardTitle>
+              <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-md border border-border/40 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setDistMetric("amount")}
+                  className={cn(
+                    "px-2 py-0.5 rounded font-medium transition-colors",
+                    distMetric === "amount" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Valor (€)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDistMetric("count")}
+                  className={cn(
+                    "px-2 py-0.5 rounded font-medium transition-colors",
+                    distMetric === "count" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Qtd (Nº)
+                </button>
+              </div>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie
-                    data={statusDist}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%" cy="50%"
-                    innerRadius={50} outerRadius={90}
-                    paddingAngle={2}
-                  >
-                    {statusDist.map((s, i) => (
-                      <Cell key={i} fill={STATUS_COLORS[s.name] || "hsl(220 9% 60%)"} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
+              {statusDist.length === 0 ? (
+                <div className="h-[280px] flex items-center justify-center text-xs text-muted-foreground">
+                  Nenhuma fatura encontrada no período
+                </div>
+              ) : (
+                <div className="relative">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie
+                        data={statusDist}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%" cy="45%"
+                        innerRadius={55} outerRadius={92}
+                        paddingAngle={statusDist.length > 1 ? 3 : 0}
+                      >
+                        {statusDist.map((s, i) => (
+                          <Cell key={i} fill={s.color} stroke="hsl(var(--background))" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<StatusPieTooltip />} />
+                      <Legend
+                        verticalAlign="bottom"
+                        wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                        formatter={(value, entry: any) => {
+                          const payload = entry?.payload;
+                          const metricLabel = distMetric === "amount" ? eur(payload?.amount ?? 0) : `${payload?.count ?? 0} fat.`;
+                          return `${value} (${metricLabel})`;
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {/* Donut Center Summary */}
+                  <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none text-center">
+                    <div className="text-base font-bold font-mono tracking-tight text-foreground">
+                      {distMetric === "amount" ? eur(totalAmountInvoices) : `${invoices.length}`}
+                    </div>
+                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">
+                      {distMetric === "amount" ? "Total Faturado" : "Faturas"}
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
