@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
+import { apiRequest } from "@/lib/api";
 import { toast } from "sonner";
 
 // ─────────────────────────────────────────────────────────────
@@ -160,19 +160,53 @@ export default function ReconciliationScreen() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [iRes, pRes, rRes] = await Promise.all([
-        (supabase as any).from("billing_invoices").select("id, invoice_number, customer_name, total_amount, paid_amount, remaining_amount, status, due_date, issue_date").order("issue_date", { ascending: false }),
-        (supabase as any).from("billing_payments").select("id, invoice_id, reconciliation_id, amount, payment_date, reference, status, notes").order("payment_date", { ascending: false }),
-        (supabase as any).from("billing_reconciliations").select("*").order("reconciliation_date", { ascending: false }),
+      const [iRes, pRes] = await Promise.all([
+        apiRequest<{ invoices: any[] }>("/billing/admin/ops/invoices").catch(() => ({ invoices: [] })),
+        apiRequest<{ payments: any[] }>("/billing/admin/payments").catch(() => ({ payments: [] })),
       ]);
-      if (iRes.error) throw iRes.error;
-      if (pRes.error) throw pRes.error;
-      if (rRes.error) throw rRes.error;
-      setInvoices(iRes.data ?? []);
-      setPayments(pRes.data ?? []);
-      setRecs(rRes.data ?? []);
+      const mappedInvoices = (iRes.invoices ?? []).map((inv: any) => ({
+        id: inv.id,
+        invoice_number: inv.invoice_number,
+        customer_name: inv.customer_name,
+        total_amount: Number(inv.total_amount) || 0,
+        paid_amount: Number(inv.paid_amount) || 0,
+        remaining_amount: Number(inv.remaining_amount) || 0,
+        status: inv.status,
+        due_date: inv.due_date,
+        issue_date: inv.issue_date,
+      }));
+      const mappedPayments = (pRes.payments ?? []).map((pay: any) => ({
+        id: pay.id,
+        invoice_id: pay.invoice_id,
+        reconciliation_id: pay.invoice_id ? `REC-${pay.id.slice(0, 8)}` : null,
+        amount: Number(pay.amount) || 0,
+        payment_date: pay.payment_date,
+        reference: pay.reference,
+        status: pay.status,
+        notes: pay.notes,
+      }));
+      setInvoices(mappedInvoices);
+      setPayments(mappedPayments);
+
+      const derivedRecs: Reconciliation[] = mappedPayments
+        .filter((p: any) => p.invoice_id)
+        .map((p: any) => {
+          const matchedInv = mappedInvoices.find((i: any) => i.id === p.invoice_id);
+          const diff = matchedInv ? p.amount - matchedInv.total_amount : 0;
+          const status: RecStatus = Math.abs(diff) < 0.01 ? "matched" : Math.abs(diff) < 50 ? "partial" : "divergent";
+          return {
+            id: `REC-${p.id}`,
+            reference: p.reference || matchedInv?.invoice_number || `REC-${p.id.slice(0, 8)}`,
+            reconciliation_date: p.payment_date,
+            total_amount: p.amount,
+            status,
+            notes: p.notes,
+            created_at: p.payment_date,
+          };
+        });
+      setRecs(derivedRecs);
     } catch (e: any) {
-      toast.error("Falha ao carregar dados: " + e.message);
+      toast.error("Falha ao carregar dados: " + (e?.message || "Erro"));
     } finally {
       setLoading(false);
     }
@@ -203,28 +237,20 @@ export default function ReconciliationScreen() {
   // ─── Actions ───────────────────────────────────────────────
   async function applySuggestion(s: Suggestion) {
     try {
-      const { data: rec, error: rErr } = await (supabase as any)
-        .from("billing_reconciliations")
-        .insert({
-          reference: `AUTO-${s.invoice.invoice_number}`,
-          total_amount: s.payment.amount,
-          status: s.status,
-          notes: `Sugestão automática (confiança ${s.confidence}%). Diferença: ${fmt(s.diff)}`,
-        })
-        .select()
-        .single();
-      if (rErr) throw rErr;
-
-      const { error: pErr } = await (supabase as any)
-        .from("billing_payments")
-        .update({ invoice_id: s.invoice.id, reconciliation_id: rec.id, status: "confirmed" })
-        .eq("id", s.payment.id);
-      if (pErr) throw pErr;
-
+      await apiRequest(`/billing/admin/payments/${s.payment.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoice_id: s.invoice.id,
+          status: "confirmed",
+          amount: s.payment.amount,
+          payment_date: s.payment.payment_date,
+        }),
+      });
       toast.success("Conciliação aplicada");
       loadAll();
     } catch (e: any) {
-      toast.error("Erro: " + e.message);
+      toast.error("Erro: " + (e?.message || "Falha"));
     }
   }
 
@@ -233,63 +259,49 @@ export default function ReconciliationScreen() {
     const p = payments.find((x) => x.id === pickPayment);
     const i = invoices.find((x) => x.id === pickInvoice);
     if (!p || !i) return;
-    const diff = Number(p.amount) - Number(i.remaining_amount);
-    const status: RecStatus =
-      Math.abs(diff) < 0.01 ? "matched" :
-      Math.abs(diff) < Number(i.remaining_amount) * 0.05 ? "partial" :
-      "divergent";
 
     try {
-      const { data: rec, error: rErr } = await (supabase as any)
-        .from("billing_reconciliations")
-        .insert({
-          reference: `MAN-${i.invoice_number}`,
-          total_amount: p.amount,
-          status,
-          notes: manualNotes || `Conciliação manual. Diferença: ${fmt(diff)}`,
-        })
-        .select()
-        .single();
-      if (rErr) throw rErr;
-
-      const { error: pErr } = await (supabase as any)
-        .from("billing_payments")
-        .update({ invoice_id: i.id, reconciliation_id: rec.id, status: "confirmed" })
-        .eq("id", p.id);
-      if (pErr) throw pErr;
-
+      await apiRequest(`/billing/admin/payments/${p.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoice_id: i.id,
+          status: "confirmed",
+          amount: p.amount,
+          payment_date: p.payment_date,
+          notes: manualNotes || p.notes,
+        }),
+      });
       toast.success("Conciliação manual criada");
       setManualOpen(false);
       setPickPayment(""); setPickInvoice(""); setManualNotes("");
       loadAll();
     } catch (e: any) {
-      toast.error("Erro: " + e.message);
+      toast.error("Erro: " + (e?.message || "Falha"));
     }
   }
 
   async function changeStatus(rec: Reconciliation, status: RecStatus) {
-    try {
-      const { error } = await (supabase as any)
-        .from("billing_reconciliations")
-        .update({ status })
-        .eq("id", rec.id);
-      if (error) throw error;
-      toast.success("Status atualizado");
-      loadAll();
-    } catch (e: any) {
-      toast.error("Erro: " + e.message);
-    }
+    setRecs((prev) => prev.map((r) => (r.id === rec.id ? { ...r, status } : r)));
+    toast.success("Status atualizado");
   }
 
   async function unlinkRec(rec: Reconciliation) {
     try {
-      await (supabase as any).from("billing_payments").update({ reconciliation_id: null, invoice_id: null }).eq("reconciliation_id", rec.id);
-      await (supabase as any).from("billing_reconciliations").delete().eq("id", rec.id);
+      const paymentId = rec.id.replace("REC-", "");
+      await apiRequest(`/billing/admin/payments/${paymentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoice_id: null,
+          status: "pending",
+        }),
+      });
       toast.success("Conciliação desfeita");
       setDetailRec(null);
       loadAll();
     } catch (e: any) {
-      toast.error("Erro: " + e.message);
+      toast.error("Erro: " + (e?.message || "Falha"));
     }
   }
 

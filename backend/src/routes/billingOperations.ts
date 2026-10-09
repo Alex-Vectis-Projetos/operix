@@ -1019,6 +1019,45 @@ operationalBillingRouter.post("/admin/ops/invoices", async (req: AuthenticatedRe
         },
       });
 
+      const meta = input.metadata as Record<string, unknown> | null;
+      const targetPaymentListId = meta?.paymentListId || meta?.payment_list_id;
+      if (typeof targetPaymentListId === "string" && targetPaymentListId.trim() && workspaceId) {
+        const pList = await tx.paymentList.findFirst({
+          where: { id: targetPaymentListId.trim(), workspaceId },
+        });
+        if (!pList) {
+          throw new NotFoundError("PAYMENT_LIST_NOT_FOUND");
+        }
+        if (pList.status !== "ready_for_billing" && pList.status !== "confronted") {
+          throw new ConflictError(
+            `LIST_STATUS_INELIGIBLE_FOR_INVOICE: Apenas listas em ready_for_billing ou confronted podem ser faturadas (atual: ${pList.status}).`
+          );
+        }
+        if (pList.invoiceId) {
+          throw new ConflictError("LIST_ALREADY_INVOICED: A lista já possui fatura associada.");
+        }
+        await tx.paymentList.update({
+          where: { id: pList.id },
+          data: {
+            status: "pending",
+            invoiceId: created.id,
+          },
+        });
+        const now = new Date();
+        await tx.paymentListEntryClaim.updateMany({
+          where: {
+            workspaceId,
+            paymentListId: pList.id,
+            status: "reserved",
+          },
+          data: {
+            status: "consumed",
+            consumedAt: now,
+            releasedAt: null,
+          },
+        });
+      }
+
       await logBackendEvent(tx, {
         tableName: "billing_invoices",
         rowId: created.id,
@@ -1145,6 +1184,40 @@ operationalBillingRouter.patch("/admin/ops/invoices/:invoiceId", async (req: Aut
         }
       }
 
+      if (input.status === "cancelled" && existing.workspaceId) {
+        if (existing.status === "paid") {
+          throw new ConflictError("CANNOT_CANCEL_PAID_INVOICE: Faturas pagas não podem ser canceladas diretamente.");
+        }
+        const paymentList = await tx.paymentList.findFirst({
+          where: {
+            workspaceId: existing.workspaceId,
+            invoiceId: existing.id,
+          },
+        });
+        if (paymentList && paymentList.status === "pending") {
+          const rollbackStatus = paymentList.sourceType === "external_import" ? "confronted" : "ready_for_billing";
+          await tx.paymentList.update({
+            where: { id: paymentList.id },
+            data: {
+              status: rollbackStatus,
+              invoiceId: null,
+            },
+          });
+          await logBackendEvent(tx, {
+            tableName: "payment_lists",
+            rowId: paymentList.id,
+            action: "payment_list.invoice_cancelled_rollback",
+            actorUserId: req.auth?.userId ?? null,
+            workspaceId: existing.workspaceId,
+            payload: {
+              invoice_id: existing.id,
+              previous_status: paymentList.status,
+              new_status: rollbackStatus,
+            } as Prisma.InputJsonValue,
+          });
+        }
+      }
+
       return updated;
     });
 
@@ -1175,6 +1248,22 @@ operationalBillingRouter.delete("/admin/ops/invoices/:invoiceId", async (req: Au
 
       if (!existing) {
         return;
+      }
+
+      if (existing.workspaceId) {
+        const linkedPaymentList = await tx.paymentList.findFirst({
+          where: { invoiceId: existing.id, workspaceId: existing.workspaceId },
+        });
+        if (linkedPaymentList && linkedPaymentList.status === "pending") {
+          const rollbackStatus = linkedPaymentList.sourceType === "external_import" ? "confronted" : "ready_for_billing";
+          await tx.paymentList.update({
+            where: { id: linkedPaymentList.id },
+            data: {
+              status: rollbackStatus,
+              invoiceId: null,
+            },
+          });
+        }
       }
 
       await logBackendEvent(tx, {

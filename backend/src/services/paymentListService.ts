@@ -568,7 +568,7 @@ export async function createInvoiceForPaymentList(
         totalAmount: recognizedAmount,
         paidAmount: 0,
         remainingAmount: recognizedAmount,
-        status: "draft",
+        status: "pending",
         notes: payload?.notes?.trim() || list.notes || null,
         source: "payment_list",
         createdBy: ctx.actorUserId ?? null,
@@ -721,6 +721,13 @@ export async function associateInvoiceForPaymentList(
         invoiceId: invoice.id,
       },
     });
+
+    if (invoice.status === "draft") {
+      await tx.billingInvoice.update({
+        where: { id: invoice.id },
+        data: { status: "pending" },
+      });
+    }
 
     const now = new Date();
     await tx.paymentListEntryClaim.updateMany({

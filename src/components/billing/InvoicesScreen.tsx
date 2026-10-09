@@ -106,6 +106,11 @@ type Invoice = {
   created_at: string;
   updated_at: string;
   metadata?: {
+    // Canonical Phase 1 link (1:1 with PaymentList)
+    paymentListId?: string | null;
+    payment_list_id?: string | null;
+    paymentListNumber?: string | null;
+    payment_list_number?: string | null;
     // Canonical link — LISTS consolidate payment_orders for billing purposes.
     linked_list_names?: string[];
     linked_lists_meta?: Array<{
@@ -544,36 +549,29 @@ export default function InvoicesScreen() {
       legal_text: DEFAULT_LEGAL,
       options: defaultOptions(),
     });
-    // Seed linked LISTS from metadata snapshot. Falls back to deriving list_names from legacy PO meta.
-    const listsMeta = inv.metadata?.linked_lists_meta ?? [];
-    const legacyPoMeta = inv.metadata?.linked_payment_orders_meta ?? [];
-    const derivedNames = inv.metadata?.linked_list_names
-      ?? Array.from(new Set(legacyPoMeta.map((m) => m.list_name).filter(Boolean) as string[]));
-    setFormListIds(derivedNames);
-    setFormLists(
-      listsMeta.length > 0
-        ? listsMeta.map((m) => ({
-            id: m.list_name, list_name: m.list_name, technician_name: m.technician_name,
-            assigned_user_id: m.assigned_user_id, client_name: m.client_name, city: null,
-            year: m.year, week: m.week, total: m.total, po_count: m.po_count,
-            payment_order_ids: [], user_ids: m.assigned_user_id ? [m.assigned_user_id] : [],
-          }))
-        : derivedNames.map((ln) => {
-            const sample = legacyPoMeta.find((m) => m.list_name === ln);
-            return {
-              id: ln, list_name: ln,
-              technician_name: sample?.technician_name ?? "—",
-              assigned_user_id: sample?.assigned_user_id ?? null,
-              client_name: null, city: null,
-              year: sample?.year ?? new Date().getUTCFullYear(),
-              week: sample?.week ?? 0,
-              total: legacyPoMeta.filter((m) => m.list_name === ln).reduce((s, m) => s + (m.total || 0), 0),
-              po_count: legacyPoMeta.filter((m) => m.list_name === ln).length,
-              payment_order_ids: legacyPoMeta.filter((m) => m.list_name === ln).map((m) => m.id),
-              user_ids: sample?.assigned_user_id ? [sample.assigned_user_id] : [],
-            };
-          })
-    );
+    // Seed linked PaymentList (Phase 1: strict 1:1)
+    const singlePaymentListId = inv.metadata?.paymentListId || inv.metadata?.payment_list_id || null;
+    const singleListName = inv.metadata?.paymentListNumber || inv.metadata?.payment_list_number || null;
+    if (singlePaymentListId) {
+      setFormListIds([singlePaymentListId]);
+      setFormLists([{
+        id: singlePaymentListId,
+        list_name: singleListName || singlePaymentListId,
+        technician_name: inv.customer_name || "—",
+        assigned_user_id: null,
+        client_name: inv.customer_name || null,
+        city: null,
+        year: new Date(inv.issue_date || Date.now()).getFullYear(),
+        week: 0,
+        total: Number(inv.total_amount || 0),
+        po_count: 1,
+        payment_order_ids: [],
+        user_ids: [],
+      }]);
+    } else {
+      setFormListIds([]);
+      setFormLists([]);
+    }
     setFormOpen(true);
   };
 
@@ -675,28 +673,19 @@ export default function InvoicesScreen() {
     return { subtotal, discount, netSubtotal, tax, total: netSubtotal + tax };
   }, [form.items, form.options]);
 
-  // Build invoice metadata from the linked LISTS selection.
-  // Underlying PO ids are expanded for trigger propagation (status sync).
+  // Build invoice metadata from the linked PaymentList (Phase 1: strict 1:1).
   const buildLinkedMetadata = () => {
-    const linked_list_names = Array.from(new Set(formListIds));
-    const linked_lists_meta = formLists.map((l) => ({
-      list_name: l.list_name, technician_name: l.technician_name,
-      assigned_user_id: l.assigned_user_id, client_name: l.client_name,
-      year: l.year, week: l.week, total: l.total, po_count: l.po_count,
-    }));
-    const linked_user_ids = Array.from(
-      new Set(formLists.flatMap((l) => l.user_ids).filter(Boolean) as string[])
-    );
-    const linked_payment_order_ids = Array.from(
-      new Set(formLists.flatMap((l) => l.payment_order_ids))
-    );
+    const selectedList = formLists[0];
+    const selectedListId = formListIds[0];
     return {
       ...(editing?.metadata ?? {}),
-      linked_list_names,
-      linked_lists_meta,
-      linked_user_ids,
-      linked_payment_order_ids,
-      linked_payment_orders: linked_payment_order_ids, // legacy alias
+      ...(selectedListId
+        ? {
+            paymentListId: selectedListId,
+            payment_list_id: selectedListId,
+            paymentListNumber: selectedList?.list_name,
+          }
+        : {}),
     };
   };
 
@@ -1245,19 +1234,40 @@ export default function InvoicesScreen() {
               </div>
             </FormSection>
 
-            {/* SECTION 1.5 — Vinculação a LISTAS consolidadas (entidade financeira) */}
+            {/* SECTION 1.5 — Vinculação à PaymentList (Fase 1: estrita 1:1) */}
             <FormSection
-              title="Listas vinculadas"
-              subtitle="O faturamento trabalha por LISTAS consolidadas (ex.: L012483), nunca por OP individual. Origem: payment-orders."
+              title="PaymentList vinculada (1:1)"
+              subtitle="Cada fatura governa exatamente uma PaymentList. Origem canônica: /api/payment-lists."
             >
               <PaymentListsSelector
                 value={formListIds}
-                onChange={(ids, lists) => { setFormListIds(ids); setFormLists(lists); }}
+                onChange={(ids, lists) => {
+                  setFormListIds(ids);
+                  setFormLists(lists);
+                  const selected = lists[0];
+                  if (selected) {
+                    if (selected.clientId && !form.client_id) {
+                      setForm((prev) => ({ ...prev, client_id: selected.clientId }));
+                    }
+                    if (selected.total && (!form.items[0]?.unit_price || form.items[0]?.unit_price === 0)) {
+                      setForm((prev) => ({
+                        ...prev,
+                        items: [{
+                          id: crypto.randomUUID(),
+                          designation: `Serviços da Lista ${selected.list_name}`,
+                          quantity: 1,
+                          unit: "un",
+                          unit_price: selected.total,
+                          tax_rate: 0,
+                        }],
+                      }));
+                    }
+                  }
+                }}
               />
               {formListIds.length > 0 && (
                 <p className="mt-2 text-[10px] text-muted-foreground">
-                  {formListIds.length} lista{formListIds.length !== 1 ? "s" : ""} vinculada{formListIds.length !== 1 ? "s" : ""}.
-                  O estado da fatura propaga automaticamente para as OPs internas.
+                  PaymentList vinculada: <span className="font-mono text-primary font-medium">{formLists[0]?.list_name}</span>. A quitação total da fatura transiciona a lista para <span className="font-mono">paid</span>.
                 </p>
               )}
             </FormSection>
