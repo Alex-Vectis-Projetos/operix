@@ -45,7 +45,11 @@ function sendError(res: Response, error: unknown): Response {
 
 externalOperationalImportsRouter.post("/materialize-staged", async (req: Request, res: Response) => {
   try {
-    const materialized = await materializeStagedOperationalImport(req.ctx!, req.body);
+    let body = req.body;
+    if (typeof body === "string") {
+      try { body = JSON.parse(body); } catch { /* noop */ }
+    }
+    const materialized = await materializeStagedOperationalImport(req.ctx!, body);
     return res.status(materialized.idempotent ? 200 : 201).json(materialized);
   } catch (error) {
     return sendError(res, error);

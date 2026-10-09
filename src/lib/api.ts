@@ -98,6 +98,10 @@ export async function apiBlobRequest(path: string, init?: ApiRequestInit): Promi
     headers.set("X-Workspace-Id", selectedWs);
   }
 
+  if (init?.body && typeof init.body === "string" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   try {
     const cleanPath = path.replace(/^\/?api(?=\/|$)/, "");
     const normalizedPath = cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`;

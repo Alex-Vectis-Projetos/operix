@@ -205,6 +205,9 @@ export default function ServiceOrdersPage() {
 
       await apiRequest("/external-operational-imports/materialize-staged", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           fileName: extraction?._file?.name || "folha_weeklog.pdf",
           mimeType: extraction?._file?.type || "application/pdf",
