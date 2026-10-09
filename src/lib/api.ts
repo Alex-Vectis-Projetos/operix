@@ -99,7 +99,9 @@ export async function apiBlobRequest(path: string, init?: ApiRequestInit): Promi
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`, {
+    const cleanPath = path.replace(/^\/?api(?=\/|$)/, "");
+    const normalizedPath = cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`;
+    const response = await fetch(`${API_BASE_URL}${normalizedPath}`, {
       ...init,
       headers,
       signal: init?.signal ?? controller.signal,

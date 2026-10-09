@@ -203,7 +203,7 @@ export default function ServiceOrdersPage() {
         fileBase64 = btoa(binary);
       }
 
-      await apiRequest("/api/external-operational-imports/materialize-staged", {
+      await apiRequest("/external-operational-imports/materialize-staged", {
         method: "POST",
         body: JSON.stringify({
           fileName: extraction?._file?.name || "folha_weeklog.pdf",
