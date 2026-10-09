@@ -16,6 +16,8 @@ import {
   Play,
   Undo2,
   Pause,
+  Loader2,
+  CheckCircle2,
 } from "lucide-react";
 import {
   useProductionOrders,
@@ -26,13 +28,6 @@ import {
   type ProductionPriority,
   type ProductionStatus,
 } from "@/hooks/useProductionOrders";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +47,17 @@ import { Button } from "@/components/ui/button";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 
 interface Props {
   onOpen: (o: ProductionOrder) => void;
@@ -161,12 +167,27 @@ export function ProductionBoard({ onOpen }: Props) {
     ? (ordersRaw as ProductionOrder[]).filter((o: ProductionOrder) => !!o)
     : [];
 
+  const [activeDragOrder, setActiveDragOrder] = useState<ProductionOrder | null>(null);
+
   const [pauseModal, setPauseModal] = useState<{
     open: boolean;
     order: ProductionOrder | null;
     targetStatus: ProductionStatus;
     reason: string;
   }>({ open: false, order: null, targetStatus: "paused", reason: "" });
+
+  const [finalizeModal, setFinalizeModal] = useState<{
+    open: boolean;
+    order: ProductionOrder | null;
+  }>({ open: false, order: null });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    })
+  );
 
   const grouped = useMemo(() => {
     const m = new Map<string, ProductionOrder[]>();
@@ -197,11 +218,7 @@ export function ProductionBoard({ onOpen }: Props) {
     }
 
     if (status === "delivered") {
-      const confirmFinalize = window.confirm(
-        `Finalizar e entregar ordem ${order.code || order.id}? Esta ação encerrará a execução e gerará o registro comercial no WEEKLOG.`
-      );
-      if (!confirmFinalize) return;
-      finalize.mutate(id);
+      setFinalizeModal({ open: true, order });
       return;
     }
 
@@ -224,7 +241,7 @@ export function ProductionBoard({ onOpen }: Props) {
       setPauseModal({ open: true, order, targetStatus: "paused", reason: "" });
       return;
     }
-    applyStatusChange(order.id!, status);
+    applyStatusChange(order.id, status);
   };
 
   const confirmPause = () => {
@@ -242,7 +259,7 @@ export function ProductionBoard({ onOpen }: Props) {
       ? currentInternal + append
       : append.trimStart();
     update.mutate(
-      { id: order.id!, status: targetStatus, notes },
+      { id: order.id, status: targetStatus, notes },
       {
         onSuccess: () => {
           toast.success(`OS ${order.code || order.id?.slice(0, 8)} pausada com sucesso.`);
@@ -253,6 +270,16 @@ export function ProductionBoard({ onOpen }: Props) {
         },
       },
     );
+  };
+
+  const confirmFinalizeOrder = () => {
+    const { order } = finalizeModal;
+    if (!order) return;
+    finalize.mutate(order.id, {
+      onSuccess: () => {
+        setFinalizeModal({ open: false, order: null });
+      },
+    });
   };
 
   const returnToBudget = async () => {
@@ -293,26 +320,37 @@ export function ProductionBoard({ onOpen }: Props) {
       window.removeEventListener("production:order-change-status-requested", handler);
   }, []);
 
-  const onDrop = (e: React.DragEvent, column: BoardColumn) => {
-    e.preventDefault();
-    const id = e.dataTransfer.getData("text/plain");
-    if (!id) return;
-    const order = orders.find((o) => o && o.id === id);
-    if (!order) return;
-    if (isOrderLocked(order.status)) return;
+  const handleDragStart = (event: DragStartEvent) => {
+    const activeId = String(event.active.id);
+    const order = orders.find((o) => o && o.id === activeId);
+    if (order && !isOrderLocked(order.status)) {
+      setActiveDragOrder(order);
+    }
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveDragOrder(null);
+    if (!over) return;
+
+    const activeId = String(active.id);
+    const targetColumnKey = String(over.id);
+
+    const order = orders.find((o) => o && o.id === activeId);
+    if (!order || isOrderLocked(order.status)) return;
 
     let target: ProductionStatus | null = null;
-    if (column.key === "in_production") {
+    if (targetColumnKey === "in_production") {
       if (order.status === "paused") {
         target = "in_production";
       } else {
         return;
       }
-    } else if (column.key === "paused") {
+    } else if (targetColumnKey === "paused") {
       if (order.status !== "paused") {
         target = "paused";
       }
-    } else if (column.key === "delivered") {
+    } else if (targetColumnKey === "delivered") {
       if (order.status !== "delivered") {
         target = "delivered";
       }
@@ -321,7 +359,7 @@ export function ProductionBoard({ onOpen }: Props) {
     if (target) {
       const allowed = getValidTransitions(order.status);
       if (!allowed.includes(target)) {
-        toast.warning(`Transição não permitida.`);
+        toast.warning(`Transição direta não permitida para esta fase.`);
         return;
       }
       requestChangeStatus(order, target);
@@ -334,16 +372,16 @@ export function ProductionBoard({ onOpen }: Props) {
         {BOARD_COLUMNS.map((col) => (
           <div
             key={col.key}
-            className="min-w-[285px] max-w-[340px] flex-1 shrink-0 snap-start rounded-xl bg-muted/30 p-3 lg:min-w-0 lg:max-w-none min-h-[200px] xl:min-h-[320px] xl:max-h-[calc(100svh-260px)] xl:overflow-y-auto"
+            className="min-w-[290px] max-w-[340px] flex-1 shrink-0 snap-start rounded-xl bg-card border border-border/70 p-3 lg:min-w-0 lg:max-w-none min-h-[220px]"
           >
-            <div className="mb-3 flex items-center justify-between py-2 md:py-1">
+            <div className="mb-3 flex items-center justify-between py-2">
               <div className="flex items-center gap-2">
-                <Skeleton className="h-2 w-2 rounded-full" />
+                <Skeleton className="h-2.5 w-2.5 rounded-full" />
                 <Skeleton className="h-4 w-28" />
               </div>
               <Skeleton className="h-5 w-8 rounded-md" />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <Skeleton key={i} className="h-40 w-full rounded-lg" />
               ))}
@@ -356,67 +394,48 @@ export function ProductionBoard({ onOpen }: Props) {
 
   return (
     <>
-      <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory lg:grid lg:grid-cols-3 lg:gap-6 lg:overflow-visible">
-        {BOARD_COLUMNS.map((col) => {
-          const items = grouped.get(col.key) ?? [];
-          const Icon = col.icon;
-          return (
-            <div
-              key={col.key}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => onDrop(e, col)}
-              className="flex min-w-[285px] max-w-[340px] flex-1 shrink-0 snap-start flex-col rounded-xl border border-border/70 bg-muted/30 p-3 lg:min-w-0 lg:max-w-none xl:max-h-[calc(100svh-260px)] xl:overflow-y-auto"
-            >
-              <div className="sticky top-0 z-10 mb-3 flex items-start justify-between gap-2 rounded-lg bg-muted/40 px-2 py-2 backdrop-blur">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span
-                    className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${col.accent}`}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 shrink-0 rounded-full ${col.dot}`} />
-                      <h3 className="text-sm font-semibold leading-none tracking-tight">
-                        {col.label}
-                      </h3>
-                    </div>
-                    <p className="mt-1 truncate text-[10px] text-muted-foreground">
-                      {col.description}
-                    </p>
-                  </div>
-                </div>
-                <Badge variant="secondary" className="shrink-0 text-xs tabular-nums">
-                  {items.length}
-                </Badge>
-              </div>
-              <div className="space-y-2.5">
-                {items.map((o) => (
-                  <OrderCard
-                    key={o.id ?? String(Math.random())}
-                    order={o}
-                    onOpen={onOpen}
-                    onChangeStatus={(next) => requestChangeStatus(o, next)}
-                  />
-                ))}
-                {items.length === 0 && (
-                  <div className="py-8 text-center text-[11px] text-muted-foreground opacity-70">
-                    Nenhuma ordem nesta fase
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory lg:grid lg:grid-cols-3 lg:gap-6 lg:overflow-visible">
+          {BOARD_COLUMNS.map((col) => {
+            const items = grouped.get(col.key) ?? [];
+            return (
+              <DroppableColumn
+                key={col.key}
+                col={col}
+                items={items}
+                onOpen={onOpen}
+                onChangeStatus={requestChangeStatus}
+              />
+            );
+          })}
+        </div>
 
+        <DragOverlay dropAnimation={{ duration: 180, easing: "cubic-bezier(0.18, 0.67, 0.6, 1.22)" }}>
+          {activeDragOrder ? (
+            <div className="w-[310px] transform rotate-1 scale-[1.02] shadow-2xl ring-2 ring-primary/60 rounded-xl cursor-grabbing pointer-events-none opacity-95">
+              <OrderCardContent
+                order={activeDragOrder}
+                onOpen={() => {}}
+                onChangeStatus={() => {}}
+                isOverlay
+              />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+
+      {/* Modal de Pausa */}
       <Dialog
         open={pauseModal.open}
         onOpenChange={(o) => {
           if (!o) setPauseModal({ open: false, order: null, targetStatus: "paused", reason: "" });
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="w-[95vw] max-w-lg sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Pause className="h-5 w-5 text-amber-600" /> Pausar Ordem de Produção
@@ -437,7 +456,7 @@ export function ProductionBoard({ onOpen }: Props) {
                 id="pause-reason"
                 autoFocus
                 rows={4}
-                placeholder="Ex.: Falta de peça específica, aguardando resposta do cliente, veículo necessita de inspeção complementar…"
+                placeholder="Ex.: Aguardando peça de reposição, pendente validação do cliente, inspeção complementar…"
                 value={pauseModal.reason}
                 onChange={(e) =>
                   setPauseModal((m) => ({ ...m, reason: e.target.value }))
@@ -447,40 +466,103 @@ export function ProductionBoard({ onOpen }: Props) {
                 O motivo será salvo nas observações internas da ordem.
               </p>
             </div>
-            <div className="rounded-lg border border-dashed border-slate-400/40 bg-slate-50/60 p-3 dark:bg-slate-900/40">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="w-full gap-2 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400"
-                onClick={returnToBudget}
-                disabled={remove.isPending}
-              >
-                <Undo2 className="h-4 w-4" /> Retornar ao orçamento
-              </Button>
-              <p className="pt-1.5 text-[11px] text-muted-foreground text-center">
-                Retira a ordem da Produção e devolve para Orçamentos como <strong>Rascunho editável</strong>.
-              </p>
-            </div>
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between sm:gap-2">
             <Button
               type="button"
               variant="outline"
-              onClick={() =>
-                setPauseModal({ open: false, order: null, targetStatus: "paused", reason: "" })
-              }
+              size="sm"
+              onClick={returnToBudget}
+              className="text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+            >
+              <Undo2 className="h-3.5 w-3.5 mr-1" /> Retornar a Orçamento (Rascunho)
+            </Button>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setPauseModal({ open: false, order: null, targetStatus: "paused", reason: "" })
+                }
+              >
+                Cancelar
+              </Button>
+              <Button
+                size="sm"
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={confirmPause}
+                disabled={!pauseModal.reason.trim() || update.isPending}
+              >
+                {update.isPending ? "Salvando…" : "Confirmar Pausa"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Confirmação de Finalização */}
+      <Dialog
+        open={finalizeModal.open}
+        onOpenChange={(o) => {
+          if (!o && !finalize.isPending) setFinalizeModal({ open: false, order: null });
+        }}
+      >
+        <DialogContent className="w-[95vw] max-w-md sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-5 w-5" /> Finalizar e Entregar Ordem
+            </DialogTitle>
+            <DialogDescription>
+              Esta ação encerra a produção operacional da ordem e gera o registro comercial oficial no WEEKLOG.
+            </DialogDescription>
+          </DialogHeader>
+          {finalizeModal.order ? (
+            <div className="rounded-lg border border-border/70 bg-muted/40 p-3 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Código OS:</span>
+                <span className="font-semibold">{finalizeModal.order.code || finalizeModal.order.id}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Cliente:</span>
+                <span className="font-medium">{finalizeModal.order.client_name || finalizeModal.order.clientName || "—"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Veículo:</span>
+                <span className="font-medium">{[finalizeModal.order.brand, finalizeModal.order.model].filter(Boolean).join(" ") || "—"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Valor:</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  {formatCanonicalCurrency(
+                    finalizeModal.order.total ?? finalizeModal.order.total_amount ?? finalizeModal.order.recognized_total,
+                    finalizeModal.order.currency || finalizeModal.order.currency_code || finalizeModal.order.currencyCode || "EUR"
+                  )}
+                </span>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={finalize.isPending}
+              onClick={() => setFinalizeModal({ open: false, order: null })}
             >
               Cancelar
             </Button>
             <Button
-              type="button"
-              onClick={confirmPause}
-              disabled={!pauseModal.reason.trim() || update.isPending}
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+              disabled={finalize.isPending}
+              onClick={confirmFinalizeOrder}
             >
-              {update.isPending ? "Salvando…" : (
+              {finalize.isPending ? (
                 <>
-                  <Play className="mr-2 h-4 w-4" /> Confirmar pausa
+                  <Loader2 className="h-4 w-4 animate-spin" /> Finalizando…
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4" /> Confirmar Finalização
                 </>
               )}
             </Button>
@@ -491,7 +573,76 @@ export function ProductionBoard({ onOpen }: Props) {
   );
 }
 
-function OrderCard({
+function DroppableColumn({
+  col,
+  items,
+  onOpen,
+  onChangeStatus,
+}: {
+  col: BoardColumn;
+  items: ProductionOrder[];
+  onOpen: (o: ProductionOrder) => void;
+  onChangeStatus: (order: ProductionOrder, next: ProductionStatus) => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: col.key,
+  });
+  const Icon = col.icon;
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex min-w-[290px] max-w-[340px] flex-1 shrink-0 snap-start flex-col rounded-xl border p-3 transition-all duration-200 lg:min-w-0 lg:max-w-none ${
+        isOver
+          ? "border-primary ring-2 ring-primary/50 bg-primary/5 shadow-md"
+          : "border-border/70 bg-card/60 dark:bg-slate-900/40"
+      }`}
+    >
+      {/* Header com fundo 100% opaco para eliminar sobreposição de texto de cards */}
+      <div className="sticky top-0 z-20 mb-3 flex items-start justify-between gap-2 rounded-lg bg-card border border-border/80 px-3 py-2.5 shadow-xs">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${col.accent}`}
+          >
+            <Icon className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${col.dot}`} />
+              <h3 className="text-sm font-semibold leading-none tracking-tight">
+                {col.label}
+              </h3>
+            </div>
+            <p className="mt-1 truncate text-[10px] text-muted-foreground">
+              {col.description}
+            </p>
+          </div>
+        </div>
+        <Badge variant="secondary" className="shrink-0 text-xs tabular-nums">
+          {items.length}
+        </Badge>
+      </div>
+
+      <div className="space-y-3 overflow-y-auto max-h-[calc(100vh-270px)] pr-1 min-h-[160px]">
+        {items.map((o) => (
+          <DraggableOrderCard
+            key={o.id}
+            order={o}
+            onOpen={onOpen}
+            onChangeStatus={(next) => onChangeStatus(o, next)}
+          />
+        ))}
+        {items.length === 0 && (
+          <div className="py-12 text-center text-xs text-muted-foreground/70 border-2 border-dashed border-border/40 rounded-lg">
+            Nenhuma ordem nesta fase
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DraggableOrderCard({
   order,
   onOpen,
   onChangeStatus,
@@ -499,6 +650,50 @@ function OrderCard({
   order: ProductionOrder;
   onOpen: (o: ProductionOrder) => void;
   onChangeStatus: (next: ProductionStatus) => void;
+}) {
+  const locked = isOrderLocked(order.status);
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: order.id,
+    disabled: locked,
+    data: { order },
+  });
+
+  const style = transform
+    ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+      }
+    : undefined;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`touch-none ${isDragging ? "opacity-30 scale-95 transition-opacity" : "transition-transform"}`}
+      {...attributes}
+      {...listeners}
+    >
+      <OrderCardContent
+        order={order}
+        onOpen={onOpen}
+        onChangeStatus={onChangeStatus}
+        isDragging={isDragging}
+      />
+    </div>
+  );
+}
+
+function OrderCardContent({
+  order,
+  onOpen,
+  onChangeStatus,
+  isDragging,
+  isOverlay,
+}: {
+  order: ProductionOrder;
+  onOpen: (o: ProductionOrder) => void;
+  onChangeStatus: (next: ProductionStatus) => void;
+  isDragging?: boolean;
+  isOverlay?: boolean;
 }) {
   const safePriority: (typeof PRIORITY_META)[ProductionPriority] =
     PRIORITY_META[order.priority as ProductionPriority] ?? PRIORITY_META.normal;
@@ -538,16 +733,16 @@ function OrderCard({
 
   return (
     <Card
-      draggable={!locked}
-      onDragStart={(e) => {
-        try {
-          e.dataTransfer.setData("text/plain", order.id ?? "");
-        } catch {
-          /* noop */
-        }
+      onClick={() => {
+        if (!isDragging && !isOverlay) onOpen(order);
       }}
-      onClick={() => onOpen(order)}
-      className="cursor-pointer space-y-3 overflow-hidden border-border/60 p-3 transition-all hover:border-primary/40 hover:shadow-md [&[draggable=false]]:opacity-80"
+      className={`space-y-3 overflow-hidden border-border/70 p-3 transition-all select-none ${
+        isOverlay
+          ? "border-primary bg-card shadow-2xl"
+          : locked
+          ? "opacity-85 cursor-pointer bg-card/90"
+          : "cursor-grab active:cursor-grabbing hover:border-primary/50 hover:shadow-md bg-card"
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -644,6 +839,9 @@ function OrderCard({
           onClick={(e) => {
             e.stopPropagation();
           }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+          }}
         >
           {validTransitions.length > 0 ? (
             <Popover>
@@ -657,7 +855,7 @@ function OrderCard({
                   Mover
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-56 p-2">
+              <PopoverContent align="end" className="w-56 p-2 z-50">
                 <div className="space-y-1.5 text-xs">
                   <p className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Ação de Status

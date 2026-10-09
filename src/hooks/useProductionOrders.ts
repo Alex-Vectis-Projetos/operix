@@ -189,6 +189,9 @@ export function useProductionOrders(filters?: { technicianOnly?: boolean; status
       qc.invalidateQueries({ queryKey: ["service_orders"] });
       toast.success("Ordem de produção finalizada com sucesso.");
     },
+    onError: (e: any) => {
+      toast.error(e?.message || "Falha ao finalizar ordem de produção.");
+    },
   });
 
   return { ...query, create, update, remove, finalize };

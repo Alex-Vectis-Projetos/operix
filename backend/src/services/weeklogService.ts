@@ -351,9 +351,33 @@ export async function finalizeProductionOrder(
         }
 
         if (!currentPo.operationalSiteKey) {
-          throw new UnprocessableEntityError(
-            "OPERATIONAL_SITE_REQUIRED: Ordem de produção sem local operacional (siteKey)."
-          );
+          const fallbackPoWithSite = await tx.productionOrder.findFirst({
+            where: {
+              workspaceId: currentPo.workspaceId,
+              clientId: currentPo.clientId,
+              operationalSiteKey: { not: null },
+            },
+            select: { operationalSiteKey: true },
+          });
+
+          const clientSnap = (currentPo.budgetRevision?.clientSnapshot as any) || {};
+          const dossierSnap = (currentPo.budgetRevision?.dossierSnapshot as any) || {};
+
+          const resolvedSiteKey =
+            fallbackPoWithSite?.operationalSiteKey ||
+            (currentPo.budget as any)?.operationalSiteKey ||
+            (currentPo.budget as any)?.siteKey ||
+            dossierSnap.operationalSiteKey ||
+            dossierSnap.siteKey ||
+            clientSnap.operationalSiteKey ||
+            clientSnap.siteKey ||
+            "MAIN";
+
+          await tx.productionOrder.update({
+            where: { id: currentPo.id },
+            data: { operationalSiteKey: resolvedSiteKey },
+          });
+          currentPo.operationalSiteKey = resolvedSiteKey;
         }
 
         // Step 1.7: Currency resolution & Budget lineage validation
