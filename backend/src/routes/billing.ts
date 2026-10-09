@@ -115,7 +115,7 @@ const adminPaymentUpsertSchema = z.object({
   notes: z.string().max(2_000).optional().nullable(),
   status: z.enum(["pending", "confirmed", "failed", "refunded"]),
   account: z.string().max(255).optional().nullable(),
-  proof_path: z.string().max(2_000_000).optional().nullable(),
+  proof_path: z.string().max(25_000_000).optional().nullable(),
   proof_name: z.string().max(255).optional().nullable(),
 });
 
@@ -2485,6 +2485,44 @@ billingRouter.get("/admin/payments", async (req: AuthenticatedRequest, res: Resp
         };
       }),
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+billingRouter.get("/admin/payments/:id/receipt", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!isAuthorizedAdminOrManager(req)) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!id) return res.status(400).json({ message: "ID do pagamento obrigatório." });
+    const payment = await prisma.manualBankTransfer.findUnique({
+      where: { id },
+      select: { proofPath: true, proofName: true },
+    });
+
+    if (!payment || !payment.proofPath) {
+      return res.status(404).json({ message: "Comprovante não encontrado." });
+    }
+
+    if (payment.proofPath.startsWith("data:")) {
+      const match = payment.proofPath.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) {
+        return res.status(400).json({ message: "Formato de comprovante inválido." });
+      }
+      const contentType = match[1];
+      const buffer = Buffer.from(match[2], "base64");
+      res.setHeader("Content-Type", contentType);
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${encodeURIComponent(payment.proofName || "comprovante")}"`
+      );
+      return res.send(buffer);
+    }
+
+    return res.redirect(payment.proofPath);
   } catch (error) {
     return next(error);
   }

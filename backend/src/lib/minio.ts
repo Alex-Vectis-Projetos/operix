@@ -145,6 +145,14 @@ export async function getPresignedDownloadUrl(
 export const ALLOWED_STORAGE_BUCKETS = [
   "production-photos",
   "uploads",
+  "avatars",
+  "hail-reports",
+  "marketplace",
+  "logos",
+  "accounting-receipts",
+  "billing-receipts",
+  "payment-proofs",
+  "invoice-pdfs",
 ] as const;
 
 export type AllowedStorageBucket = (typeof ALLOWED_STORAGE_BUCKETS)[number];

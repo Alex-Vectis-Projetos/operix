@@ -37,6 +37,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/api";
+import { openOrDownloadFile } from "@/lib/storage";
 
 type PaymentStatus = "pending" | "confirmed" | "failed" | "refunded";
 type Attachment = {
@@ -328,12 +329,12 @@ export default function PaymentsScreen() {
     }
   };
 
-  const openReceipt = async (att: Attachment) => {
+  const openReceipt = (att: Attachment, forceDownload = false) => {
     if (!att.signed_url) {
       toast({ title: "Não foi possível abrir comprovante", variant: "destructive" });
       return;
     }
-    window.open(att.signed_url, "_blank");
+    openOrDownloadFile(att.signed_url, att.file_name || "comprovante", forceDownload);
   };
 
   // Export CSV
@@ -597,9 +598,17 @@ export default function PaymentsScreen() {
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-medium">{fmt(p.amount)}</TableCell>
                       <TableCell><StatusBadge status={p.status} /></TableCell>
-                      <TableCell className="text-center">
+                      <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
                         {att.length > 0 ? (
-                          <FileText className="h-3.5 w-3.5 text-primary inline" />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-primary hover:bg-primary/10"
+                            title={`Abrir comprovante: ${att[0].file_name}`}
+                            onClick={() => openReceipt(att[0], false)}
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                          </Button>
                         ) : (
                           <span className="text-muted-foreground/40">—</span>
                         )}
@@ -615,6 +624,16 @@ export default function PaymentsScreen() {
                             <DropdownMenuItem onClick={() => setDetailId(p.id)}>
                               <Eye className="h-3.5 w-3.5 mr-2" />Detalhes
                             </DropdownMenuItem>
+                            {att.length > 0 && (
+                              <>
+                                <DropdownMenuItem onClick={() => openReceipt(att[0], false)}>
+                                  <FileText className="h-3.5 w-3.5 mr-2 text-primary" />Ver comprovante
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openReceipt(att[0], true)}>
+                                  <Download className="h-3.5 w-3.5 mr-2" />Descarregar comprovante
+                                </DropdownMenuItem>
+                              </>
+                            )}
                             <DropdownMenuItem onClick={() => openEdit(p)}>
                               <Pencil className="h-3.5 w-3.5 mr-2" />Editar
                             </DropdownMenuItem>
@@ -764,9 +783,12 @@ export default function PaymentsScreen() {
 
             <div className="col-span-2 space-y-1.5">
               <Label className="text-xs flex items-center gap-1.5">
-                <Upload className="h-3.5 w-3.5" /> Comprovante (PDF / imagem)
+                <Upload className="h-3.5 w-3.5" /> Comprovante (PDF, imagem, CSV, JSON, TXT, Excel)
               </Label>
-              <Input type="file" accept="image/*,application/pdf" className="h-9 text-xs"
+              <Input
+                type="file"
+                accept="image/*,application/pdf,.csv,.json,.txt,.xml,.xlsx,.xls"
+                className="h-9 text-xs"
                 onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
               />
               {receiptFile && (
@@ -850,16 +872,29 @@ export default function PaymentsScreen() {
                 ) : (
                   <div className="space-y-1.5">
                     {detailAttachments.map((a) => (
-                      <button key={a.id}
-                        onClick={() => openReceipt(a)}
-                        className="w-full text-left text-xs px-2 py-1.5 rounded border border-border/50 hover:bg-accent/50 flex items-center gap-2 transition"
-                      >
-                        <FileText className="h-3.5 w-3.5 text-primary" />
-                        <span className="flex-1 truncate">{a.file_name}</span>
-                        <span className="text-muted-foreground text-[10px]">
-                          {a.size_bytes ? `${(a.size_bytes / 1024).toFixed(0)} KB` : ""}
-                        </span>
-                      </button>
+                      <div key={a.id} className="flex items-center gap-1.5 w-full">
+                        <button
+                          type="button"
+                          onClick={() => openReceipt(a, false)}
+                          className="flex-1 text-left text-xs px-2.5 py-2 rounded border border-border/50 hover:bg-accent/50 flex items-center gap-2 transition min-w-0"
+                          title="Visualizar comprovante"
+                        >
+                          <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                          <span className="flex-1 truncate">{a.file_name}</span>
+                          <span className="text-muted-foreground text-[10px] shrink-0">
+                            {a.size_bytes ? `${(a.size_bytes / 1024).toFixed(0)} KB` : ""}
+                          </span>
+                        </button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 border-border/50 hover:bg-accent/50"
+                          onClick={() => openReceipt(a, true)}
+                          title="Descarregar ficheiro"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     ))}
                   </div>
                 )}

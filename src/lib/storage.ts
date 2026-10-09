@@ -67,3 +67,72 @@ export async function deleteFiles(bucket: string, paths: string[]): Promise<void
     throw new Error((body as { message?: string }).message ?? "Erro ao deletar arquivo(s).");
   }
 }
+
+/**
+ * Abre ou descarrega arquivos com segurança cross-browser.
+ * Resolve a restrição de segurança dos navegadores Chromium (Chrome/Edge/Brave) que bloqueiam
+ * a abertura direta de Data URLs (data:application/pdf ou data:image) via window.open().
+ * Converte Data URLs para Blob URLs gerenciadas ou faz download direto.
+ */
+export function openOrDownloadFile(
+  urlOrData: string,
+  fileName = "documento",
+  forceDownload = false
+): void {
+  if (!urlOrData) return;
+
+  if (urlOrData.startsWith("data:")) {
+    try {
+      const parts = urlOrData.split(";base64,");
+      const contentType = parts[0].replace("data:", "") || "application/octet-stream";
+      const base64Data = parts[1] || "";
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Uint8Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const blob = new Blob([byteNumbers], { type: contentType });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const isViewable =
+        !forceDownload &&
+        (contentType.startsWith("image/") ||
+          contentType === "application/pdf" ||
+          contentType.startsWith("text/"));
+
+      if (isViewable) {
+        const win = window.open(blobUrl, "_blank");
+        if (win) {
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+          return;
+        }
+      }
+
+      // Se pop-up bloqueado ou download forçado ou outro formato (CSV, JSON, etc.):
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+      return;
+    } catch (err) {
+      console.error("[openOrDownloadFile] Falha ao decodificar Data URL:", err);
+    }
+  }
+
+  // URL regular (HTTP/HTTPS)
+  if (forceDownload) {
+    const a = document.createElement("a");
+    a.href = urlOrData;
+    a.download = fileName;
+    a.target = "_blank";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } else {
+    window.open(urlOrData, "_blank", "noopener,noreferrer");
+  }
+}
+

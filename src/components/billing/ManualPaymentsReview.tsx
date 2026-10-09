@@ -13,6 +13,7 @@ import {
   useAdminPendingTransfers, useApproveManualTransfer, useRejectManualTransfer,
   signedProofUrl, statusMeta,
 } from "@/hooks/useManualPayments";
+import { openOrDownloadFile } from "@/lib/storage";
 
 function fmtMoney(v: number, c = "EUR") {
   return new Intl.NumberFormat("pt-PT", { style: "currency", currency: c }).format(v);
@@ -42,10 +43,10 @@ export function ManualPaymentsReview() {
     }
   };
 
-  const openProof = async (path: string) => {
+  const openProof = async (path: string, fileName = "comprovante") => {
     const url = await signedProofUrl(path);
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
-    else toast.error("Não foi possível abrir o comprovante");
+    if (!url) return toast.error("Não foi possível abrir o comprovante");
+    openOrDownloadFile(url, fileName);
   };
 
   if (isLoading) return <LoadingState variant="cards" />;
