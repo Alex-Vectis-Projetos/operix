@@ -3041,7 +3041,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
         where: { id: siteScopedUser },
         create: {
           id: siteScopedUser,
-          email: "site-scoped@client.com",
+          email: "site-scoped-inv@client.com",
           fullName: "Site Scoped Viewer",
           role: "user",
           passwordHash: "x",
@@ -3056,7 +3056,7 @@ describe("Spec 006 / Phase 1 — Business Flow Reconciliation Acceptance Suite",
           data: {
             id: siteScopedApp,
             authUserId: siteScopedUser,
-            email: "site-scoped@client.com",
+            email: "site-scoped-inv@client.com",
             workspaceId: fixture.workspaceA,
           },
         });
