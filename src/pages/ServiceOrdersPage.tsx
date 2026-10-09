@@ -53,6 +53,7 @@ export default function ServiceOrdersPage() {
 
   const [extractions, setExtractions] = useState<(ExtractionResult & { _id: string; _file?: File; _documentId?: string; _docState: DocumentVisualState; _ocrVersion: number })[]>([]);
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const { data: orders = [], isLoading } = useServiceOrders({});
   const { extract } = useExtractServiceOrder();
   const { data: clients = [] } = useClients();
@@ -120,16 +121,16 @@ export default function ServiceOrdersPage() {
     });
   }, [addFiles, extract, user?.id, queryClient, hCtx, t]);
 
-  const handleSave = async (extractionId: string, rows: ExtractedOrder[], opts?: { isPrivate?: boolean }) => {
+  const handleSave = async (extractionId: string, rows: ExtractedOrder[], _opts?: { isPrivate?: boolean }) => {
     const extraction = extractions.find((e) => e._id === extractionId);
     const authUser = await getCurrentUser();
     if (!authUser?.id) {
       toast.error("Sessão expirada. Faça login novamente antes de salvar.", { duration: 7000 });
       return;
     }
-    const inserts: ServiceOrderInsert[] = [];
+
     const missingUserRows: number[] = [];
-    rows.forEach((r, idx) => {
+    const formattedRows = rows.map((r, idx) => {
       const clientMatch = clients.find((c) => c.name.toLowerCase() === r.client?.toLowerCase());
       const rawTech = (r.technician ?? "").trim();
       const techByUser = technicians.find((t) => t.user_id === rawTech);
@@ -138,60 +139,49 @@ export default function ServiceOrdersPage() {
         : undefined;
       const techMatch = techByUser ?? techByName;
       let technicianName: string = techMatch?.name ?? rawTech;
-      if (!canAssignAnyTechnician) {
-        const me = technicians.find((t) => t.user_id === authUser.id);
-        if (me) technicianName = me.name;
-      } else if (techByUser) {
-        technicianName = techByUser.name;
-      }
-      const selectedUser = techByUser ?? techByName ?? null;
-      const ctxDefaults = hierarchyDefaults(hCtx);
-      const payload: Record<string, any> = {
-        client_id: clientMatch?.id || null,
-        client_name: r.client?.trim() || clientMatch?.name || ctxDefaults.client || "",
-        technician_name: technicianName,
-        technician_id: null,
-        platform: r.platform ?? ctxDefaults.platform ?? null,
-        week: r.week ?? ctxDefaults.week ?? null,
-        operational_unit: ctxDefaults.operational_unit ?? null,
-        car_name: r.car_name ?? null,
-        license_plate: r.license_plate ? formatLicensePlate(r.license_plate) : null,
-        service_1_name: r.service_1_name ?? null,
-        service_1_price: r.service_1_price ?? null,
-        service_2_name: r.service_2_name ?? null,
-        service_2_price: r.service_2_price ?? null,
-        service_3_name: r.service_3_name ?? null,
-        service_3_price: r.service_3_price ?? null,
-        service_4_name: r.service_4_name ?? null,
-        service_4_price: r.service_4_price ?? null,
-        total: r.total ?? null,
-        status: "draft",
-        group_id: r.week ?? ctxDefaults.week ?? null,
-        // Ownership: private OS skip workspace linkage; collective OS bind to workspace.
-        visibility_scope: opts?.isPrivate ? "private" : "workspace",
-        ...(opts?.isPrivate ? { workspace_id: null } : (ctxWs.resolvedWorkspaceId ? { workspace_id: ctxWs.resolvedWorkspaceId } : {})),
-      };
-      // Contexto operacional SEMPRE prevalece sobre o ano atual.
-      if (ctxDefaults.year) {
-        const y = parseInt(ctxDefaults.year, 10);
-        const d = new Date();
-        d.setFullYear(y);
-        payload.created_at = d.toISOString();
-      }
-      const techName = payload.technician_name || r.technician;
-      const techEarn = getTechEarnings(techName, payload.total, earningsMap);
-      payload.technician_percentage = techEarn?.percentage ?? 0;
-      payload.technician_earning = techEarn?.earnings ?? 0;
       let finalUserId: string = authUser.id;
-      if (canAssignAnyTechnician) finalUserId = selectedUser?.user_id ?? "";
-      if (!canAssignAnyTechnician && finalUserId !== authUser.id) {
-        throw new Error("RLS violation prevention: invalid user_id");
+      if (canAssignAnyTechnician) {
+        finalUserId = techMatch?.user_id ?? (isTechnicianRole ? authUser.id : "");
       }
-      if (!finalUserId) missingUserRows.push(idx + 1);
-      payload.user_id = finalUserId;
-      payload.assigned_user_id = finalUserId;
-      inserts.push(payload as ServiceOrderInsert);
+      if (!finalUserId) {
+        missingUserRows.push(idx + 1);
+      }
+
+      const services: Array<{ code?: string; description: string; amount: number; quantity?: number }> = [];
+      if (r.service_1_name || (r.service_1_price && r.service_1_price > 0)) {
+        services.push({ description: r.service_1_name || "Serviço 1", amount: r.service_1_price || 0 });
+      }
+      if (r.service_2_name || (r.service_2_price && r.service_2_price > 0)) {
+        services.push({ description: r.service_2_name || "Serviço 2", amount: r.service_2_price || 0 });
+      }
+      if (r.service_3_name || (r.service_3_price && r.service_3_price > 0)) {
+        services.push({ description: r.service_3_name || "Serviço 3", amount: r.service_3_price || 0 });
+      }
+      if (r.service_4_name || (r.service_4_price && r.service_4_price > 0)) {
+        services.push({ description: r.service_4_name || "Serviço 4", amount: r.service_4_price || 0 });
+      }
+      if (services.length === 0 && (r.total && r.total > 0)) {
+        services.push({ description: "Serviço Geral", amount: r.total });
+      }
+
+      const ctxDefaults = hierarchyDefaults(hCtx);
+      return {
+        clientId: clientMatch?.id || null,
+        clientName: r.client?.trim() || clientMatch?.name || ctxDefaults.client || "Cliente",
+        technicianUserId: finalUserId,
+        technicianName: technicianName || authUser.email || "",
+        carName: r.car_name ?? null,
+        licensePlate: r.license_plate ? formatLicensePlate(r.license_plate) : null,
+        vin: null,
+        operationalSiteKey: r.platform ?? ctxDefaults.platform ?? "GERAL",
+        platform: r.platform ?? ctxDefaults.platform ?? "GERAL",
+        week: r.week ?? ctxDefaults.week ?? null,
+        year: ctxDefaults.year ?? null,
+        services,
+        total: r.total ?? 0,
+      };
     });
+
     if (missingUserRows.length > 0) {
       const msg = isTechnicianRole
         ? "Sua conta não está autenticada. Faça login novamente antes de salvar."
@@ -199,10 +189,42 @@ export default function ServiceOrdersPage() {
       toast.error(msg, { duration: 7000 });
       return;
     }
-    toast.error(
-      "A gravação direta de Ordens de Serviço legadas foi descontinuada (T08). O fluxo canônico de importação e confronto OCR será integrado na Spec 004.",
-      { duration: 8000 }
-    );
+
+    setIsSaving(true);
+    try {
+      let fileBase64: string | null = null;
+      if (extraction?._file) {
+        const buffer = await extraction._file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        fileBase64 = btoa(binary);
+      }
+
+      await apiRequest("/api/external-operational-imports/materialize-staged", {
+        method: "POST",
+        body: JSON.stringify({
+          fileName: extraction?._file?.name || "folha_weeklog.pdf",
+          mimeType: extraction?._file?.type || "application/pdf",
+          fileBase64,
+          documentId: extraction?._documentId || null,
+          rows: formattedRows,
+        }),
+      });
+
+      toast.success("WEEKLOG e Lista de Pagamento gerados com sucesso!");
+      handleDiscard(extractionId);
+      queryClient.invalidateQueries({ queryKey: ["weeklogs"] });
+      queryClient.invalidateQueries({ queryKey: ["payment-lists"] });
+      queryClient.invalidateQueries({ queryKey: ["service_orders"] });
+      queryClient.invalidateQueries({ queryKey: ["embedded-docs"] });
+    } catch (err: any) {
+      toast.error(err?.message || "Falha ao materializar WEEKLOG externo.", { duration: 8000 });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDiscard = (extractionId: string) => {
@@ -335,7 +357,7 @@ export default function ServiceOrdersPage() {
                 notes={extraction.notes}
                 onSave={(rows, opts) => handleSave(extraction._id, rows, opts)}
                 onDiscard={() => handleDiscard(extraction._id)}
-                isSaving={false}
+                isSaving={isSaving}
                 technicians={technicians}
                 isTechnicianRole={isTechnicianRole}
                 isAdmin={canAssignAnyTechnician}

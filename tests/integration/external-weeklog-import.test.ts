@@ -690,5 +690,75 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
       expect((validations[0]!.coverageSnapshot as any).sourceImportId).toBe("historic-import");
       expect((validations[1]!.coverageSnapshot as any).sourceImportId).toBe(importId);
     });
+
+    it("MATERIALIZE-STAGED-01: Materialização direta de linhas de staging revisadas com validação formal e draft comercial", async () => {
+      const deliveredAt = new Date("2026-09-22T14:30:00.000Z");
+      const res = await fetch(`${baseUrl}/api/external-operational-imports/materialize-staged`, {
+        method: "POST",
+        headers: getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha),
+        body: JSON.stringify({
+          fileName: "folha_fisica_assinada.pdf",
+          mimeType: "application/pdf",
+          rows: [
+            {
+              clientId: FIXTURES_004_WEEKLOG.clientA.id,
+              technicianUserId: FIXTURES_004_WEEKLOG.activeTechnician.userId,
+              carName: "CITROEN C3",
+              licensePlate: "AA-99-ZZ",
+              operationalSiteKey: "SITE-PDR-01",
+              deliveredAt: deliveredAt.toISOString(),
+              services: [{ code: "PDR", description: "Desamassamento granizo", amount: "250.00", quantity: "1" }],
+              total: "250.00",
+            },
+            {
+              clientId: FIXTURES_004_WEEKLOG.clientA.id,
+              technicianUserId: FIXTURES_004_WEEKLOG.activeTechnician.userId,
+              carName: "PEUGEOT 208",
+              licensePlate: null, // Test empty plate with vehicle identified by carName
+              vin: null,
+              operationalSiteKey: "SITE-PDR-01",
+              deliveredAt: deliveredAt.toISOString(),
+              services: [{ code: "PDR", description: "PDR Porta Dianteira", amount: "180.00", quantity: "1" }],
+              total: "180.00",
+            },
+          ],
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const data = await res.json();
+      expect(data.status).toBe("committed");
+      expect(data.weeklogId).toBeDefined();
+      expect(data.entries).toHaveLength(2);
+
+      // Verify no ProductionOrders were created
+      const poCount = await prisma.productionOrder.count({ where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha } });
+      expect(poCount).toBe(0);
+
+      // Verify entries have sourceType = external_import and productionOrderId = null
+      const entries = await prisma.weeklogEntry.findMany({ where: { weeklogId: data.weeklogId } });
+      expect(entries).toHaveLength(2);
+      for (const entry of entries) {
+        expect(entry.sourceType).toBe("external_import");
+        expect(entry.productionOrderId).toBeNull();
+        expect(entry.validationStatus).toBe("approved");
+        expect(entry.externalImportItemId).toBeDefined();
+      }
+
+      // Verify formal WeeklogValidation with validationMethod = external_import_review
+      const validation = await prisma.weeklogValidation.findFirstOrThrow({ where: { weeklogId: data.weeklogId } });
+      expect(validation.validationMethod).toBe("external_import_review");
+      expect(validation.status).toBe("validated");
+      expect((validation.coverageSnapshot as any).sourceType).toBe("external_import");
+
+      // Verify draft PaymentList was automatically created
+      const draftList = await prisma.paymentList.findFirst({
+        where: { workspaceId: FIXTURES_004_WEEKLOG.wsAlpha, originWeeklogValidationId: validation.id },
+        include: { items: true },
+      });
+      expect(draftList).not.toBeNull();
+      expect(draftList?.status).toBe("draft");
+      expect(draftList?.items).toHaveLength(2);
+    });
   });
 });

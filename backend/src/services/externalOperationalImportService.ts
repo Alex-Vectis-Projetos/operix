@@ -58,14 +58,20 @@ function assertImportManager(ctx: RequestContext): void {
 
 function normalizePlate(value: string | null | undefined): string | null | undefined {
   if (value === undefined || value === null) return value;
-  const normalized = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (!normalized || normalized.length < 5 || normalized.length > 16) throw new UnprocessableEntityError("REVIEWED_LICENSE_PLATE_INVALID");
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+  if (!normalized) return null;
+  if (normalized.length < 2 || normalized.length > 20) throw new UnprocessableEntityError("REVIEWED_LICENSE_PLATE_INVALID");
   return normalized;
 }
 
 function normalizeVin(value: string | null | undefined): string | null | undefined {
   if (value === undefined || value === null) return value;
-  const normalized = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!normalized) return null;
   if (!/^[A-HJ-NPR-Z0-9]{11,17}$/.test(normalized)) throw new UnprocessableEntityError("REVIEWED_VIN_INVALID");
   return normalized;
 }
@@ -73,6 +79,7 @@ function normalizeVin(value: string | null | undefined): string | null | undefin
 function completeOperationalRow(row: {
   reviewedLicensePlate: string | null;
   reviewedVin: string | null;
+  reviewedCarName?: string | null;
   reviewedClientId: string | null;
   reviewedCurrencyCode: string | null;
   reviewedOperationalSiteKey: string | null;
@@ -82,7 +89,7 @@ function completeOperationalRow(row: {
   reviewedTotal: Prisma.Decimal | null;
 }): boolean {
   return Boolean(
-    (row.reviewedLicensePlate || row.reviewedVin) && row.reviewedClientId && row.reviewedCurrencyCode &&
+    (row.reviewedLicensePlate || row.reviewedVin || row.reviewedCarName) && row.reviewedClientId && row.reviewedCurrencyCode &&
     row.reviewedOperationalSiteKey && row.reviewedTechnicianUserId && row.reviewedDeliveredAt &&
     row.reviewedServices && row.reviewedTotal?.isPositive(),
   );
@@ -388,12 +395,14 @@ async function validateReviewedOperationalRows(
     // Recheck vehicle identity as it is a security-sensitive reviewed value.
     normalizePlate(row.reviewedLicensePlate);
     normalizeVin(row.reviewedVin);
-    if (!row.reviewedLicensePlate && !row.reviewedVin) throw new UnprocessableEntityError("REVIEWED_VEHICLE_IDENTIFIER_REQUIRED");
+    if (!row.reviewedLicensePlate && !row.reviewedVin && !row.reviewedCarName) {
+      throw new UnprocessableEntityError("REVIEWED_VEHICLE_IDENTIFIER_REQUIRED");
+    }
 
     const [client, technician] = await Promise.all([
       tx.client.findFirst({ where: { id: row.reviewedClientId, workspaceId: ws, deletedAt: null }, select: { id: true, name: true } }),
       tx.appUser.findFirst({
-        where: { authUserId: row.reviewedTechnicianUserId },
+        where: { OR: [{ authUserId: row.reviewedTechnicianUserId }, { id: row.reviewedTechnicianUserId }] },
         include: { user: { select: { fullName: true, isActive: true } }, memberships: { where: { workspaceId: ws, status: "active" }, select: { id: true } } },
       }),
     ]);
@@ -573,3 +582,218 @@ export async function commitReviewedExternalOperationalImport(ctx: RequestContex
     };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
+
+function resolveOperationalDate(
+  deliveredAtInput?: string | Date | null,
+  weekInput?: string | null,
+  yearReference?: number | null,
+): Date {
+  if (deliveredAtInput) {
+    const d = new Date(deliveredAtInput);
+    if (!isNaN(d.getTime())) return d;
+  }
+  if (weekInput) {
+    const m = String(weekInput).match(/(\d{1,2})/);
+    if (m) {
+      const weekNum = parseInt(m[1], 10);
+      const year = yearReference || new Date().getUTCFullYear();
+      const jan1Weekday = new Date(Date.UTC(year, 0, 1)).getUTCDay();
+      const daysToSunday = jan1Weekday === 0 ? 0 : 7 - jan1Weekday;
+      const firstSun = new Date(Date.UTC(year, 0, 1 + daysToSunday));
+      const midWeek = new Date(Date.UTC(firstSun.getUTCFullYear(), firstSun.getUTCMonth(), firstSun.getUTCDate() + (weekNum - 1) * 7 + 3, 12, 0, 0));
+      if (!isNaN(midWeek.getTime())) return midWeek;
+    }
+  }
+  return new Date();
+}
+
+export type StagedRowInput = {
+  clientId?: string | null;
+  clientName?: string | null;
+  technicianUserId: string;
+  technicianName?: string | null;
+  carName?: string | null;
+  licensePlate?: string | null;
+  vin?: string | null;
+  operationalSiteKey?: string | null;
+  platform?: string | null;
+  week?: string | null;
+  year?: number | string | null;
+  deliveredAt?: string | Date | null;
+  services?: Array<{
+    code?: string;
+    description?: string;
+    quantity?: number | string;
+    amount?: number | string;
+    unitPrice?: number | string;
+  }> | null;
+  total?: number | string | null;
+};
+
+export type MaterializeStagedOperationalInput = {
+  fileName: string;
+  mimeType?: string | null;
+  fileBase64?: string | null;
+  documentId?: string | null;
+  rows: StagedRowInput[];
+};
+
+export async function materializeStagedOperationalImport(
+  ctx: RequestContext,
+  input: MaterializeStagedOperationalInput,
+  dependencies: ServiceDependencies = {},
+): Promise<ExternalMaterialization> {
+  assertImportManager(ctx);
+  const ws = workspaceId(ctx);
+
+  if (!input.rows || input.rows.length === 0) {
+    throw new UnprocessableEntityError("IMPORT_STAGED_ROWS_EMPTY");
+  }
+
+  const storage = dependencies.storage ?? minioImportDocumentStorage;
+  const id = randomUUID();
+  let bytes: Buffer | null = null;
+  if (input.fileBase64) {
+    try {
+      bytes = Buffer.from(input.fileBase64, "base64");
+    } catch {
+      bytes = null;
+    }
+  }
+  const fileSha = bytes
+    ? sha256(bytes)
+    : sha256(Buffer.from(JSON.stringify({ fileName: input.fileName, rows: input.rows })));
+  const mimeType: "application/pdf" | "image/png" | "image/jpeg" =
+    input.mimeType === "image/png" || input.mimeType === "image/jpeg" ? input.mimeType : "application/pdf";
+  const key = operationalImportStorageKey(ws, id, input.fileName || "weeklog.pdf");
+
+  if (bytes) {
+    try {
+      await storage.put(key, bytes, mimeType);
+    } catch {
+      // Storage promotion is non-blocking if storage service is optional/local
+    }
+  }
+
+  // Persist import and reviewed items in transaction
+  await prisma.$transaction(async (tx) => {
+    await tx.externalOperationalImport.create({
+      data: {
+        id,
+        workspaceId: ws,
+        fileName: input.fileName || "folha_weeklog.pdf",
+        storagePath: bytes ? key : null,
+        fileSha256: fileSha,
+        mimeType,
+        sizeBytes: bytes ? bytes.length : 0,
+        status: "reviewed",
+        uploadedBy: ctx.actorUserId,
+      },
+    });
+
+    for (const [idx, row] of input.rows.entries()) {
+      // 1. Resolve client
+      let clientId = row.clientId;
+      const clientName = (row.clientName || "").trim();
+      if (clientId) {
+        const existing = await tx.client.findFirst({ where: { id: clientId, workspaceId: ws, deletedAt: null } });
+        if (!existing) clientId = null;
+      }
+      if (!clientId && clientName) {
+        const found = await tx.client.findFirst({
+          where: { workspaceId: ws, name: { equals: clientName, mode: "insensitive" }, deletedAt: null },
+        });
+        if (found) {
+          clientId = found.id;
+        } else {
+          const created = await tx.client.create({
+            data: { workspaceId: ws, name: clientName },
+          });
+          clientId = created.id;
+        }
+      }
+      if (!clientId) {
+        throw new UnprocessableEntityError(`REVIEWED_CLIENT_REQUIRED_ROW_${idx + 1}`);
+      }
+
+      // 2. Resolve technician
+      const techUser = await tx.appUser.findFirst({
+        where: { OR: [{ authUserId: row.technicianUserId }, { id: row.technicianUserId }] },
+        include: { memberships: { where: { workspaceId: ws, status: "active" } } },
+      });
+      const isWorkspaceOwner = await tx.workspace.findFirst({ where: { id: ws, ownerUserId: techUser?.id } });
+      if (!techUser || (!techUser.memberships.length && !isWorkspaceOwner)) {
+        throw new ForbiddenError(`REVIEWED_TECHNICIAN_NOT_IN_WORKSPACE_ROW_${idx + 1}`);
+      }
+      const technicianUserId = techUser.authUserId;
+
+      // 3. Resolve vehicle identity
+      const normPlate = normalizePlate(row.licensePlate) ?? null;
+      const normVin = normalizeVin(row.vin) ?? null;
+      const carName = (row.carName || "").trim() || null;
+      if (!normPlate && !normVin && !carName) {
+        throw new UnprocessableEntityError(`REVIEWED_VEHICLE_IDENTIFIER_REQUIRED_ROW_${idx + 1}`);
+      }
+
+      // 4. Resolve services
+      const servicesList = (row.services || []).map((s) => ({
+        code: s.code || "PDR",
+        description: s.description || "Serviço Operacional",
+        quantity: s.quantity ? String(s.quantity) : "1",
+        amount: s.amount ? String(s.amount) : String(s.unitPrice || "0"),
+      }));
+      const rowTotalDec = parseReviewedDecimal(String(row.total ?? 0));
+      if (!rowTotalDec.isPositive()) {
+        throw new UnprocessableEntityError(`REVIEWED_TOTAL_MUST_BE_POSITIVE_ROW_${idx + 1}`);
+      }
+      if (servicesList.length === 0) {
+        servicesList.push({
+          code: "PDR",
+          description: "Serviço Operacional Geral",
+          quantity: "1",
+          amount: rowTotalDec.toString(),
+        });
+      }
+
+      // 5. Resolve siteKey & deliveredAt
+      const siteKey = (row.operationalSiteKey || row.platform || "GERAL").trim();
+      const yearRef = row.year ? Number(row.year) : null;
+      const deliveredAt = resolveOperationalDate(row.deliveredAt, row.week, yearRef);
+
+      await tx.externalOperationalImportItem.create({
+        data: {
+          workspaceId: ws,
+          importId: id,
+          rawLicensePlate: row.licensePlate ?? null,
+          rawVin: row.vin ?? null,
+          rawCarName: row.carName ?? null,
+          rawClientName: clientName || null,
+          rawCurrencyCode: "EUR",
+          rawOperationalSiteKey: siteKey,
+          rawTechnician: row.technicianName ?? null,
+          rawWeek: row.week ?? null,
+          rawDeliveredAtText: deliveredAt.toISOString(),
+          rawServices: servicesList,
+          rawTotalText: rowTotalDec.toString(),
+          reviewedLicensePlate: normPlate,
+          reviewedVin: normVin,
+          reviewedCarName: carName,
+          reviewedClientId: clientId,
+          reviewedCurrencyCode: "EUR",
+          reviewedOperationalSiteKey: siteKey,
+          reviewedTechnicianUserId: technicianUserId,
+          reviewedDeliveredAt: deliveredAt,
+          reviewedServices: servicesList,
+          reviewedTotal: rowTotalDec,
+          status: "reviewed",
+          reviewedBy: ctx.actorUserId,
+          reviewedAt: new Date(),
+        },
+      });
+    }
+  });
+
+  // Materialize atomically via commitReviewedExternalOperationalImport
+  return commitReviewedExternalOperationalImport(ctx, id);
+}
+

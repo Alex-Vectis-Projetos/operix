@@ -8,6 +8,7 @@ import {
   commitReviewedExternalOperationalImport,
   discardExternalOperationalImport,
   getExternalOperationalImport,
+  materializeStagedOperationalImport,
   retryExternalOperationalExtraction,
   reviewExternalOperationalImport,
 } from "../services/externalOperationalImportService.js";
@@ -41,6 +42,15 @@ function sendError(res: Response, error: unknown): Response {
   }
   return res.status(500).json({ code: "IMPORT_INTERNAL_ERROR", message: "Falha ao processar importação." });
 }
+
+externalOperationalImportsRouter.post("/materialize-staged", async (req: Request, res: Response) => {
+  try {
+    const materialized = await materializeStagedOperationalImport(req.ctx!, req.body);
+    return res.status(materialized.idempotent ? 200 : 201).json(materialized);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
 
 externalOperationalImportsRouter.post("/", upload.single("file"), async (req: Request, res: Response) => {
   try {
