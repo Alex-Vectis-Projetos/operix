@@ -29,6 +29,7 @@ import {
   type ProductionStatus,
 } from "@/hooks/useProductionOrders";
 import { useLanguage } from "@/hooks/useLanguage";
+import { useRole } from "@/hooks/useRole";
 import { LocalBudgetsSyncBanner } from "./LocalBudgetsSyncBanner";
 import { useBudgets } from "@/hooks/useBudgets";
 import {
@@ -80,6 +81,9 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const { lang } = useLanguage();
   const langDisplay = resolveInterventionDisplayLang(lang);
   const queryClient = useQueryClient();
+  const { dbRole, isAdmin, isOwner } = useRole();
+  const canDeleteBudget = isAdmin || isOwner;
+  const isClient = dbRole === "client";
 
   const {
     budgets: apiBudgets,
@@ -550,7 +554,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                               {b.status === "approved" ? "Revisar" : "Editar"}
                             </Button>
                           ) : null}
-                          {b.status === "approved" && !alreadySent ? (
+                          {b.status === "approved" && !alreadySent && !isClient ? (
                             <Button
                               size="sm"
                               variant="outline"
@@ -559,17 +563,19 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                               disabled={approveBudgetMutation.isPending}
                             >
                               <ArrowRightLeft className="h-3.5 w-3.5" />
-                              Enviar p/ Produção
+                              {langDisplay === "fr" ? "Envoyer en Production" : "Enviar p/ Produção"}
                             </Button>
                           ) : null}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => removeBudget(b.id)}
-                          >
-                            Apagar
-                          </Button>
+                          {canDeleteBudget && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => removeBudget(b.id)}
+                            >
+                              {langDisplay === "fr" ? "Supprimer" : "Apagar"}
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

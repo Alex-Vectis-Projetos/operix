@@ -16,6 +16,7 @@ import {
   finalizeProductionOrder,
   type FinalizeProductionOrderOptions,
 } from "../services/weeklogService.js";
+import { sendEmail } from "../lib/email/resend.js";
 
 export const productionOrdersRouter = Router();
 
@@ -1031,6 +1032,10 @@ productionOrdersRouter.patch("/:id/services/:serviceId", async (req: Request, re
       return res.status(403).json({ message: "Workspace ativo não definido." });
     }
 
+    if (ctx.membershipRole === "client") {
+      throw new ForbiddenError("CLIENT_ACCESS_DENIED: Clientes não possuem permissão para executar ou alterar ordens operacionais.");
+    }
+
     const order = await prisma.productionOrder.findUnique({ where: { id } });
     if (!order || order.workspaceId !== ctx.activeWorkspaceId) {
       return res.status(404).json({ message: "Ordem de produção não encontrada." });
@@ -1070,13 +1075,17 @@ productionOrdersRouter.patch("/:id/services/:serviceId", async (req: Request, re
   }
 });
 
-// POST /api/production-orders/:id/request-budget-correction — Pausa OP e gera revisão N+1 no orçamento
+// POST /api/production-orders/:id/request-budget-correction — Pausa OP, gera revisão N+1 no orçamento e notifica responsável
 productionOrdersRouter.post("/:id/request-budget-correction", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params["id"] as string;
     const ctx = req.ctx;
     if (!ctx?.activeWorkspaceId) {
       return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    if (ctx.membershipRole === "client") {
+      throw new ForbiddenError("CLIENT_ACCESS_DENIED: Clientes não possuem permissão para solicitar correção em ordens operacionais.");
     }
 
     const order = await prisma.productionOrder.findUnique({
@@ -1101,56 +1110,154 @@ productionOrdersRouter.post("/:id/request-budget-correction", async (req: Reques
 
     // 2. Se houver orçamento vinculado, cria nova revisão de rascunho (N+1) preservando a aprovada
     let nextRevision: any = null;
+    let budgetRecord: any = null;
     if (order.budgetId) {
-      const budget = await prisma.budget.findUnique({
+      budgetRecord = await prisma.budget.findUnique({
         where: { id: order.budgetId },
         include: { currentRevision: true, approvedRevision: true },
       });
-      if (budget) {
-        const baseRev = budget.approvedRevision || budget.currentRevision;
-        if (baseRev) {
-          const latestRev = await prisma.budgetRevision.findFirst({
-            where: { budgetId: budget.id },
-            orderBy: { revisionNumber: "desc" },
-          });
-          const nextRevNumber = (latestRev?.revisionNumber ?? 1) + 1;
-          nextRevision = await prisma.budgetRevision.create({
-            data: {
-              budgetId: budget.id,
-              revisionNumber: nextRevNumber,
-              status: "draft",
-              budgetType: baseRev.budgetType,
-              netTotal: baseRev.netTotal,
-              interventionTypes: baseRev.interventionTypes,
-              currencyCode: baseRev.currencyCode,
-              grossTotal: baseRev.grossTotal,
-              discountPct: baseRev.discountPct,
-              discountTotal: baseRev.discountTotal,
-              taxPct: baseRev.taxPct,
-              taxTotal: baseRev.taxTotal,
-              finalTotal: baseRev.finalTotal,
-              parts: baseRev.parts as any,
-              services: baseRev.services as any,
-              labor: baseRev.labor as any,
-              diagnosis: baseRev.diagnosis,
-              technicalDescription: `[Revisão gerada por solicitação de correção na produção]: ${reason}`,
-              vehicleSnapshot: baseRev.vehicleSnapshot as any,
-              clientSnapshot: baseRev.clientSnapshot as any,
-              dossierSnapshot: baseRev.dossierSnapshot as any,
-              createdById: ctx.actorUserId,
-            },
-          });
-          await prisma.budget.update({
-            where: { id: budget.id },
-            data: { currentRevisionId: nextRevision.id },
-          });
+
+      if (budgetRecord) {
+        // Idempotência: Se o orçamento já possui uma revisão de rascunho aberta para correção, reutiliza sem duplicar
+        if (
+          budgetRecord.currentRevision &&
+          budgetRecord.currentRevision.status === "draft" &&
+          budgetRecord.currentRevision.id !== budgetRecord.approvedRevisionId &&
+          (budgetRecord.currentRevision.technicalDescription || "").includes("[Revisão gerada por solicitação de correção na produção]")
+        ) {
+          nextRevision = budgetRecord.currentRevision;
+        } else {
+          const baseRev = budgetRecord.approvedRevision || budgetRecord.currentRevision;
+          if (baseRev) {
+            const latestRev = await prisma.budgetRevision.findFirst({
+              where: { budgetId: budgetRecord.id },
+              orderBy: { revisionNumber: "desc" },
+            });
+            const nextRevNumber = (latestRev?.revisionNumber ?? 1) + 1;
+            nextRevision = await prisma.budgetRevision.create({
+              data: {
+                budgetId: budgetRecord.id,
+                revisionNumber: nextRevNumber,
+                status: "draft",
+                budgetType: baseRev.budgetType,
+                netTotal: baseRev.netTotal,
+                interventionTypes: baseRev.interventionTypes,
+                currencyCode: baseRev.currencyCode,
+                grossTotal: baseRev.grossTotal,
+                discountPct: baseRev.discountPct,
+                discountTotal: baseRev.discountTotal,
+                taxPct: baseRev.taxPct,
+                taxTotal: baseRev.taxTotal,
+                finalTotal: baseRev.finalTotal,
+                parts: baseRev.parts as any,
+                services: baseRev.services as any,
+                labor: baseRev.labor as any,
+                diagnosis: baseRev.diagnosis,
+                technicalDescription: `[Revisão gerada por solicitação de correção na produção]: ${reason}`,
+                vehicleSnapshot: baseRev.vehicleSnapshot as any,
+                clientSnapshot: baseRev.clientSnapshot as any,
+                dossierSnapshot: baseRev.dossierSnapshot as any,
+                createdById: ctx.actorUserId,
+              },
+            });
+            await prisma.budget.update({
+              where: { id: budgetRecord.id },
+              data: { currentRevisionId: nextRevision.id },
+            });
+          }
         }
       }
+    }
+
+    // 3. Notificação transacional para o responsável pelo orçamento
+    let recipientEmail: string | null = null;
+    if (budgetRecord?.createdById) {
+      const creator = await prisma.user.findUnique({
+        where: { id: budgetRecord.createdById },
+        select: { email: true },
+      });
+      if (creator?.email) recipientEmail = creator.email;
+    }
+
+    if (!recipientEmail) {
+      const adminMembership = await prisma.membership.findFirst({
+        where: {
+          workspaceId: order.workspaceId,
+          role: { in: ["owner", "admin"] },
+        },
+        include: { user: { select: { email: true } } },
+      });
+      recipientEmail = adminMembership?.user?.email ?? null;
+    }
+
+    let requesterName = "Equipe de Produção";
+    if (ctx.actorUserId) {
+      const requester = await prisma.user.findUnique({
+        where: { id: ctx.actorUserId },
+        select: { fullName: true, email: true },
+      });
+      if (requester?.fullName) requesterName = requester.fullName;
+      else if (requester?.email) requesterName = requester.email;
+    }
+
+    let notificationResult: {
+      delivered: boolean;
+      provider?: string;
+      recipient: string | null;
+      error?: string | null;
+    } = {
+      delivered: false,
+      recipient: recipientEmail,
+    };
+
+    if (recipientEmail) {
+      const timestampIso = new Date().toISOString();
+      const budgetCode = budgetRecord?.code || "N/A";
+      const subject = `[Operix] Demande de correction · Devis ${budgetCode} · OP ${order.code}`;
+      const htmlBody = `
+        <div style="font-family: sans-serif; font-size: 14px; color: #1e293b; line-height: 1.6;">
+          <h2 style="color: #ea580c;">Demande de correction du devis</h2>
+          <p>Une anomalie ou modification a été signalée lors de l'exécution en atelier :</p>
+          <ul>
+            <li><strong>Numéro du devis :</strong> ${budgetCode}</li>
+            <li><strong>Ordre de production :</strong> ${order.code}</li>
+            <li><strong>Client :</strong> ${order.clientName || budgetRecord?.clientName || "—"}</li>
+            <li><strong>Demandeur :</strong> ${requesterName}</li>
+            <li><strong>Motif de la correction :</strong> ${reason}</li>
+            <li><strong>Nouvelle révision générée :</strong> Révision ${nextRevision?.revisionNumber ?? "N+1"} (ID: ${nextRevision?.id ?? "N/A"})</li>
+            <li><strong>Date et heure :</strong> ${timestampIso}</li>
+          </ul>
+          <p>L'ordre de production a été placé en état <strong>Pausé</strong> en attente de révision du devis.</p>
+          <p>Cordialement,<br/>Système Operix</p>
+        </div>
+      `;
+      const textBody = `Demande de correction de devis\nDevis: ${budgetCode}\nOP: ${order.code}\nClient: ${order.clientName || "—"}\nDemandeur: ${requesterName}\nMotif: ${reason}\nNouvelle révision: ${nextRevision?.revisionNumber ?? "N+1"}\nDate: ${timestampIso}\n`;
+
+      const emailRes = await sendEmail({
+        to: recipientEmail,
+        subject,
+        html: htmlBody,
+        text: textBody,
+      });
+
+      notificationResult = {
+        delivered: emailRes.ok,
+        provider: emailRes.provider,
+        recipient: recipientEmail,
+        error: emailRes.ok ? null : (emailRes as any).error,
+      };
+    } else {
+      notificationResult = {
+        delivered: false,
+        recipient: null,
+        error: "Aucun destinataire configuré pour la notification.",
+      };
     }
 
     return res.json({
       order: mapOrder(updatedOrder),
       nextRevisionId: nextRevision?.id ?? null,
+      notification: notificationResult,
       message: "Ordem pausada e nova revisão de orçamento iniciada com sucesso.",
     });
   } catch (error) {

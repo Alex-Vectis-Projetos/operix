@@ -50,6 +50,7 @@ import { toast } from "sonner";
 import { COUNTRIES } from "@/lib/countries";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/hooks/useLanguage";
+import { useRole } from "@/hooks/useRole";
 import { useExtractProductionOrder, type FieldConfidence } from "@/hooks/useExtractProductionOrder";
 import { FileUploadZone } from "@/components/service-orders/FileUploadZone";
 
@@ -1146,6 +1147,8 @@ interface Props {
 type DialogStep = "choose_type" | "form";
 
 export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
+  const { dbRole } = useRole();
+  const isClient = dbRole === "client";
   const [form, setForm] = useState<Budget>(() => emptyBudget());
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState<DialogStep>(() => {
@@ -3745,12 +3748,22 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                           type="button"
                           size="sm"
                           onClick={approveWithSignature}
-                          disabled={isLocked}
+                          disabled={isLocked || !isClient}
+                          title={!isClient ? (langDisplay === "fr" ? "Réservé au client" : "Aprovação reservada ao cliente") : undefined}
                           className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white"
                         >
                           <PenLine className="h-3.5 w-3.5" /> {langDisplay === "fr" ? "Signer le devis" : "Assinar orçamento"}
                         </Button>
                       </div>
+
+                      {!isClient && (
+                        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300">
+                          <AlertTriangle className="h-4 w-4 inline mr-1 text-amber-600" />
+                          {langDisplay === "fr"
+                            ? "L'approbation du devis relève de l'autorité exclusive du Client ou de son collaborateur délégué. Les gestionnaires internes ne peuvent pas valider à sa place."
+                            : "A aprovação do orçamento pertence exclusivamente à autoridade do Cliente ou de seu colaborador delegado. Usuários internos da oficina não podem validar no lugar do cliente."}
+                        </div>
+                      )}
                     </div>
 
                     <div className="relative">
@@ -3775,7 +3788,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                           setConfirmNoSignatureChecked(false);
                           setConfirmNoSignatureOpen(true);
                         }}
-                        disabled={isLocked}
+                        disabled={isLocked || !isClient}
+                        title={!isClient ? (langDisplay === "fr" ? "Réservé au client" : "Aprovação reservada ao cliente") : undefined}
                         className="h-9"
                       >
                         <HandPlatter className="h-4 w-4" />{" "}

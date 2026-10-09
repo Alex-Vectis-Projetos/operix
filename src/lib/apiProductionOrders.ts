@@ -51,3 +51,40 @@ export function finalizeProductionOrder(id: string): Promise<FinalizeProductionO
   });
 }
 
+export function updateProductionOrderService(
+  orderId: string,
+  serviceId: string,
+  completed: boolean,
+): Promise<ProductionOrder> {
+  return apiRequest<ProductionOrder>(`/production-orders/${orderId}/services/${serviceId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ completed }),
+    timeoutMs: 12000,
+  });
+}
+
+export interface RequestBudgetCorrectionResult {
+  order: ProductionOrder;
+  nextRevisionId: string | null;
+  notification?: {
+    delivered: boolean;
+    provider?: string;
+    recipient: string | null;
+    error?: string | null;
+  };
+  message: string;
+}
+
+export function requestBudgetCorrection(
+  orderId: string,
+  reason: string,
+): Promise<RequestBudgetCorrectionResult> {
+  return apiRequest<RequestBudgetCorrectionResult>(`/production-orders/${orderId}/request-budget-correction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+    timeoutMs: 15000,
+  });
+}
+

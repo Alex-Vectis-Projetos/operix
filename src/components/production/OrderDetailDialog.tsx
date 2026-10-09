@@ -37,6 +37,14 @@ import { useAutosave } from "@/hooks/useAutosave";
 import { PhotoUploader } from "./PhotoUploader";
 import { OrderTimeline } from "./OrderTimeline";
 import { FileUploadZone } from "@/components/service-orders/FileUploadZone";
+import { useQueryClient } from "@tanstack/react-query";
+import { useLanguage } from "@/hooks/useLanguage";
+import { useRole } from "@/hooks/useRole";
+import {
+  updateProductionOrderService,
+  requestBudgetCorrection,
+} from "@/lib/apiProductionOrders";
+import { cn } from "@/lib/utils";
 import { useExtractProductionOrder } from "@/hooks/useExtractProductionOrder";
 import { formatBRL } from "./BudgetDialog";
 import { useBudget, type ApiBudget, type ApiBudgetRevision } from "@/hooks/useBudgets";
@@ -590,6 +598,14 @@ export function mapFinalizeError(err: any): string {
 }
 
 export function OrderDetailDialog({ order, onClose }: Props) {
+  const qc = useQueryClient();
+  const { lang } = useLanguage();
+  const langDisplay = lang === "fr" ? "fr" : "pt";
+  const { dbRole } = useRole();
+  const isClient = dbRole === "client";
+  const [loadingServiceId, setLoadingServiceId] = useState<string | null>(null);
+  const [requestingCorrection, setRequestingCorrection] = useState(false);
+
   const { update, remove, create, finalize } = useProductionOrders();
   const [isFinalizing, setIsFinalizing] = useState(false);
   const { members: membersRaw } = useWorkspace();
@@ -621,6 +637,20 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
   const activeBudgetId = order?.budgetId ?? order?.budget_id ?? null;
   const { data: budgetData } = useBudget(activeBudgetId);
+
+  const performedServicesList = useMemo(() => {
+    const raw = order?.performed_services ?? order?.performedServices ?? [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }, [order?.performed_services, order?.performedServices]);
 
   const activeRevision = useMemo(() => {
     if (!budgetData) return null;
@@ -933,52 +963,75 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     onClose();
   };
 
+  const handleToggleService = async (serviceId: string, completed: boolean) => {
+    if (!order?.id || isNew || loadingServiceId || isClient || locked) return;
+    setLoadingServiceId(serviceId);
+    try {
+      await updateProductionOrderService(order.id, serviceId, completed);
+      await qc.invalidateQueries({ queryKey: ["production-orders"] });
+      toast.success(
+        langDisplay === "fr"
+          ? (completed ? "Prestation marquée comme terminée." : "Prestation remise en attente.")
+          : (completed ? "Serviço marcado como concluído no servidor." : "Serviço reaberto no servidor.")
+      );
+    } catch (err: any) {
+      toast.error(err?.message || (langDisplay === "fr" ? "Échec de mise à jour du service." : "Falha ao atualizar o serviço."));
+    } finally {
+      setLoadingServiceId(null);
+    }
+  };
+
   const handleRequestBudgetCorrection = async () => {
-    if (!order?.id) return;
-    if (!budgetHydrated) {
-      toast.warning("Esta Ordem de Serviço não tem orçamento atrelado.");
+    if (!order?.id || isNew || locked || requestingCorrection || isClient) return;
+    if (!budgetHydrated && !order.budgetId && !order.budget_id) {
+      toast.warning(langDisplay === "fr" ? "Cet ordre de production n'est pas lié à un devis." : "Esta Ordem de Serviço não tem orçamento atrelado.");
       return;
     }
-    if (locked) {
-      toast.warning("Ordem bloqueada — não é possível solicitar correção.");
-      return;
-    }
-    const reason = window.prompt(
-      "Informe o motivo da correção (será enviado para o responsável pelo orçamento):",
-    );
+
+    const promptMessage = langDisplay === "fr"
+      ? "Veuillez indiquer le motif de la correction demandée pour ce devis :"
+      : "Informe o motivo da correção (será enviado para o responsável pelo orçamento):";
+
+    const reason = window.prompt(promptMessage);
     if (reason == null) return;
     if (!reason.trim()) {
-      toast.error("Motivo da correção é obrigatório.");
+      toast.error(langDisplay === "fr" ? "Le motif de correction est obligatoire." : "Motivo da correção é obrigatório.");
       return;
     }
-    if (!window.confirm("Confirmar solicitação de correção? O orçamento será retornado para ajustes.")) {
-      return;
-    }
+
+    const confirmMessage = langDisplay === "fr"
+      ? "Confirmer la demande de correction ? L'ordre de production sera mis en pause et une nouvelle révision de devis sera générée."
+      : "Confirmar solicitação de correção? A ordem de produção será pausada e uma nova revisão de orçamento será gerada.";
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setRequestingCorrection(true);
     try {
-      const budgetId: string | null = order.budgetId || order.budget_id || null;
-      if (!budgetId) {
-        toast.error("Vínculo orçamento ↔ OS não encontrado. Não foi possível solicitar correção.");
-        return;
+      const res = await requestBudgetCorrection(order.id, reason.trim());
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["production-orders"] }),
+        qc.invalidateQueries({ queryKey: ["budgets"] }),
+      ]);
+
+      let successMsg = langDisplay === "fr"
+        ? "Ordre de production mis en pause et nouvelle révision de devis créée."
+        : "Ordem pausada e nova revisão de orçamento iniciada com sucesso.";
+
+      if (res.notification?.delivered) {
+        successMsg += langDisplay === "fr" ? " Notification envoyée par e-mail." : " Notificação enviada por e-mail.";
+      } else if (res.notification?.error) {
+        toast.warning(
+          langDisplay === "fr"
+            ? `Révision créée, mais notification non délivrée : ${res.notification.error}`
+            : `Revisão criada, mas notificação não entregue: ${res.notification.error}`
+        );
       }
-      const timestamp = new Date().toISOString();
-      const appendNote = `\n\n==== SOLICITAÇÃO DE CORREÇÃO ====\nData: ${timestamp}\nMotivo: ${reason.trim()}\nOrçamento retornado para ajustes.\n`;
-      const { budget, internal } = splitBudgetOnlyAfterExecution(order?.notes);
-      const internalWithNote = (internal || "") + appendNote;
-      const finalNotes = rebuildNotesFromParts({
-        internal: internalWithNote,
-        budget,
-        execution: executionSafe,
-      });
-      await update.mutateAsync({ id: order.id, notes: finalNotes });
-      setInternalNotes(internalWithNote);
-      window.dispatchEvent(
-        new CustomEvent("budget:correction-requested", {
-          detail: { budgetId, reason: reason.trim() },
-        }),
-      );
-      toast.success("Correção solicitada · orçamento retornado para ajustes.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Falha ao solicitar correção.");
+
+      toast.success(successMsg);
+    } catch (err: any) {
+      toast.error(err?.message || (langDisplay === "fr" ? "Échec de la demande de correction." : "Falha ao solicitar correção do orçamento."));
+    } finally {
+      setRequestingCorrection(false);
     }
   };
 
@@ -1610,25 +1663,165 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                       />
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 dark:bg-emerald-500/[0.04]">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
-                          <CheckCheck className="h-4 w-4" /> Serviço concluído
+                    {/* Prestações Estruturadas Canônicas do Servidor */}
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center justify-between pb-1">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                          <Package className="h-4 w-4 text-indigo-500" />
+                          <span>{langDisplay === "fr" ? "Prestations Structurées (Canonicité Serveur)" : "Serviços Estruturados (Servidor Canônico)"}</span>
                         </div>
-                        <p className="text-[11px] text-muted-foreground max-w-xl">
-                          Marque quando todos os serviços da OS forem finalizados. Esta ação bloqueia alterações nos passos e indica que o veículo está pronto para Controle Final / Entrega.
-                        </p>
+                        <Badge variant="outline" className="text-xs font-mono">
+                          {performedServicesList.length} {langDisplay === "fr" ? "ligne(s)" : "item(ns)"}
+                        </Badge>
                       </div>
-                      <div className="flex items-center gap-2.5 rounded-lg border border-emerald-500/30 bg-white px-3 py-2 dark:bg-slate-900/70">
-                        <Checkbox
-                          id="service_done_toggle"
-                          checked={executionSafe.service_done}
-                          onCheckedChange={(v) => toggleServiceDone(Boolean(v))}
-                        />
-                        <Label htmlFor="service_done_toggle" className="text-sm font-medium cursor-pointer pl-0.5">
-                          {executionSafe.service_done ? "Serviço marcado como concluído." : "Marcar serviço como concluído."}
-                        </Label>
-                      </div>
+
+                      {performedServicesList.length > 0 ? (
+                        <>
+                          <div className="overflow-hidden rounded-xl border border-border/70 bg-white dark:bg-slate-950/40">
+                            <div className="overflow-x-auto">
+                              <Table>
+                                <TableHeader className="bg-slate-50 dark:bg-slate-900/70">
+                                  <TableRow>
+                                    <TableHead className="w-[8%] text-center text-[11px]">
+                                      {langDisplay === "fr" ? "Fait" : "OK"}
+                                    </TableHead>
+                                    <TableHead className="w-[34%] text-[11px]">
+                                      {langDisplay === "fr" ? "Prestation / Description" : "Serviço / Descrição"}
+                                    </TableHead>
+                                    <TableHead className="w-[14%] text-[11px]">
+                                      {langDisplay === "fr" ? "Catégorie" : "Categoria"}
+                                    </TableHead>
+                                    <TableHead className="w-[14%] text-right text-[11px]">
+                                      {langDisplay === "fr" ? "Quantité" : "Quantidade"}
+                                    </TableHead>
+                                    <TableHead className="w-[15%] text-right text-[11px]">
+                                      {langDisplay === "fr" ? "Prix Unitaire" : "Valor Unitário"}
+                                    </TableHead>
+                                    <TableHead className="w-[15%] text-right text-[11px]">
+                                      Total
+                                    </TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {performedServicesList.map((svc: any, idx: number) => {
+                                    const isDone = svc.completed === true || svc.status === "completed";
+                                    const isLoading = loadingServiceId === svc.id;
+                                    const currency = svc.currency || order?.currency_code || order?.currencyCode || "EUR";
+                                    const categoryLabel = svc.category === "labor"
+                                      ? (langDisplay === "fr" ? "Main d'œuvre" : "Mão de Obra")
+                                      : svc.category === "part"
+                                      ? (langDisplay === "fr" ? "Pièce" : "Peça")
+                                      : (langDisplay === "fr" ? "Prestation" : "Serviço");
+
+                                    return (
+                                      <TableRow key={svc.id || idx} className={isDone ? "bg-emerald-50/40 dark:bg-emerald-950/20" : ""}>
+                                        <TableCell className="text-center p-2">
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant={isDone ? "default" : "outline"}
+                                            disabled={locked || isClient || isLoading}
+                                            onClick={() => handleToggleService(svc.id, !isDone)}
+                                            className={cn(
+                                              "h-7 w-7 p-0 transition-all",
+                                              isDone ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "border-slate-300"
+                                            )}
+                                            title={
+                                              isClient
+                                                ? (langDisplay === "fr" ? "Lecture seule pour les clients" : "Somente leitura para clientes")
+                                                : (isDone
+                                                    ? (langDisplay === "fr" ? "Marquer comme non terminé" : "Reabrir serviço")
+                                                    : (langDisplay === "fr" ? "Marquer como terminé" : "Marcar como concluído"))
+                                            }
+                                          >
+                                            {isLoading ? (
+                                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            ) : isDone ? (
+                                              <CheckCheck className="h-4 w-4" />
+                                            ) : (
+                                              <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600" />
+                                            )}
+                                          </Button>
+                                        </TableCell>
+                                        <TableCell className="p-2.5">
+                                          <div className="font-medium text-xs text-foreground">{svc.name}</div>
+                                          {svc.description && svc.description !== svc.name && (
+                                            <div className="text-[10px] text-muted-foreground">{svc.description}</div>
+                                          )}
+                                        </TableCell>
+                                        <TableCell className="p-2.5">
+                                          <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal">
+                                            {categoryLabel}
+                                          </Badge>
+                                        </TableCell>
+                                        <TableCell className="p-2.5 text-right text-xs font-mono">
+                                          {svc.quantity || 1}
+                                        </TableCell>
+                                        <TableCell className="p-2.5 text-right text-xs font-mono text-muted-foreground">
+                                          {formatBRL(Number(svc.unitPrice || 0), currency)}
+                                        </TableCell>
+                                        <TableCell className="p-2.5 text-right text-xs font-mono font-medium text-foreground">
+                                          {formatBRL(Number(svc.total || 0), currency)}
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+
+                          {/* Resumo canônico de conclusão */}
+                          {(() => {
+                            const doneCountSvc = performedServicesList.filter((s: any) => s.completed || s.status === "completed").length;
+                            const allDone = doneCountSvc === performedServicesList.length && performedServicesList.length > 0;
+                            return (
+                              <div className={cn(
+                                "flex flex-wrap items-center justify-between gap-4 rounded-xl border p-3.5",
+                                allDone
+                                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300"
+                                  : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300"
+                              )}>
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2 text-sm font-semibold">
+                                    <CheckCheck className={cn("h-4 w-4", allDone ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500")} />
+                                    <span>
+                                      {allDone
+                                        ? (langDisplay === "fr" ? "Toutes les prestations sont validées au niveau serveur." : "Todos os serviços foram concluídos no servidor.")
+                                        : (langDisplay === "fr"
+                                            ? `${doneCountSvc} / ${performedServicesList.length} prestations terminées au niveau serveur.`
+                                            : `${doneCountSvc} de ${performedServicesList.length} serviços concluídos no servidor.`)}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground max-w-xl">
+                                    {langDisplay === "fr"
+                                      ? "L'état d'achèvement de chaque prestation est synchronisé et persisté directement dans l'ordre de production sans modifier les montants financiers."
+                                      : "O estado de conclusão de cada serviço é sincronizado e persistido na ordem de produção sem alterar valores financeiros."}
+                                  </p>
+                                </div>
+                                <Badge variant={allDone ? "default" : "outline"} className={allDone ? "bg-emerald-600 text-white" : ""}>
+                                  {allDone
+                                    ? (langDisplay === "fr" ? "Prêt pour livraison" : "Pronto para entrega")
+                                    : (langDisplay === "fr" ? "En cours d'exécution" : "Em execução")}
+                                </Badge>
+                              </div>
+                            );
+                          })()}
+                        </>
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 p-4 text-center">
+                          <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                            {langDisplay === "fr"
+                              ? "Aucune prestation structurée n'est enregistrée sur cet ordre de production."
+                              : "Nenhum serviço estruturado registrado nesta ordem de produção."}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            {langDisplay === "fr"
+                              ? "Pour valider des prestations au niveau serveur, associez un devis approuvé contenant des lignes chiffrées."
+                              : "Para concluir serviços no servidor, vincule um orçamento aprovado contendo itens estruturados e valorados."}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -1638,15 +1831,20 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
             <div className="flex flex-wrap justify-between gap-2 pt-2 border-t border-border/50">
               <div className="flex gap-2">
-                {!isNew && budgetHydrated && !locked && (
+                {!isNew && (budgetHydrated || order?.budgetId || order?.budget_id) && !locked && !isClient && (
                   <Button
                     variant="outline"
                     size="sm"
                     className="gap-1.5 text-amber-700 border-amber-500/40 hover:bg-amber-500/10 dark:text-amber-400"
                     onClick={handleRequestBudgetCorrection}
-                    disabled={update.isPending || create.isPending}
+                    disabled={update.isPending || create.isPending || requestingCorrection}
                   >
-                    <AlertTriangle className="h-4 w-4" /> Solicitar correção do orçamento
+                    {requestingCorrection ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4" />
+                    )}
+                    {langDisplay === "fr" ? "Demander correction du devis" : "Solicitar correção do orçamento"}
                   </Button>
                 )}
                 {!isNew && !locked && (

@@ -49,6 +49,10 @@ export interface ProductionOrder {
   budgetId?: string | null;
   budget_revision_id?: string | null;
   budgetRevisionId?: string | null;
+  performed_services?: any[] | null;
+  performedServices?: any[] | null;
+  currency_code?: string | null;
+  currencyCode?: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

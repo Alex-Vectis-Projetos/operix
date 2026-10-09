@@ -16,6 +16,7 @@ import {
 import {
   useCountryDocumentRequirements, useConfiguredCountries, type CountryDocumentRequirement,
 } from "@/hooks/useCountryDocumentRequirements";
+import { useRole } from "@/hooks/useRole";
 import { COUNTRIES } from "@/lib/countries";
 
 const TOP_COUNTRIES = [
@@ -32,6 +33,9 @@ const TOP_COUNTRIES = [
 ];
 
 export default function CountryDocumentRequirementsPage() {
+  const { isAdmin, isOwner } = useRole();
+  const canManage = isAdmin || isOwner;
+
   const { data: configuredCountries = [], isLoading: loadingCountries } = useConfiguredCountries();
   const [selectedCountry, setSelectedCountry] = useState<string>("Bélgica");
   const [newCountryModalOpen, setNewCountryModalOpen] = useState(false);
@@ -377,25 +381,29 @@ export default function CountryDocumentRequirementsPage() {
                             Obrigatório
                           </Badge>
 
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                            onClick={() => startEdit(req)}
-                            title="Editar nome"
-                          >
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </Button>
+                          {canManage && (
+                            <>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                onClick={() => startEdit(req)}
+                                title="Editar nome"
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </Button>
 
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={() => update.mutate({ id: req.id, active: false })}
-                            title="Desativar requisito"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                onClick={() => update.mutate({ id: req.id, active: false })}
+                                title="Desativar requisito"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </>
                     )}
@@ -406,58 +414,69 @@ export default function CountryDocumentRequirementsPage() {
           )}
 
           {/* New Document Section */}
-          <div className="rounded-xl border p-4 bg-muted/15 space-y-3">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Adicionar Novo Documento Exigido
-              </h4>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
-              <div className="flex-1 space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Nome do Documento</label>
-                <Input
-                  value={newDocumentName}
-                  onChange={(e) => setNewDocumentName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddDocument();
-                    }
-                  }}
-                  placeholder="Ex.: Certificado de Seguro de Responsabilidade Civil..."
-                  className="bg-background"
-                />
+          {canManage ? (
+            <div className="rounded-xl border p-4 bg-muted/15 space-y-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Adicionar Novo Documento Exigido
+                </h4>
               </div>
 
-              <div className="space-y-1.5 sm:w-56">
-                <label className="text-xs font-medium text-muted-foreground">Aplica-se a</label>
-                <Select
-                  value={newAppliesTo}
-                  onValueChange={(val: any) => setNewAppliesTo(val)}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
+                <div className="flex-1 space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Nome do Documento</label>
+                  <Input
+                    value={newDocumentName}
+                    onChange={(e) => setNewDocumentName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddDocument();
+                      }
+                    }}
+                    placeholder="Ex.: Certificado de Seguro de Responsabilidade Civil..."
+                    className="bg-background"
+                  />
+                </div>
+
+                <div className="space-y-1.5 sm:w-56">
+                  <label className="text-xs font-medium text-muted-foreground">Aplica-se a</label>
+                  <Select
+                    value={newAppliesTo}
+                    onValueChange={(val: any) => setNewAppliesTo(val)}
+                  >
+                    <SelectTrigger className="bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="both">Técnicos & Prestadores</SelectItem>
+                      <SelectItem value="technician">Apenas Técnicos</SelectItem>
+                      <SelectItem value="provider_operational">Apenas Prestadores</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  onClick={handleAddDocument}
+                  disabled={create.isPending || !newDocumentName.trim()}
+                  className="gap-1.5 shrink-0"
                 >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="both">Técnicos & Prestadores</SelectItem>
-                    <SelectItem value="technician">Apenas Técnicos</SelectItem>
-                    <SelectItem value="provider_operational">Apenas Prestadores</SelectItem>
-                  </SelectContent>
-                </Select>
+                  {create.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  <span>Adicionar</span>
+                </Button>
               </div>
-
-              <Button
-                onClick={handleAddDocument}
-                disabled={create.isPending || !newDocumentName.trim()}
-                className="gap-2 sm:self-end"
-              >
-                {create.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                Adicionar
-              </Button>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-xl border border-border bg-muted/30 p-3.5 text-xs text-muted-foreground flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
+              <span>Modo somente leitura · Apenas Administradores do workspace podem cadastrar ou alterar requisitos documentais.</span>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
