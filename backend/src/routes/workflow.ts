@@ -247,33 +247,51 @@ function parseValidation(so: SO | null): {
 }
 
 function deriveStatus(params: {
-  po: PO | null;
+  po: any | null;
   so: SO | null;
   pay: PAY | null;
   val: ReturnType<typeof parseValidation>;
+  we?: any | null;
+  pli?: any | null;
 }): OperationalWorkflowStatus {
-  const { po, so, pay, val } = params;
+  const { po, so, pay, val, we, pli } = params;
   const prodStatus = po?.status ?? null;
-  const hasDelivery = Boolean(
-    po?.deliveredAt ??
-      (so &&
-        typeof (so as any).production_delivered_at === "string" &&
-        (so as any).production_delivered_at),
-  );
+
+  const isPaid =
+    (pli?.paymentList?.status === "paid") ||
+    (pay?.status === "paid") ||
+    (typeof pay?.total === "number" &&
+      typeof pay?.amountPaid === "number" &&
+      pay.amountPaid >= pay.total - 0.005 &&
+      pay.total > 0);
+
+  if (isPaid) {
+    return prodStatus === "delivered" || prodStatus === "invoiced"
+      ? "encerrado"
+      : "pago";
+  }
+
+  if (pli?.paymentList?.status === "pending" || pay?.status === "pending") {
+    return "aguardando_pagamento";
+  }
+
+  if (pli?.paymentList) {
+    const plStatus = pli.paymentList.status;
+    if (plStatus === "ready_for_billing" || plStatus === "confronted" || plStatus === "under_review" || plStatus === "draft") {
+      return "aguardando_ordem_lista";
+    }
+  }
 
   if (pay) {
-    const paid =
-      (pay.status === "paid") ||
-      (typeof pay.total === "number" &&
-        typeof pay.amountPaid === "number" &&
-        pay.amountPaid >= pay.total - 0.005 &&
-        pay.total > 0);
-    if (paid) {
-      return prodStatus === "delivered" || prodStatus === "invoiced"
-        ? "encerrado"
-        : "pago";
-    }
     return "aguardando_pagamento";
+  }
+
+  if (we) {
+    const latestVal = we.weeklog?.validations?.[0];
+    if (latestVal?.status === "rejected") return "correcao_necessaria";
+    if (latestVal?.status === "approved") return "aguardando_ordem_lista";
+    if (latestVal?.submittedAt || latestVal?.status === "signed") return "aguardando_aprovacao";
+    return "weeklog_em_aberto";
   }
 
   if (so) {
@@ -292,6 +310,7 @@ function deriveStatus(params: {
   }
 
   if (po) {
+    const hasDelivery = Boolean(po.deliveredAt);
     if (hasDelivery || prodStatus === "finished" || prodStatus === "delivered")
       return "weeklog_em_aberto";
     if (
@@ -307,62 +326,137 @@ function deriveStatus(params: {
 }
 
 function itemFromParts(params: {
-  po: PO | null;
+  po: any | null;
   so: SO | null;
   pay: PAY | null;
+  we?: any | null;
+  pli?: any | null;
 }): WorkflowItem {
-  const { po, so, pay } = params;
+  const { po, so, pay, we, pli } = params;
   const val = parseValidation(so);
 
   const client_name =
-    po?.clientName ?? so?.clientName ?? pay?.clientName ?? null;
+    po?.clientName ??
+    we?.clientName ??
+    so?.clientName ??
+    pli?.paymentList?.clientName ??
+    pay?.clientName ??
+    null;
+
   const technician_name =
     po?.technicianName ??
+    we?.technicianName ??
     so?.technicianName ??
+    pli?.technicianName ??
     pay?.technicianName ??
     null;
+
   const platform = po?.platform ?? so?.platform ?? pay?.platform ?? null;
   const operational_unit =
-    so?.operationalUnit ?? pay?.operationalUnit ?? null;
+    po?.operationalSiteKey ??
+    we?.weeklog?.siteKey ??
+    pli?.operationalSiteKey ??
+    so?.operationalUnit ??
+    pay?.operationalUnit ??
+    null;
 
-  const brand = po?.brand ?? null;
-  const model = po?.model ?? null;
-  const car_name = so?.carName ?? pay?.carName ?? null;
+  const brand = po?.brand ?? we?.brand ?? null;
+  const model = po?.model ?? we?.model ?? null;
+  const car_name =
+    so?.carName ??
+    pli?.carName ??
+    pay?.carName ??
+    (brand && model ? `${brand} ${model}` : null);
   const license_plate =
-    po?.licensePlate ?? so?.licensePlate ?? pay?.licensePlate ?? null;
-  const vin = po?.vin ?? null;
+    po?.licensePlate ??
+    we?.licensePlate ??
+    so?.licensePlate ??
+    pli?.licensePlate ??
+    pay?.licensePlate ??
+    null;
+  const vin = po?.vin ?? we?.vin ?? pli?.vin ?? null;
 
-  const valor_total =
-    so && typeof so.total === "number" && isFinite(so.total)
-      ? so.total
-      : pay && typeof pay.total === "number" && isFinite(pay.total)
-        ? pay.total
-        : null;
-  const valor_aprovado =
-    (val.situation === "oui" && val.valor_final !== null)
-      ? val.valor_final
-      : null;
-  const valor_pago =
-    pay && typeof pay.amountPaid === "number" && isFinite(pay.amountPaid)
-      ? pay.amountPaid
-      : 0;
-  const valor_pendente =
-    typeof valor_total === "number"
-      ? Math.max(0, valor_total - valor_pago)
+  let poTotal: number | null = null;
+  if (po?.budgetRevision?.finalTotal != null) {
+    poTotal = Number(po.budgetRevision.finalTotal);
+  } else if (po?.budget?.total != null) {
+    poTotal = Number(po.budget.total);
+  } else if (Array.isArray(po?.performedServices) && po.performedServices.length > 0) {
+    poTotal = po.performedServices.reduce((sum: number, s: any) => {
+      const q = Number(s.quantity ?? 1) || 1;
+      const pu = Number(s.unit_price ?? s.unitPrice ?? s.price ?? 0) || 0;
+      return sum + (Number(s.total) || (q * pu));
+    }, 0);
+  }
+
+  const pliTotal = pli?.totalAmount != null ? Number(pli.totalAmount) : null;
+  const weTotal = we?.totalAmount != null ? Number(we.totalAmount) : null;
+  const soTotal = so && typeof so.total === "number" && isFinite(so.total) ? so.total : null;
+  const payTotal = pay && typeof pay.total === "number" && isFinite(pay.total) ? pay.total : null;
+
+  const rawTotal = pliTotal ?? weTotal ?? soTotal ?? poTotal ?? payTotal ?? null;
+  const valor_total = rawTotal != null ? Number(rawTotal.toFixed(2)) : null;
+
+  const latestVal = we?.weeklog?.validations?.[0];
+  const isApproved =
+    latestVal?.status === "approved" || val.situation === "oui";
+  const isRejected =
+    latestVal?.status === "rejected" || val.situation === "non";
+
+  const validation_situation: "oui" | "non" | null = isApproved
+    ? "oui"
+    : isRejected
+      ? "non"
+      : val.situation;
+
+  const validation_assinado =
+    Boolean(latestVal?.submittedAt) ||
+    latestVal?.status === "approved" ||
+    latestVal?.status === "signed" ||
+    val.assinado;
+
+  const validation_retificativa =
+    we?.isRectification ? "partial" : val.retificativa;
+
+  const valor_aprovado = isApproved
+    ? (val.valor_final ?? pliTotal ?? weTotal ?? valor_total)
+    : null;
+
+  const isPaid =
+    (pli?.paymentList?.status === "paid") ||
+    (pay?.status === "paid") ||
+    (payTotal != null &&
+      typeof pay?.amountPaid === "number" &&
+      pay.amountPaid >= payTotal - 0.005 &&
+      payTotal > 0);
+
+  let valor_pago = 0;
+  if (typeof pay?.amountPaid === "number" && isFinite(pay.amountPaid) && pay.amountPaid > 0) {
+    valor_pago = pay.amountPaid;
+  } else if (isPaid && valor_total !== null) {
+    valor_pago = valor_total;
+  }
+
+  const valor_pendente = isPaid
+    ? 0
+    : valor_total !== null
+      ? Math.max(0, Number((valor_total - valor_pago).toFixed(2)))
       : null;
 
   const week_raw =
+    we?.weeklog?.week ??
     so?.week ??
     (val.week_display
       ? (val.year_ref ? `${val.year_ref}-W${String(val.week_number ?? 0).padStart(2, "0")}` : val.week_display)
       : null);
 
-  const status = deriveStatus({ po, so, pay, val });
+  const status = deriveStatus({ po, so, pay, val, we, pli });
   const meta = STATUS_META[status];
   const has_error = status === "correcao_necessaria";
 
   const created_at =
     po?.createdAt?.toISOString() ??
+    we?.createdAt?.toISOString() ??
     so?.createdAt?.toISOString() ??
     pay?.createdAt?.toISOString() ??
     new Date(0).toISOString();
@@ -370,6 +464,7 @@ function itemFromParts(params: {
   return {
     id:
       po?.id ??
+      we?.id ??
       so?.id ??
       pay?.id ??
       `wf-${crypto.randomUUID()}`,
@@ -379,19 +474,20 @@ function itemFromParts(params: {
         ? "weeklog_only"
         : "payment_only",
 
-    production_order_id: po?.id ?? null,
+    production_order_id: po?.id ?? we?.productionOrderId ?? null,
     production_code: po?.code ?? null,
     production_status: po?.status ?? null,
-    production_delivered_at: po?.deliveredAt?.toISOString() ?? null,
+    production_delivered_at:
+      po?.deliveredAt?.toISOString() ?? we?.deliveredAt?.toISOString() ?? null,
 
     service_order_id: so?.id ?? null,
     week: week_raw,
-    week_number: val.week_number,
-    year_reference: val.year_ref ?? so?.yearReference ?? null,
+    week_number: we?.weeklog?.weekNumber ?? val.week_number,
+    year_reference: we?.weeklog?.yearReference ?? val.year_ref ?? so?.yearReference ?? null,
 
-    payment_order_id: pay?.id ?? val.payment_order_id ?? null,
-    list_name: pay?.listName ?? val.list_name ?? null,
-    payment_status: pay?.status ?? null,
+    payment_order_id: pay?.id ?? pli?.legacyPaymentOrderId ?? val.payment_order_id ?? null,
+    list_name: pli?.paymentList?.listNumber ?? pay?.listName ?? val.list_name ?? null,
+    payment_status: pli?.paymentList?.status ?? pay?.status ?? null,
 
     client_name,
     technician_name,
@@ -409,9 +505,9 @@ function itemFromParts(params: {
     valor_pago,
     valor_pendente,
 
-    validation_situation: val.situation,
-    validation_assinado: val.assinado,
-    validation_retificativa: val.retificativa,
+    validation_situation,
+    validation_assinado,
+    validation_retificativa,
 
     status,
     status_label: meta.label,
@@ -434,9 +530,30 @@ workflowRouter.get(
       if (!workspace_id)
         return res.status(400).json({ message: "workspace_id é obrigatório." });
 
-      const [pos, sos, pays] = await Promise.all([
+      const [pos, sos, pays, paymentLists] = await Promise.all([
         prisma.productionOrder.findMany({
           where: { workspaceId: workspace_id },
+          include: {
+            budgetRevision: true,
+            budget: true,
+            weeklogEntries: {
+              include: {
+                weeklog: {
+                  include: {
+                    validations: {
+                      orderBy: { validationSequence: "desc" },
+                      take: 1,
+                    },
+                  },
+                },
+                paymentListItems: {
+                  include: {
+                    paymentList: true,
+                  },
+                },
+              },
+            },
+          },
           orderBy: { createdAt: "desc" },
         }),
         prisma.serviceOrder.findMany({
@@ -453,24 +570,38 @@ workflowRouter.get(
           },
           orderBy: { createdAt: "desc" },
         }),
+        prisma.paymentList.findMany({
+          where: { workspaceId: workspace_id },
+          include: {
+            items: true,
+          },
+          orderBy: { createdAt: "desc" },
+        }),
       ]);
 
       const bySoId = new Map<string, SO>();
       for (const so of sos) bySoId.set(so.id, so);
 
-      const byProductionSoFK = new Map<string, PO>();
-      const byProductionCode = new Map<string, PO>();
+      const byProductionSoFK = new Map<string, any>();
+      const byProductionCode = new Map<string, any>();
       for (const po of pos) {
         if (po.serviceOrderId) byProductionSoFK.set(po.serviceOrderId, po);
         if (po.code) byProductionCode.set(po.code, po);
       }
 
       const payBySoId = new Map<string, PAY>();
+      const payById = new Map<string, PAY>();
+      const payByListName = new Map<string, PAY>();
       for (const pay of pays) {
         if (pay.serviceOrderId) payBySoId.set(pay.serviceOrderId, pay);
+        if (pay.id) payById.set(pay.id, pay);
+        if (pay.listName) payByListName.set(pay.listName, pay);
       }
 
       const seenKeys = new Set<string>();
+      const seenPayIds = new Set<string>();
+      const seenPaymentListIds = new Set<string>();
+      const seenSoIds = new Set<string>();
       const items: WorkflowItem[] = [];
 
       const pushIfNew = (key: string, it: WorkflowItem) => {
@@ -480,19 +611,37 @@ workflowRouter.get(
       };
 
       for (const po of pos) {
-        const so = po.serviceOrderId
-          ? bySoId.get(po.serviceOrderId) ?? null
-          : null;
-        const pay = so ? payBySoId.get(so.id) ?? null : null;
-        const it = itemFromParts({ po, so, pay });
+        const so = po.serviceOrderId ? bySoId.get(po.serviceOrderId) ?? null : null;
+        if (so) seenSoIds.add(so.id);
+
+        const we = po.weeklogEntries?.[0] ?? null;
+        const pli = we?.paymentListItems?.[0] ?? null;
+
+        if (pli?.paymentListId) seenPaymentListIds.add(pli.paymentListId);
+
+        let pay: PAY | null = null;
+        if (pli?.legacyPaymentOrderId) {
+          pay = payById.get(pli.legacyPaymentOrderId) ?? null;
+        }
+        if (!pay && pli?.paymentList?.listNumber) {
+          pay = payByListName.get(pli.paymentList.listNumber) ?? null;
+        }
+        if (!pay && so) {
+          pay = payBySoId.get(so.id) ?? null;
+        }
+
+        if (pay) seenPayIds.add(pay.id);
+
+        const it = itemFromParts({ po, so, pay, we, pli });
         pushIfNew(`po-${po.id}`, it);
       }
 
       for (const so of sos) {
+        if (seenSoIds.has(so.id)) continue;
         if (seenKeys.has(`so-${so.id}`)) continue;
         const alreadyLinkedViaPO = byProductionSoFK.has(so.id);
         if (alreadyLinkedViaPO) continue;
-        let po: PO | null = null;
+        let po: any | null = null;
         if (!po) {
           const snap = so.distributionSnapshot;
           const base =
@@ -503,14 +652,17 @@ workflowRouter.get(
           if (code) po = byProductionCode.get(String(code)) ?? null;
         }
         const pay = payBySoId.get(so.id) ?? null;
+        if (pay) seenPayIds.add(pay.id);
+
         const it = itemFromParts({ po, so, pay });
         pushIfNew(`so-${so.id}`, it);
       }
 
       for (const pay of pays) {
+        if (seenPayIds.has(pay.id)) continue;
         if (seenKeys.has(`pay-${pay.id}`)) continue;
         const so = pay.serviceOrderId ? bySoId.get(pay.serviceOrderId) ?? null : null;
-        let po: PO | null = so ? byProductionSoFK.get(so.id) ?? null : null;
+        let po: any | null = so ? byProductionSoFK.get(so.id) ?? null : null;
         const it = itemFromParts({ po, so, pay });
         pushIfNew(`pay-${pay.id}`, it);
       }

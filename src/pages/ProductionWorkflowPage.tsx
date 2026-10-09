@@ -136,6 +136,21 @@ function KpiCard({
   );
 }
 
+function formatProductionStatus(status: string | null | undefined): string {
+  if (!status) return "—";
+  const map: Record<string, string> = {
+    new_vehicle: "Novo Veículo",
+    in_production: "Em Produção",
+    paused: "Pausado",
+    awaiting_validation: "Aguardando Validação",
+    finished: "Finalizado",
+    delivered: "Entregue",
+    invoiced: "Faturado",
+    cancelled: "Cancelado",
+  };
+  return map[status] ?? status;
+}
+
 function NavLink({
   to,
   label,
@@ -149,12 +164,12 @@ function NavLink({
     <Button
       variant="outline"
       size="sm"
-      className="h-7 gap-1.5 px-2 text-[11px]"
+      className="h-7 gap-1.5 px-2.5 text-[11px] font-medium hover:bg-primary/5 hover:text-primary transition-colors"
       asChild
     >
-      <Link to={to} target="_blank" rel="noreferrer noopener">
+      <Link to={to}>
         <Icon className="h-3 w-3" /> {label}
-        <ExternalLink className="h-2.5 w-2.5 text-muted-foreground" />
+        <ExternalLink className="h-2.5 w-2.5 text-muted-foreground ml-0.5" />
       </Link>
     </Button>
   );
@@ -169,233 +184,266 @@ function OperationCard({
 }) {
   const m = meta?.[it.status];
   return (
-    <Card className="group overflow-hidden transition-all hover:shadow-md">
-      <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="space-y-1.5 min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
+    <Card className="group overflow-hidden border border-border/80 bg-card/95 transition-all duration-200 hover:shadow-lg hover:border-primary/30 flex flex-col justify-between">
+      <CardHeader className="p-4 pb-3 space-y-3">
+        {/* Top Badges & Total */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1.5 min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
               <StatusPill meta={m} status={it.status} />
-              {it.list_name ? (
-                <Badge variant="outline" className="h-5 gap-1 text-[11px]">
-                  <HashIcon className="h-2.5 w-2.5 text-indigo-500" />{" "}
-                  {it.list_name}
+              {it.list_name && (
+                <Badge variant="outline" className="h-5 gap-1 font-mono text-[11px] border-primary/25 bg-primary/5 text-primary">
+                  <HashIcon className="h-2.5 w-2.5" /> {it.list_name}
                 </Badge>
-              ) : null}
-              {it.validation_retificativa &&
-              it.validation_retificativa !== "none" ? (
+              )}
+              {it.operational_unit && (
+                <Badge variant="secondary" className="h-5 gap-1 text-[10px] font-medium text-muted-foreground bg-muted">
+                  <Building2 className="h-2.5 w-2.5 shrink-0" /> {it.operational_unit}
+                </Badge>
+              )}
+              {it.validation_retificativa && it.validation_retificativa !== "none" && (
                 <Badge
                   variant="secondary"
-                  className="h-5 gap-1 text-[11px] border-amber-400/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                  className="h-5 gap-1 text-[10px] border-amber-400/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-semibold"
                 >
-                  <AlertTriangle className="h-2.5 w-2.5" />{" "}
-                  Retificação · {it.validation_retificativa.toUpperCase()}
+                  <AlertTriangle className="h-2.5 w-2.5 shrink-0" /> Retificação · {it.validation_retificativa.toUpperCase()}
                 </Badge>
-              ) : null}
-              {it.has_error ? (
-                <Badge
-                  variant="destructive"
-                  className="h-5 gap-1 text-[11px]"
-                >
-                  <AlertTriangle className="h-2.5 w-2.5" /> Correção
-                </Badge>
-              ) : null}
-            </div>
-            <h3 className="truncate text-sm font-semibold">
-              {it.client_name ? (
-                <span className="mr-2">{it.client_name}</span>
-              ) : (
-                <span className="text-muted-foreground">Cliente não informado · </span>
               )}
-              {it.car_name || (it.brand && it.model) ? (
-                <span className="font-medium text-foreground/90">
-                  {it.car_name ?? `${it.brand} ${it.model}`}
-                </span>
-              ) : null}
-              {it.license_plate ? (
-                <span className="ml-2 font-mono text-[11px] text-muted-foreground">
-                  · {it.license_plate}
-                </span>
-              ) : null}
-            </h3>
+              {it.has_error && (
+                <Badge variant="destructive" className="h-5 gap-1 text-[10px]">
+                  <AlertTriangle className="h-2.5 w-2.5 shrink-0" /> Correção
+                </Badge>
+              )}
+            </div>
+
+            {/* Client & Vehicle */}
+            <div className="pt-1">
+              <h3 className="text-base font-bold text-foreground tracking-tight leading-snug truncate" title={it.client_name ?? "Cliente não informado"}>
+                {it.client_name || "Cliente não informado"}
+              </h3>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                {(it.car_name || (it.brand && it.model)) && (
+                  <span className="font-medium text-foreground/90 inline-flex items-center gap-1.5 truncate max-w-[220px]" title={it.car_name ?? `${it.brand} ${it.model}`}>
+                    <Car className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    {it.car_name ?? `${it.brand} ${it.model}`}
+                  </span>
+                )}
+                {it.license_plate && (
+                  <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-muted/80 border border-border/70 text-foreground shrink-0">
+                    {it.license_plate}
+                  </span>
+                )}
+                {it.vin && (
+                  <span className="font-mono text-[10px] text-muted-foreground shrink-0">
+                    VIN: {it.vin.slice(0, 8)}…
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
-          <div className="flex flex-col items-end gap-1">
-            <div className="text-right">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Total
-              </div>
-              <div className="text-lg font-semibold tabular-nums">
-                {fmtBRL(it.valor_total)}
-              </div>
+          {/* Monetary Total Block */}
+          <div className="shrink-0 text-right pl-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block">
+              Total Operacional
+            </span>
+            <div className="text-lg sm:text-xl font-bold tabular-nums text-foreground tracking-tight mt-0.5">
+              {fmtBRL(it.valor_total)}
             </div>
+            {it.valor_pendente !== null && it.valor_pendente > 0 ? (
+              <span className="inline-block text-[10px] font-medium text-amber-600 dark:text-amber-400 mt-0.5">
+                Pendente: {fmtBRL(it.valor_pendente)}
+              </span>
+            ) : it.status === "pago" || it.status === "encerrado" ? (
+              <span className="inline-block text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                Totalmente Pago
+              </span>
+            ) : null}
           </div>
         </div>
 
+        {/* Next Action Banner */}
         <div
-          className="mt-2 flex items-start gap-2 rounded-lg border border-indigo-500/20 bg-indigo-500/5 px-3 py-2 text-[11px] text-indigo-800 dark:text-indigo-300"
+          className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-foreground/90 dark:text-primary-foreground"
           role="note"
           aria-label="Próxima ação"
         >
-          <ArrowUpRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-500" />
-          <div className="space-y-0.5">
-            <div className="font-semibold uppercase tracking-wide text-indigo-500/90 dark:text-indigo-400">
+          <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <span className="font-semibold uppercase tracking-wider text-[10px] text-primary block">
               Próxima ação
-            </div>
-            <div className="leading-snug">{m?.next_action ?? it.next_action}</div>
+            </span>
+            <span className="leading-snug text-foreground/90 text-xs block">
+              {m?.next_action ?? it.next_action}
+            </span>
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4 pb-3 pt-0">
-        <div className="grid gap-3 text-[11px] md:grid-cols-3">
-          <div className="space-y-1 rounded-lg border bg-slate-50/50 p-2.5 dark:bg-slate-900/20">
-            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <Wrench className="h-3 w-3 text-indigo-500" /> Produção
+      <CardContent className="p-4 pt-0 space-y-3 flex-1 flex flex-col justify-between">
+        {/* 3 Pipeline Stages Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          {/* STAGE 1: PRODUÇÃO */}
+          <div className="min-w-0 rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 space-y-2 transition-colors hover:border-border">
+            <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-indigo-500">
+                <Wrench className="h-3.5 w-3.5 shrink-0" /> Produção
+              </div>
+              {it.production_status && (
+                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                  it.production_status === 'delivered' || it.production_status === 'finished'
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                    : it.production_status === 'paused'
+                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                    : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                }`}>
+                  {formatProductionStatus(it.production_status)}
+                </span>
+              )}
             </div>
-            <dl className="space-y-0.5 leading-relaxed">
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Ordem</dt>
-                <dd className="font-medium tabular-nums">
+            <div className="space-y-1.5 text-xs">
+              <div className="min-w-0">
+                <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Ordem</span>
+                <span className="block font-mono text-xs font-semibold text-foreground truncate" title={it.production_code ?? ""}>
                   {it.production_code ?? "—"}
-                </dd>
+                </span>
               </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Status</dt>
-                <dd className="font-medium">
-                  {it.production_status ?? "—"}
-                </dd>
+              <div className="min-w-0">
+                <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Status</span>
+                <span className="block font-medium text-xs text-foreground truncate">
+                  {formatProductionStatus(it.production_status)}
+                </span>
               </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Finalizado</dt>
-                <dd className="font-medium tabular-nums">
+              <div className="min-w-0">
+                <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Finalizado</span>
+                <span className="block font-medium text-xs text-foreground tabular-nums">
                   {fmtDate(it.production_delivered_at)}
-                </dd>
+                </span>
               </div>
-            </dl>
+            </div>
           </div>
 
-          <div className="space-y-1 rounded-lg border bg-slate-50/50 p-2.5 dark:bg-slate-900/20">
-            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <FileText className="h-3 w-3 text-sky-500" /> WEEKLOG
-            </div>
-            <dl className="space-y-0.5 leading-relaxed">
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Semana</dt>
-                <dd className="font-medium tabular-nums">
-                  {it.week ?? "—"}
-                </dd>
+          {/* STAGE 2: WEEKLOG */}
+          <div className="min-w-0 rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 space-y-2 transition-colors hover:border-border">
+            <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-sky-500">
+                <FileText className="h-3.5 w-3.5 shrink-0" /> WEEKLOG
               </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Validação</dt>
-                <dd className="font-medium">
+              {it.validation_situation === "oui" ? (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  Validado
+                </span>
+              ) : it.validation_situation === "non" ? (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                  Recusado
+                </span>
+              ) : it.week ? (
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                  Em Aberto
+                </span>
+              ) : null}
+            </div>
+            <div className="space-y-1.5 text-xs">
+              <div className="min-w-0">
+                <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Semana</span>
+                <span className="block font-mono text-xs font-semibold text-foreground truncate">
+                  {it.week ?? "—"}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Validação</span>
+                <span className="block font-medium text-xs truncate">
                   {it.validation_situation === "oui" ? (
-                    <span className="text-emerald-700 dark:text-emerald-400">
-                      SIM
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3 inline shrink-0" /> Sim {it.validation_assinado ? "· Assinado" : ""}
                     </span>
                   ) : it.validation_situation === "non" ? (
-                    <span className="text-rose-700 dark:text-rose-400">NÃO</span>
-                  ) : (
-                    "—"
-                  )}
-                  {it.validation_assinado ? (
-                    <span className="ml-1.5 text-emerald-700 dark:text-emerald-400">
-                      · assinado
+                    <span className="text-rose-600 dark:text-rose-400 font-semibold inline-flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3 inline shrink-0" /> Não
                     </span>
-                  ) : null}
-                </dd>
+                  ) : it.validation_assinado ? (
+                    <span className="text-indigo-600 dark:text-indigo-400 font-medium">Assinado</span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </span>
               </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Valor Aprovado</dt>
-                <dd className="font-medium tabular-nums">
+              <div className="min-w-0">
+                <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Valor Aprovado</span>
+                <span className="block font-semibold text-xs text-foreground tabular-nums truncate">
                   {fmtBRL(it.valor_aprovado)}
-                </dd>
+                </span>
               </div>
-            </dl>
+            </div>
           </div>
 
-          <div className="space-y-1 rounded-lg border bg-slate-50/50 p-2.5 dark:bg-slate-900/20">
-            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <CreditCard className="h-3 w-3 text-amber-500" /> Pagamento
+          {/* STAGE 3: PAGAMENTO */}
+          <div className="min-w-0 rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 space-y-2 transition-colors hover:border-border">
+            <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-500">
+                <CreditCard className="h-3.5 w-3.5 shrink-0" /> Pagamento
+              </div>
+              {it.status === "pago" || it.status === "encerrado" ? (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  Pago
+                </span>
+              ) : it.valor_pendente && it.valor_pendente > 0 ? (
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  Pendente
+                </span>
+              ) : null}
             </div>
-            <dl className="space-y-0.5 leading-relaxed">
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Lista</dt>
-                <dd className="font-mono font-medium tabular-nums">
-                  {it.list_name ?? "—"}
-                </dd>
+            <div className="space-y-1.5 text-xs">
+              <div className="min-w-0">
+                <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Lista</span>
+                <span className="block font-mono text-xs font-semibold text-foreground truncate">
+                  {it.list_name ? `# ${it.list_name}` : "—"}
+                </span>
               </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Pago</dt>
-                <dd className="font-medium tabular-nums">
+              <div className="min-w-0">
+                <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Valor Pago</span>
+                <span className="block font-medium text-xs text-foreground tabular-nums truncate">
                   {fmtBRL(it.valor_pago)}
-                </dd>
+                </span>
               </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Pendente</dt>
-                <dd
-                  className={`font-medium tabular-nums ${
-                    it.valor_pendente && it.valor_pendente > 0
-                      ? "text-amber-700 dark:text-amber-400"
-                      : "text-emerald-700 dark:text-emerald-400"
-                  }`}
-                >
+              <div className="min-w-0">
+                <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Pendente</span>
+                <span className={`block font-semibold text-xs tabular-nums truncate ${
+                  it.valor_pendente && it.valor_pendente > 0
+                    ? "text-amber-600 dark:text-amber-400 font-bold"
+                    : "text-emerald-600 dark:text-emerald-400"
+                }`}>
                   {fmtBRL(it.valor_pendente)}
-                </dd>
+                </span>
               </div>
-            </dl>
+            </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-2">
-          <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-            {it.technician_name ? (
+        {/* Card Footer: Metadata and Links */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 border-t border-border/50 pt-2.5 mt-auto">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            {it.technician_name && (
               <span className="inline-flex items-center gap-1.5">
-                <User className="h-3 w-3" /> {it.technician_name}
+                <User className="h-3.5 w-3.5" /> {it.technician_name}
               </span>
-            ) : null}
-            {it.operational_unit ? (
+            )}
+            {it.year_reference && (
               <span className="inline-flex items-center gap-1.5">
-                <Building2 className="h-3 w-3" /> {it.operational_unit}
+                <Calendar className="h-3.5 w-3.5" /> {it.year_reference}
               </span>
-            ) : null}
-            {it.platform ? (
-              <span className="inline-flex items-center gap-1.5">
-                <Building2 className="h-3 w-3" /> {it.platform}
-              </span>
-            ) : null}
-            {it.vin ? (
-              <span className="inline-flex items-center gap-1.5 font-mono">
-                <Car className="h-3 w-3" /> VIN {it.vin.slice(0, 8)}…
-              </span>
-            ) : null}
-            {it.year_reference ? (
-              <span className="inline-flex items-center gap-1.5">
-                <Calendar className="h-3 w-3" /> {it.year_reference}
-              </span>
-            ) : null}
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            {it.production_order_id ? (
-              <NavLink
-                to={`/production`}
-                label="Produção"
-                icon={Wrench}
-              />
-            ) : null}
-            {it.service_order_id ? (
-              <NavLink
-                to={`/service-orders`}
-                label="WEEKLOG"
-                icon={FileText}
-              />
-            ) : null}
-            {it.payment_order_id ? (
-              <NavLink
-                to={`/payment-orders`}
-                label="Pagamento"
-                icon={CreditCard}
-              />
-            ) : null}
+            {(it.production_order_id || it.production_code) && (
+              <NavLink to="/production" label="Produção" icon={Wrench} />
+            )}
+            {(it.service_order_id || it.week) && (
+              <NavLink to="/service-orders" label="WEEKLOG" icon={FileText} />
+            )}
+            {(it.payment_order_id || it.list_name) && (
+              <NavLink to="/payment-orders" label="Pagamento" icon={CreditCard} />
+            )}
           </div>
         </div>
       </CardContent>
@@ -742,7 +790,7 @@ function WorkflowGrid({
 }) {
   if (loading && (!items || items.length === 0)) {
     return (
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (
           <Card key={i} className="overflow-hidden">
             <CardHeader className="pb-3">
@@ -788,7 +836,7 @@ function WorkflowGrid({
     );
   }
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
       {items.map((it) => (
         <OperationCard
           key={it.id}
