@@ -55,17 +55,17 @@ export function CompanyDataCard() {
   useEffect(() => {
     if (data) {
       setForm({
-        company_name: (data as any).company_name || "",
+        company_name: (data as any).company_name || (data as any).companyName || "",
         siret: (data as any).siret || "",
-        tva_number: (data as any).tva_number || "",
-        company_email: (data as any).company_email || "",
-        company_phone: (data as any).company_phone || "",
-        bank_name: (data as any).bank_name || "",
+        tva_number: (data as any).tva_number || (data as any).tvaNnumber || "",
+        company_email: (data as any).company_email || (data as any).companyEmail || "",
+        company_phone: (data as any).company_phone || (data as any).companyPhone || "",
+        bank_name: (data as any).bank_name || (data as any).bankName || "",
         iban: (data as any).iban || "",
-        swift_bic: (data as any).swift_bic || "",
-        street_number: (data as any).street_number || "",
-        street_name: (data as any).street_name || "",
-        postal_code: (data as any).postal_code || "",
+        swift_bic: (data as any).swift_bic || (data as any).swiftBic || "",
+        street_number: (data as any).street_number || (data as any).streetNumber || "",
+        street_name: (data as any).street_name || (data as any).streetName || "",
+        postal_code: (data as any).postal_code || (data as any).postalCode || "",
         city: (data as any).city || "",
         country: (data as any).country || "",
       });

@@ -4,8 +4,16 @@ import { apiRequest } from "@/lib/api";
 import { useLanguage } from "@/hooks/useLanguage";
 import { Skeleton } from "@/components/ui/skeleton";
 import * as maplibregl from "maplibre-gl";
+import { setWorkerUrl } from "maplibre-gl";
 import type { Map as MLMap, GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+// Configure worker URL explicitly for Vite bundler
+// @ts-ignore
+import maplibreglWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+
+if (typeof window !== "undefined" && typeof setWorkerUrl === "function") {
+  setWorkerUrl(maplibreglWorkerUrl);
+}
 import { Users, CloudRain, Zap, Radar, Wrench, FileText, X, AlertTriangle, Wind, Clock, Gauge, Filter, Play, Pause, RotateCcw, Target, Eye } from "lucide-react";
 import { HailRadarIcon } from "@/components/icons/HailRadarIcon";
 import { OperationalPanel, PanelTeam, PanelOrder } from "./OperationalPanel";
@@ -97,6 +105,35 @@ function guessCityFromText(text: string): string | null {
 /* ------------------------------------------------------------------ */
 const DARK_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
+/** Fallback raster style (instant load, zero external fonts/sprites required) */
+const DARK_FALLBACK_STYLE: any = {
+  version: 8,
+  sources: {
+    "carto-dark": {
+      type: "raster",
+      tiles: [
+        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+      ],
+      tileSize: 256,
+      attribution:
+        '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    },
+  },
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  layers: [
+    {
+      id: "carto-dark-layer",
+      type: "raster",
+      source: "carto-dark",
+      minzoom: 0,
+      maxzoom: 19,
+    },
+  ],
+};
+
 /* ------------------------------------------------------------------ */
 /*  Layer config                                                       */
 /* ------------------------------------------------------------------ */
@@ -160,6 +197,8 @@ export function OperationalMap() {
   const initTimerRef = useRef<number | null>(null);
   const gpuContextLostRef = useRef(false);
   const radarStaggerTimerRef = useRef<number | null>(null);
+  const fallbackReadyTimerRef = useRef<number | null>(null);
+  const layersMountedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
@@ -523,6 +562,7 @@ export function OperationalMap() {
   /* -------- Init map ------------------------------------------------ */
   useEffect(() => {
     if (!containerEl || mapRef.current) return;
+    layersMountedRef.current = false;
 
     // WebGL availability check — fall back to no-WebGL panel if missing
     const probe = document.createElement("canvas");
@@ -534,7 +574,6 @@ export function OperationalMap() {
       setMapError("WebGL indisponível neste dispositivo");
       return;
     }
-    try { (gl as WebGLRenderingContext).getExtension("WEBGL_lose_context")?.loseContext(); } catch {}
 
     if (!styleRef.current) {
       const s = document.createElement("style");
@@ -547,7 +586,7 @@ export function OperationalMap() {
     try {
       map = new maplibregl.Map({
         container: containerEl,
-        style: DARK_STYLE,
+        style: DARK_FALLBACK_STYLE,
         center: [2.3522, 46.6034],
         zoom: 4.8,
         attributionControl: { compact: true },
@@ -591,14 +630,19 @@ export function OperationalMap() {
     map.on("error", (e: any) => {
       // Isolated: tile/style/zoom errors won't crash the map
       const msg = e?.error?.message ?? String(e);
-      if (/zoom|tile|404|aborted/i.test(msg)) return; // expected, ignore
-      setMapReady(false);
-      setMapError(msg || "Falha inesperada no mapa operacional.");
+      if (/zoom|tile|404|aborted|Failed to fetch|NetworkError/i.test(msg)) {
+        return; // expected, ignore
+      }
+      if (!layersMountedRef.current) {
+        setMapReady(false);
+        setMapError(msg || "Falha inesperada no mapa operacional.");
+      }
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
-    map.on("load", () => {
+    function mountLayers() {
+      if (!map || layersMountedRef.current) return;
       try {
       /* ---- Empty sources & layers; populated by data effect -------- */
       const addClusterLayer = (id: string, color: string) => {
@@ -875,21 +919,37 @@ export function OperationalMap() {
         map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
         map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
       });
-      window.clearTimeout(fallbackReadyTimer);
+      if (fallbackReadyTimerRef.current) {
+        window.clearTimeout(fallbackReadyTimerRef.current);
+        fallbackReadyTimerRef.current = null;
+      }
+      layersMountedRef.current = true;
       setMapReady(true);
+      setMapError(null);
+      try { map.resize(); } catch {}
       } catch (e) {
-        window.clearTimeout(fallbackReadyTimer);
-        setMapReady(false);
-        setMapError((e as Error)?.message || "Falha ao montar as camadas do mapa.");
+        if (!layersMountedRef.current) {
+          setMapReady(false);
+          setMapError((e as Error)?.message || "Falha ao montar as camadas do mapa.");
+        }
       }
-    });
+    }
 
+    if (map.isStyleLoaded()) {
+      mountLayers();
+    } else {
+      map.on("load", mountLayers);
+      map.once("styledata", mountLayers);
+    }
+
+    // Timeout de segurança
     const fallbackReadyTimer = window.setTimeout(() => {
-      if (!map.loaded()) {
+      if (!layersMountedRef.current && !map.isStyleLoaded() && !map.loaded()) {
         setMapReady(false);
-        setMapError("Tempo limite excedido ao inicializar o mapa. Verifique WebGL e a fonte cartográfica.");
+        setMapError("Tempo limite excedido ao inicializar o mapa. Verifique WebGL e a conexão.");
       }
-    }, 10_000);
+    }, 15_000);
+    fallbackReadyTimerRef.current = fallbackReadyTimer;
 
     mapRef.current = map;
 
@@ -898,7 +958,7 @@ export function OperationalMap() {
     const radarStaggerTimer = radarStaggerTimerRef.current;
 
     return () => {
-      window.clearTimeout(fallbackReadyTimer);
+      if (fallbackReadyTimerRef.current) window.clearTimeout(fallbackReadyTimerRef.current);
       if (radarTimer) window.clearTimeout(radarTimer);
       if (initTimer) window.clearTimeout(initTimer);
       if (radarStaggerTimer) window.clearTimeout(radarStaggerTimer);
@@ -906,6 +966,7 @@ export function OperationalMap() {
       try { canvas.removeEventListener("webglcontextrestored", onCtxRestored); } catch {}
       try { map.remove(); } catch {}
       mapRef.current = null;
+      layersMountedRef.current = false;
       setMapReady(false);
     };
   }, [containerEl, mapInitTick]);
@@ -1325,15 +1386,17 @@ export function OperationalMap() {
             <button
               onClick={() => {
                 initRetryRef.current = 0;
-                if (!mapRef.current) setMapInitTick((n) => n + 1);
-                else {
-                  gpuContextLostRef.current = false;
-                  setSourceRecoveryTick((n) => n + 1);
-                  setRasterRecoveryTick((n) => n + 1);
+                if (mapRef.current) {
+                  try { mapRef.current.remove(); } catch {}
+                  mapRef.current = null;
                 }
+                layersMountedRef.current = false;
+                gpuContextLostRef.current = false;
                 setMapError(null);
+                setMapReady(false);
+                setMapInitTick((n) => n + 1);
               }}
-              className="mt-1 text-[11px] px-3 py-1 rounded-md border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10"
+              className="mt-1 text-[11px] px-3 py-1 rounded-md border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10 cursor-pointer"
             >
               Tentar novamente
             </button>

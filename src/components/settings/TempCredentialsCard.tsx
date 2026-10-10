@@ -25,16 +25,20 @@ export function TempCredentialsCard() {
     staleTime: 60_000,
     placeholderData: (previousData) => previousData ?? [],
     queryFn: async (): Promise<TempCred[]> => {
-      const { data, error } = await withPromiseTimeout<any>(
-        supabase
-          .from("temp_credentials" as any)
-          .select("user_id, email, full_name, temp_password, created_at")
-          .order("created_at", { ascending: false }),
-        10000,
-        "temp_credentials",
-      );
-      if (error) throw error;
-      return (data as unknown as TempCred[]) ?? [];
+      try {
+        const { data, error } = await withPromiseTimeout<any>(
+          supabase
+            .from("temp_credentials" as any)
+            .select("user_id, email, full_name, temp_password, created_at")
+            .order("created_at", { ascending: false }),
+          3000,
+          "temp_credentials",
+        );
+        if (error) return [];
+        return (data as unknown as TempCred[]) ?? [];
+      } catch {
+        return [];
+      }
     },
   });
 

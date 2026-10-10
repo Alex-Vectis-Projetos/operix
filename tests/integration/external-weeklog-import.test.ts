@@ -166,6 +166,10 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
     const { weeklogsRouter } = await import("../../backend/src/routes/weeklogs.js");
     app.use("/api/weeklogs", weeklogsRouter);
 
+    // Rota de workflow operacional
+    const { workflowRouter } = await import("../../backend/src/routes/workflow.js");
+    app.use("/api/workflow", workflowRouter);
+
     // Rota futura de importações operacionais externas
     try {
       // @ts-expect-error route created in T06
@@ -759,6 +763,28 @@ describe("Spec 004 — External WEEKLOG Import & Coverage Suite (T01/T02 Baselin
       expect(draftList).not.toBeNull();
       expect(draftList?.status).toBe("draft");
       expect(draftList?.items).toHaveLength(2);
+
+      // Verify GET /api/weeklogs includes the validated weeklog
+      const resWeeklogs = await fetch(`${baseUrl}/api/weeklogs`, {
+        headers: getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha),
+      });
+      expect(resWeeklogs.status).toBe(200);
+      const weeklogsList = await resWeeklogs.json();
+      expect(weeklogsList.some((w: any) => w.id === data.weeklogId)).toBe(true);
+
+      // Verify GET /api/workflow crosses Weeklog with PaymentList properly
+      const resWf = await fetch(`${baseUrl}/api/workflow?workspace_id=${FIXTURES_004_WEEKLOG.wsAlpha}`, {
+        headers: getAuthHeader(FIXTURES_004_WEEKLOG.ownerA, FIXTURES_004_WEEKLOG.wsAlpha),
+      });
+      expect(resWf.status).toBe(200);
+      const wfData = await resWf.json();
+      const citroenWf = wfData.items.find((it: any) => it.car_name === "CITROEN C3");
+      expect(citroenWf).toBeDefined();
+      expect(citroenWf.status).toBe("aprovado");
+      expect(citroenWf.validation_situation).toBe("oui");
+      expect(citroenWf.valor_aprovado).toBe(250);
+      expect(citroenWf.list_name).toBe(draftList?.listNumber);
+      expect(citroenWf.week).not.toBeNull();
     });
   });
 });

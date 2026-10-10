@@ -37,7 +37,30 @@ settingsRouter.get("/company", async (req: AuthenticatedRequest, res: Response, 
     const settings = await prisma.companySetting.findUnique({
       where: { userId },
     });
-    return res.json({ settings: settings ?? null });
+    if (!settings) {
+      return res.json({ settings: null });
+    }
+    return res.json({
+      settings: {
+        ...settings,
+        company_name: settings.companyName,
+        siret: settings.siret,
+        tva_number: settings.tvaNnumber,
+        company_email: settings.companyEmail,
+        company_phone: settings.companyPhone,
+        bank_name: settings.bankName,
+        iban: settings.iban,
+        swift_bic: settings.swiftBic,
+        street_number: settings.streetNumber,
+        street_name: settings.streetName,
+        postal_code: settings.postalCode,
+        city: settings.city,
+        country: settings.country,
+        company_share: settings.companyShare,
+        partner_share: settings.partnerShare,
+        tech_share: settings.techShare,
+      },
+    });
   } catch (error) {
     return next(error);
   }

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { buildAuthHeaders } from "@/lib/authSession";
 import { uploadFile, deleteFiles, getFileUrl } from "@/lib/storage";
 import {
   listDocuments,
@@ -112,7 +113,9 @@ async function fetchDocumentBlobUrl(
 
 
   const mimeType = getMimeType(doc.name, doc.mime_type);
-  const response = await fetch(signedUrl);
+  const response = await fetch(signedUrl, {
+    headers: buildAuthHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch file (${response.status}).`);

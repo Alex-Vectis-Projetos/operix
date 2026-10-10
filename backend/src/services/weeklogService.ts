@@ -739,8 +739,6 @@ export async function listWeeklogs(
     if (filters.status !== "all") {
       where.status = filters.status;
     }
-  } else {
-    where.status = { not: "validated" };
   }
   if (filters.siteKey) {
     where.siteKey = filters.siteKey;

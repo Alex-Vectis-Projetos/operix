@@ -62,7 +62,7 @@ export const STATUS_META: Record<
     label: "Aprovado",
     tone: "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200",
     dot: "bg-emerald-500",
-    next_action: "Criar a Ordem/Lista de Pagamento (geração automática ao validar).",
+    next_action: "WEEKLOG validado. Lista comercial em revisão/confrontação.",
   },
   aguardando_ordem_lista: {
     label: "Aguardando ordem/lista",
@@ -74,7 +74,7 @@ export const STATUS_META: Record<
     label: "Aguardando pagamento",
     tone: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border-amber-300",
     dot: "bg-amber-600",
-    next_action: "Efetuar o pagamento da Ordem de Pagamento.",
+    next_action: "Aguardar liquidação financeira da Fatura/Cobrança.",
   },
   pago: {
     label: "Pago",
@@ -278,26 +278,30 @@ function deriveStatus(params: {
   if (pli?.paymentList) {
     const plStatus = pli.paymentList.status;
     if (plStatus === "ready_for_billing" || plStatus === "confronted" || plStatus === "under_review" || plStatus === "draft") {
-      return "aguardando_ordem_lista";
+      return "aprovado";
     }
+  }
+
+  if (pay?.status === "draft" || pay?.status === "under_review" || pay?.status === "confronted" || pay?.status === "ready_for_billing") {
+    return "aprovado";
+  }
+
+  if (we) {
+    const latestVal = we.weeklog?.validations?.[0];
+    if (latestVal?.status === "rejected") return "correcao_necessaria";
+    if (latestVal?.status === "approved" || latestVal?.status === "validated") return "aprovado";
+    if (latestVal?.submittedAt || latestVal?.status === "signed") return "aguardando_aprovacao";
+    return "weeklog_em_aberto";
   }
 
   if (pay) {
     return "aguardando_pagamento";
   }
 
-  if (we) {
-    const latestVal = we.weeklog?.validations?.[0];
-    if (latestVal?.status === "rejected") return "correcao_necessaria";
-    if (latestVal?.status === "approved") return "aguardando_ordem_lista";
-    if (latestVal?.submittedAt || latestVal?.status === "signed") return "aguardando_aprovacao";
-    return "weeklog_em_aberto";
-  }
-
   if (so) {
     if (val.situation === "non") return "correcao_necessaria";
     if (val.situation === "oui") {
-      return "aguardando_ordem_lista";
+      return "aprovado";
     }
     if (val.assinado) return "aguardando_aprovacao";
     if (
@@ -399,7 +403,9 @@ function itemFromParts(params: {
 
   const latestVal = we?.weeklog?.validations?.[0];
   const isApproved =
-    latestVal?.status === "approved" || val.situation === "oui";
+    latestVal?.status === "approved" ||
+    latestVal?.status === "validated" ||
+    val.situation === "oui";
   const isRejected =
     latestVal?.status === "rejected" || val.situation === "non";
 
@@ -412,6 +418,7 @@ function itemFromParts(params: {
   const validation_assinado =
     Boolean(latestVal?.submittedAt) ||
     latestVal?.status === "approved" ||
+    latestVal?.status === "validated" ||
     latestVal?.status === "signed" ||
     val.assinado;
 
@@ -470,9 +477,11 @@ function itemFromParts(params: {
       `wf-${crypto.randomUUID()}`,
     origin: po
       ? "production_weeklog"
-      : so
+      : we
         ? "weeklog_only"
-        : "payment_only",
+        : so
+          ? "weeklog_only"
+          : "payment_only",
 
     production_order_id: po?.id ?? we?.productionOrderId ?? null,
     production_code: po?.code ?? null,
@@ -573,7 +582,23 @@ workflowRouter.get(
         prisma.paymentList.findMany({
           where: { workspaceId: workspace_id },
           include: {
-            items: true,
+            items: {
+              include: {
+                paymentList: true,
+                weeklogEntry: {
+                  include: {
+                    weeklog: {
+                      include: {
+                        validations: {
+                          orderBy: { validationSequence: "desc" },
+                          take: 1,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
           orderBy: { createdAt: "desc" },
         }),
@@ -596,6 +621,15 @@ workflowRouter.get(
         if (pay.serviceOrderId) payBySoId.set(pay.serviceOrderId, pay);
         if (pay.id) payById.set(pay.id, pay);
         if (pay.listName) payByListName.set(pay.listName, pay);
+      }
+
+      const pliByLegacyPayId = new Map<string, any>();
+      for (const pl of paymentLists) {
+        for (const item of pl.items) {
+          if (item.legacyPaymentOrderId) {
+            pliByLegacyPayId.set(item.legacyPaymentOrderId, item);
+          }
+        }
       }
 
       const seenKeys = new Set<string>();
@@ -663,8 +697,44 @@ workflowRouter.get(
         if (seenKeys.has(`pay-${pay.id}`)) continue;
         const so = pay.serviceOrderId ? bySoId.get(pay.serviceOrderId) ?? null : null;
         let po: any | null = so ? byProductionSoFK.get(so.id) ?? null : null;
-        const it = itemFromParts({ po, so, pay });
+        const pli = pliByLegacyPayId.get(pay.id) ?? null;
+        const we = pli?.weeklogEntry ?? null;
+        const it = itemFromParts({ po, so, pay, we, pli });
         pushIfNew(`pay-${pay.id}`, it);
+      }
+
+      for (const pl of paymentLists) {
+        for (const pli of pl.items) {
+          if (pli.legacyPaymentOrderId && seenPayIds.has(pli.legacyPaymentOrderId)) continue;
+          if (seenKeys.has(`pli-${pli.id}`)) continue;
+          const we = pli.weeklogEntry ?? null;
+          const it = itemFromParts({ po: null, so: null, pay: null, we, pli });
+          pushIfNew(`pli-${pli.id}`, it);
+        }
+      }
+
+      const unlinkedWeeklogEntries = await prisma.weeklogEntry.findMany({
+        where: {
+          workspaceId: workspace_id,
+          productionOrderId: null,
+          paymentListItems: { none: {} },
+        },
+        include: {
+          weeklog: {
+            include: {
+              validations: {
+                orderBy: { validationSequence: "desc" },
+                take: 1,
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      for (const we of unlinkedWeeklogEntries) {
+        if (seenKeys.has(`we-${we.id}`)) continue;
+        const it = itemFromParts({ po: null, so: null, pay: null, we, pli: null });
+        pushIfNew(`we-${we.id}`, it);
       }
 
       items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));

@@ -340,7 +340,7 @@ export function WeeklogOperationalDocumentDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300">
             <FileText className="h-5 w-5" />
-            Documento Operacional · WEEKLOG
+            Documento Operacional · Arquivo Histórico
             {state.week_display ? (
               <span className="ml-auto text-sm font-normal text-muted-foreground">
                 {state.week_display}
@@ -349,10 +349,13 @@ export function WeeklogOperationalDocumentDialog({
             ) : null}
           </DialogTitle>
           <DialogDescription className="text-[11px] text-muted-foreground">
-            Dados preenchidos automaticamente da Produção / Orçamento / WEEKLOG.
-            Ajuste valor, data, responsável, validação e retificativa antes de confirmar.
+            Registro histórico de documento operacional (somente leitura). A validação formal com assinatura digital é realizada na aba de Lotes Semanais (WEEKLOG Canônico).
           </DialogDescription>
         </DialogHeader>
+
+        <div className="rounded-lg border border-amber-300/60 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+          <b>Aviso:</b> Este modal pertence ao <i>Arquivo Histórico (Legado)</i> e opera em modo somente leitura. Para validar lotes, assinar digitalmente e liberar para lista de pagamento, acerte os lotes na aba <b>Lotes Semanais (WEEKLOG Canônico)</b>.
+        </div>
 
         {/* ====== CABEÇALHO (modelo folha) ====== */}
         <section className="grid grid-cols-12 gap-3 p-3 rounded-lg border bg-slate-50 dark:bg-slate-900/40 text-xs">
@@ -817,7 +820,7 @@ export function WeeklogOperationalDocumentDialog({
 
         <DialogFooter className="mt-4 flex items-center justify-between">
           <span className="text-xs text-muted-foreground italic">
-            Visualização somente leitura · Validação e retificação canônica disponíveis no T10
+            Visualização somente leitura · Para validar lotes canônicos, utilize a aba "Lotes Semanais (WEEKLOG Canônico)"
           </span>
           <Button
             variant="outline"

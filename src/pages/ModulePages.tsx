@@ -1249,6 +1249,26 @@ export function UsersPage() {
     onError: (err) => toast.error((err as Error).message),
   });
 
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ membershipId, newStatus }: { membershipId: string; newStatus: "active" | "inactive" }) => {
+      if (!workspaceId) throw new Error("Workspace não selecionado.");
+      return apiRequest(`/workspaces/${workspaceId}/members/${membershipId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: newStatus }),
+        timeoutMs: 10000,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workspace-users-page"] });
+      queryClient.invalidateQueries({ queryKey: ["workspace-members"] });
+      toast.success(t("toast.updated"));
+    },
+    onError: (err) => toast.error((err as Error).message),
+  });
+
   const handleCreateUser = async () => {
     if (!workspaceId || !createForm.email || !createForm.full_name) return;
     setCreating(true);
@@ -1501,9 +1521,29 @@ export function UsersPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={u.status === "active" ? "text-[10px] border-emerald-500/30 text-emerald-500" : "text-[10px] border-border text-muted-foreground"}>
-                        {u.status === "active" ? "Ativo" : "Inativo"}
-                      </Badge>
+                      {isAdmin && !u.is_workspace_owner && u.auth_user_id !== user?.id ? (
+                        <Select
+                          value={u.status}
+                          onValueChange={(v) =>
+                            updateStatusMutation.mutate({
+                              membershipId: u.membership_id,
+                              newStatus: v as "active" | "inactive",
+                            })
+                          }
+                        >
+                          <SelectTrigger className="h-7 w-[95px] text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="active">Ativo</SelectItem>
+                            <SelectItem value="inactive">Inativo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Badge variant="outline" className={u.status === "active" ? "text-[10px] border-emerald-500/30 text-emerald-500" : "text-[10px] border-border text-muted-foreground"}>
+                          {u.status === "active" ? "Ativo" : "Inativo"}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{formatLastAccess(u.last_access_at)}</TableCell>
                   </TableRow>

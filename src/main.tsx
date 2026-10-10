@@ -141,6 +141,14 @@ import { installAuthBreaker } from "./lib/authBreaker";
 // Survives GoTrue 504 storms without infinite spinners.
 installAuthBreaker();
 
+// Auto-recover from stale chunks / redeployments (Vite dynamic import hash mismatch)
+if (typeof window !== "undefined") {
+  window.addEventListener("vite:preloadError", (event) => {
+    console.warn("[vite] Stale chunk hash detected, auto-reloading page:", event);
+    window.location.reload();
+  });
+}
+
 // Sentry: minimal error/runtime monitoring — initialized once at bootstrap.
 const SENTRY_DSN_FALLBACK =
   "https://746d269b547c16ec650ebe86b9a6ac37@o4511469175504896.ingest.de.sentry.io/4511469204668496";
