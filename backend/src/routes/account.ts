@@ -337,6 +337,8 @@ accountRouter.get("/workspaces", async (req: AuthenticatedRequest, res: Response
                 id: true,
                 name: true,
                 ownerUserId: true,
+                brandConfig: true,
+                logoUrl: true,
               },
             },
           },
@@ -351,13 +353,15 @@ accountRouter.get("/workspaces", async (req: AuthenticatedRequest, res: Response
           workspaceId: string;
           role: string;
           status: string;
-          workspace: { name: string; ownerUserId: string };
+          workspace: { name: string; ownerUserId: string; brandConfig: unknown; logoUrl: string | null };
         }) => ({
           workspaceId: membership.workspaceId,
           workspaceName: membership.workspace.name,
           ownerAppUserId: membership.workspace.ownerUserId,
           membershipRole: membership.role,
           membershipStatus: membership.status,
+          brandConfig: membership.workspace.brandConfig,
+          logoUrl: membership.workspace.logoUrl,
         })) ?? [],
     });
   } catch (error) {

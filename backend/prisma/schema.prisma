@@ -79,6 +79,8 @@ model Workspace {
   type        String   @default("company")
   ownerUserId String   @map("owner_user_id")
   timezone    String   @default("UTC")
+  brandConfig Json?    @default("{}") @map("brand_config")
+  logoUrl     String?  @map("logo_url")
   createdAt   DateTime @default(now()) @map("created_at")
 
   owner             AppUser              @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)

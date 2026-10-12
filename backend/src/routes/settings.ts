@@ -59,6 +59,8 @@ settingsRouter.get("/company", async (req: AuthenticatedRequest, res: Response, 
         company_share: settings.companyShare,
         partner_share: settings.partnerShare,
         tech_share: settings.techShare,
+        brand_config: settings.brandConfig,
+        logo_url: settings.logoUrl,
       },
     });
   } catch (error) {
@@ -101,7 +103,13 @@ settingsRouter.patch("/company", async (req: AuthenticatedRequest, res: Response
       update: data,
     });
 
-    return res.json({ settings });
+    return res.json({
+      settings: {
+        ...settings,
+        brand_config: settings.brandConfig,
+        logo_url: settings.logoUrl,
+      },
+    });
   } catch (error) {
     return next(error);
   }

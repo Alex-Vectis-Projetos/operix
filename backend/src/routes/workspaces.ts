@@ -654,3 +654,108 @@ workspaceRouter.patch("/:workspaceId/members/:membershipId", async (req: Authent
     return next(error);
   }
 });
+
+const updateWorkspaceBrandingSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  brand_config: z.record(z.string(), z.any()).nullable().optional(),
+  logo_url: z.string().url().or(z.literal("")).nullable().optional(),
+});
+
+workspaceRouter.get("/:workspaceId/branding", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const paramsSchema = z.object({
+      workspaceId: z.string().min(1),
+    });
+    const { workspaceId } = paramsSchema.parse(req.params);
+    const access = await resolveWorkspaceAccess(req.auth!.userId, workspaceId);
+
+    if (!access.appUser) {
+      return res.status(404).json({ message: "App user not found." });
+    }
+    if (!access.canAccess || !access.workspace) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    const ws = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: {
+        id: true,
+        name: true,
+        brandConfig: true,
+        logoUrl: true,
+      },
+    });
+
+    if (!ws) {
+      return res.status(404).json({ message: "Workspace not found." });
+    }
+
+    return res.json({
+      workspace: {
+        id: ws.id,
+        name: ws.name,
+        brand_config: ws.brandConfig,
+        logo_url: ws.logoUrl,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+workspaceRouter.patch("/:workspaceId/branding", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const paramsSchema = z.object({
+      workspaceId: z.string().min(1),
+    });
+    const { workspaceId } = paramsSchema.parse(req.params);
+    const input = updateWorkspaceBrandingSchema.parse(req.body);
+    const access = await resolveWorkspaceAccess(req.auth!.userId, workspaceId);
+
+    if (!access.appUser) {
+      return res.status(404).json({ message: "App user not found." });
+    }
+    if (!access.workspace || !access.canAccess) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    const canManageBranding = access.isWorkspaceOwner || access.membershipRole === "admin";
+    if (!canManageBranding) {
+      return res.status(403).json({ message: "Apenas administradores ou proprietários podem personalizar a marca do workspace." });
+    }
+
+    const data: Prisma.WorkspaceUpdateInput = {};
+    if (input.name !== undefined) {
+      data.name = input.name.trim();
+    }
+    if (input.brand_config !== undefined) {
+      data.brandConfig = input.brand_config ?? Prisma.DbNull;
+    }
+    if (input.logo_url !== undefined) {
+      data.logoUrl = input.logo_url ? input.logo_url.trim() : null;
+    }
+
+    const updated = await prisma.workspace.update({
+      where: { id: workspaceId },
+      data,
+      select: {
+        id: true,
+        name: true,
+        brandConfig: true,
+        logoUrl: true,
+      },
+    });
+
+    return res.json({
+      workspace: {
+        id: updated.id,
+        name: updated.name,
+        brand_config: updated.brandConfig,
+        logo_url: updated.logoUrl,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
