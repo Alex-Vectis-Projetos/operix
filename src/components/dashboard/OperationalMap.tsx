@@ -220,38 +220,9 @@ function guessCityFromText(text: string): string | null {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Dark premium MapLibre style (CartoDB GL vector — proper ocean)     */
+/*  Dark premium MapLibre style (OpenFreeMap Vector — Keyless & Clean) */
 /* ------------------------------------------------------------------ */
-const DARK_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
-
-/** Fallback raster style (instant load, zero external fonts/sprites required) */
-const DARK_FALLBACK_STYLE: any = {
-  version: 8,
-  sources: {
-    "carto-dark": {
-      type: "raster",
-      tiles: [
-        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-      ],
-      tileSize: 256,
-      attribution:
-        '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    },
-  },
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-  layers: [
-    {
-      id: "carto-dark-layer",
-      type: "raster",
-      source: "carto-dark",
-      minzoom: 0,
-      maxzoom: 19,
-    },
-  ],
-};
+const DARK_STYLE = "https://tiles.openfreemap.org/styles/dark";
 
 /* ------------------------------------------------------------------ */
 /*  Layer config                                                       */
@@ -815,7 +786,7 @@ export function OperationalMap() {
     try {
       map = new maplibregl.Map({
         container: containerEl,
-        style: DARK_FALLBACK_STYLE,
+        style: DARK_STYLE,
         center: [2.3522, 46.6034],
         zoom: 4.8,
         attributionControl: { compact: true },
@@ -1763,7 +1734,7 @@ export function OperationalMap() {
         )}
         {/* Diagnostic badge: provider + status */}
         <div className="absolute top-2 left-2 z-10 text-[9px] font-mono text-cyan-200/70 bg-[#0a1628]/70 border border-cyan-500/20 rounded px-2 py-0.5 pointer-events-none">
-          CARTO · {mapReady ? "online" : "init"} · hail:{hailEvents.length}
+          OpenFreeMap · {mapReady ? "online" : "init"} · hail:{hailEvents.length}
         </div>
         {/* -------- Elegant operational legend overlay -------- */}
         {layers.hail && mapReady && <HailLegend />}
