@@ -35,9 +35,78 @@ function mapLocation(l: any) {
     manager_phone: l.managerPhone,
     manager_email: l.managerEmail,
     status: l.status,
+    latitude: l.latitude != null ? Number(l.latitude) : null,
+    longitude: l.longitude != null ? Number(l.longitude) : null,
+    is_approximate: Boolean(l.isApproximate),
     created_at: l.createdAt.toISOString(),
     updated_at: l.updatedAt.toISOString(),
   };
+}
+
+async function geocodeLocationAddress(parts: {
+  street?: string | null;
+  number?: string | null;
+  city?: string | null;
+  country?: string | null;
+  zip?: string | null;
+}): Promise<{ latitude: number | null; longitude: number | null; isApproximate: boolean }> {
+  const query = [
+    [parts.street, parts.number].filter(Boolean).join(" "),
+    parts.zip,
+    parts.city,
+    parts.country,
+  ]
+    .filter(Boolean)
+    .join(", ")
+    .trim();
+
+  if (!query) return { latitude: null, longitude: null, isApproximate: true };
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&accept-language=pt`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Operix-Operations/1.0 (admin@operix-pro.com)" },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const first = Array.isArray(data) && data[0];
+      if (first?.lat && first?.lon) {
+        return {
+          latitude: Number(first.lat),
+          longitude: Number(first.lon),
+          isApproximate: false,
+        };
+      }
+    }
+  } catch {
+    // Graceful fallback on network timeout/failure
+  }
+
+  // Graceful fallback: try searching city + country if specific street was not indexed
+  if (parts.city) {
+    try {
+      const cityQuery = [parts.city, parts.country].filter(Boolean).join(", ");
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cityQuery)}&limit=1&accept-language=pt`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Operix-Operations/1.0 (admin@operix-pro.com)" },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const first = Array.isArray(data) && data[0];
+        if (first?.lat && first?.lon) {
+          return {
+            latitude: Number(first.lat),
+            longitude: Number(first.lon),
+            isApproximate: true, // Tagged approximate
+          };
+        }
+      }
+    } catch {}
+  }
+
+  return { latitude: null, longitude: null, isApproximate: true };
 }
 
 const REQUIRED_FIELDS: Array<[string, string]> = [
@@ -115,6 +184,23 @@ locationsRouter.post("/", async (req: AuthenticatedRequest, res: Response, next:
       return res.status(400).json({ message: `Campos obrigatórios ausentes: ${missing.join(", ")}.` });
     }
 
+    let lat = body.latitude != null ? Number(body.latitude) : null;
+    let lng = body.longitude != null ? Number(body.longitude) : null;
+    let isApprox = false;
+
+    if (lat == null || lng == null) {
+      const geo = await geocodeLocationAddress({
+        street: body.address_street,
+        number: body.address_number,
+        city: body.address_city,
+        country: body.address_country,
+        zip: body.address_zip,
+      });
+      lat = geo.latitude;
+      lng = geo.longitude;
+      isApprox = geo.isApproximate;
+    }
+
     const location = await prisma.location.create({
       data: {
         workspaceId: req.ctx.activeWorkspaceId,
@@ -132,6 +218,9 @@ locationsRouter.post("/", async (req: AuthenticatedRequest, res: Response, next:
         managerPhone: body.manager_phone ?? null,
         managerEmail: body.manager_email ?? null,
         status: body.status === "inactive" ? "inactive" : "active",
+        latitude: lat,
+        longitude: lng,
+        isApproximate: isApprox,
         createdBy: req.auth?.userId ?? null,
       },
     });
@@ -179,8 +268,74 @@ locationsRouter.patch("/:id", async (req: AuthenticatedRequest, res: Response, n
       return res.status(400).json({ message: "Nenhum campo para atualizar." });
     }
 
+    const addressChanged =
+      body.address_street !== undefined ||
+      body.address_number !== undefined ||
+      body.address_city !== undefined ||
+      body.address_country !== undefined ||
+      body.address_zip !== undefined;
+
+    if (body.latitude !== undefined) {
+      data.latitude = body.latitude != null ? Number(body.latitude) : null;
+    }
+    if (body.longitude !== undefined) {
+      data.longitude = body.longitude != null ? Number(body.longitude) : null;
+    }
+
+    if (addressChanged && body.latitude === undefined && body.longitude === undefined) {
+      const geo = await geocodeLocationAddress({
+        street: (body.address_street ?? existing.addressStreet) as string,
+        number: (body.address_number ?? existing.addressNumber) as string,
+        city: (body.address_city ?? existing.addressCity) as string,
+        country: (body.address_country ?? existing.addressCountry) as string,
+        zip: (body.address_zip ?? existing.addressZip) as string,
+      });
+      data.latitude = geo.latitude;
+      data.longitude = geo.longitude;
+      data.isApproximate = geo.isApproximate;
+    }
+
     const location = await prisma.location.update({ where: { id }, data });
     return res.json(mapLocation(location));
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// POST /locations/backfill-geocode — Geocode any existing locations missing coordinates
+locationsRouter.post("/backfill-geocode", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo obrigatório." });
+    }
+    const locations = await prisma.location.findMany({
+      where: {
+        workspaceId: req.ctx.activeWorkspaceId,
+        latitude: null,
+      },
+    });
+    const results = [];
+    for (const loc of locations) {
+      const geo = await geocodeLocationAddress({
+        street: loc.addressStreet,
+        number: loc.addressNumber,
+        city: loc.addressCity,
+        country: loc.addressCountry,
+        zip: loc.addressZip,
+      });
+      if (geo.latitude != null && geo.longitude != null) {
+        const updated = await prisma.location.update({
+          where: { id: loc.id },
+          data: {
+            latitude: geo.latitude,
+            longitude: geo.longitude,
+            isApproximate: geo.isApproximate,
+          },
+        });
+        results.push(mapLocation(updated));
+      }
+    }
+    return res.json({ backfilled: results.length, items: results });
   } catch (err) {
     return next(err);
   }

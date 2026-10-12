@@ -21,6 +21,9 @@ export interface Location {
   manager_phone: string | null;
   manager_email: string | null;
   status: LocationStatus;
+  latitude?: number | null;
+  longitude?: number | null;
+  is_approximate?: boolean;
   created_at: string;
   updated_at: string;
 }

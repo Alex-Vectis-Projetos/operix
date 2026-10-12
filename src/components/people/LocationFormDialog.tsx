@@ -6,7 +6,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
+import { Loader2, MapPin } from "lucide-react";
 import type { Location, LocationInput } from "@/hooks/useLocations";
 
 const EMPTY_FORM: LocationInput = {
@@ -129,6 +129,13 @@ export function LocationFormDialog({ open, onOpenChange, editing, onSubmit, savi
           <div className="space-y-1.5">
             <Label>País *</Label>
             <Input value={form.address_country} onChange={(e) => set("address_country")(e.target.value)} placeholder="França" />
+          </div>
+
+          <div className="col-span-2 flex items-center gap-2 p-2.5 rounded-lg border border-cyan-500/20 bg-cyan-950/20 text-xs text-cyan-300">
+            <MapPin className="w-4 h-4 text-cyan-400 shrink-0" />
+            <span>
+              <strong>Geocoding Automático via OpenStreetMap:</strong> Ao salvar, o sistema localiza a rua e o número no mapa para posicionamento de frota e rotas.
+            </span>
           </div>
 
           <div className="space-y-1.5">

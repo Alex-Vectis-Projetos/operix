@@ -277,6 +277,7 @@ const MAP_CSS = `
 /* ------------------------------------------------------------------ */
 export function OperationalMap() {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MLMap | null>(null);
   const styleRef = useRef<HTMLStyleElement | null>(null);
@@ -331,6 +332,26 @@ export function OperationalMap() {
       return Array.isArray(data) ? data : [];
     },
   });
+
+  // Auto-backfill existing locations missing coordinates
+  const backfillTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (backfillTriggeredRef.current || locationsList.length === 0) return;
+    const hasUngeocoded = locationsList.some(
+      (l: any) => l.latitude == null && (l.address_street || l.addressStreet)
+    );
+    if (hasUngeocoded) {
+      backfillTriggeredRef.current = true;
+      apiRequest<{ backfilled: number }>("/locations/backfill-geocode", { method: "POST" })
+        .then((res) => {
+          if (res && res.backfilled > 0) {
+            queryClient.invalidateQueries({ queryKey: ["op-map-locations"] });
+            queryClient.invalidateQueries({ queryKey: ["locations"] });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [locationsList, queryClient]);
 
   /* -------- data: service orders (orders + operations inferred) ----- */
   const { data: serviceOrders = [], isLoading: loadingSO } = useQuery({
@@ -428,7 +449,6 @@ export function OperationalMap() {
   });
 
   /* -------- data: hail events (operational weather intel) ----------- */
-  const queryClient = useQueryClient();
   const { data: hailEvents = [] } = useQuery<HailEvent[]>({
     queryKey: ["op-map-hail"],
     retry: 0,
@@ -613,27 +633,41 @@ export function OperationalMap() {
       return h;
     };
 
-    // Fast lookup for workspace locations
-    const locationCoordsMap = new Map<string, [number, number]>();
+    // Fast lookup for workspace locations (prioritizes exact street coordinates)
+    const locationCoordsMap = new Map<string, { coords: [number, number]; exact: boolean }>();
     for (const loc of locationsList) {
-      const matchedCity = guessCityFromText([loc.address_city, loc.name].filter(Boolean).join(" "));
-      const coords = (matchedCity && CITY_COORDS[matchedCity])
-        ? CITY_COORDS[matchedCity]
-        : COUNTRY_CENTROIDS[(loc.address_country || "PT").toUpperCase()] || COUNTRY_CENTROIDS.PT;
-      if (loc.id) locationCoordsMap.set(loc.id, coords);
-      if (loc.name) locationCoordsMap.set(normalizeGeoText(loc.name), coords);
+      const lat = Number(loc.latitude ?? loc.lat);
+      const lng = Number(loc.longitude ?? loc.lng);
+      let coords: [number, number];
+      let exact = false;
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        coords = [lng, lat];
+        exact = true;
+      } else {
+        const matchedCity = guessCityFromText([loc.address_city, loc.name].filter(Boolean).join(" "));
+        coords = (matchedCity && CITY_COORDS[matchedCity])
+          ? CITY_COORDS[matchedCity]
+          : COUNTRY_CENTROIDS[(loc.address_country || "PT").toUpperCase()] || COUNTRY_CENTROIDS.PT;
+      }
+      if (loc.id) locationCoordsMap.set(loc.id, { coords, exact });
+      if (loc.name) locationCoordsMap.set(normalizeGeoText(loc.name), { coords, exact });
     }
 
     for (const o of serviceOrders) {
       let [lng, lat] = [0, 0];
       let resolvedCity = "";
+      let isExactLocation = false;
 
       // 1. Try matching with linked location ID or location name
       if (o.location_id && locationCoordsMap.has(o.location_id)) {
-        [lng, lat] = locationCoordsMap.get(o.location_id)!;
+        const info = locationCoordsMap.get(o.location_id)!;
+        [lng, lat] = info.coords;
+        isExactLocation = info.exact;
         resolvedCity = o.location_name || "Base";
       } else if (o.location_name && locationCoordsMap.has(normalizeGeoText(o.location_name))) {
-        [lng, lat] = locationCoordsMap.get(normalizeGeoText(o.location_name))!;
+        const info = locationCoordsMap.get(normalizeGeoText(o.location_name))!;
+        [lng, lat] = info.coords;
+        isExactLocation = info.exact;
         resolvedCity = o.location_name;
       } else {
         // 2. Try city name anywhere in order text
@@ -656,11 +690,18 @@ export function OperationalMap() {
         } else if (locationsList.length > 0) {
           // 3. Fallback: anchor to workspace's active location
           const firstLocation = locationsList[0];
-          const matchedCityLoc = guessCityFromText([firstLocation?.address_city, firstLocation?.name].filter(Boolean).join(" "));
-          const baseCoords = (matchedCityLoc && CITY_COORDS[matchedCityLoc])
-            ? CITY_COORDS[matchedCityLoc]
-            : COUNTRY_CENTROIDS[(firstLocation?.address_country || "PT").toUpperCase()] || COUNTRY_CENTROIDS.PT;
-          [lng, lat] = baseCoords;
+          const latFirst = Number(firstLocation?.latitude ?? firstLocation?.lat);
+          const lngFirst = Number(firstLocation?.longitude ?? firstLocation?.lng);
+          if (Number.isFinite(latFirst) && Number.isFinite(lngFirst)) {
+            [lng, lat] = [lngFirst, latFirst];
+            isExactLocation = true;
+          } else {
+            const matchedCityLoc = guessCityFromText([firstLocation?.address_city, firstLocation?.name].filter(Boolean).join(" "));
+            const baseCoords = (matchedCityLoc && CITY_COORDS[matchedCityLoc])
+              ? CITY_COORDS[matchedCityLoc]
+              : COUNTRY_CENTROIDS[(firstLocation?.address_country || "PT").toUpperCase()] || COUNTRY_CENTROIDS.PT;
+            [lng, lat] = baseCoords;
+          }
           resolvedCity = firstLocation?.name || firstLocation?.address_city || "Operação";
         } else {
           // 4. Fallback to default centroid (Portugal)
@@ -669,10 +710,11 @@ export function OperationalMap() {
         }
       }
 
-      // Add deterministic jitter so overlapping orders in the same location/city have distinct spots
+      // Add dispersal: tight 15-meter spread for exact base locations; regional spread for city centroids
       const h = hash(String(o.id ?? o.license_plate ?? o.code));
-      const jx = (((h & 0xff) / 255) - 0.5) * 0.045;
-      const jy = ((((h >> 8) & 0xff) / 255) - 0.5) * 0.045;
+      const spread = isExactLocation ? 0.0003 : 0.045;
+      const jx = (((h & 0xff) / 255) - 0.5) * spread;
+      const jy = ((((h >> 8) & 0xff) / 255) - 0.5) * spread;
 
       features.push({
         type: "Feature",
