@@ -14,7 +14,7 @@ import maplibreglWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&
 if (typeof window !== "undefined" && typeof setWorkerUrl === "function") {
   setWorkerUrl(maplibreglWorkerUrl);
 }
-import { Users, CloudRain, Zap, Radar, Wrench, FileText, X, AlertTriangle, Wind, Clock, Gauge, Filter, Play, Pause, RotateCcw, Target, Eye } from "lucide-react";
+import { Users, CloudRain, Zap, Radar, Wrench, FileText, X, AlertTriangle, Wind, Clock, Gauge, Filter, Play, Pause, RotateCcw, Target, Eye, Network, Share2 } from "lucide-react";
 import { HailRadarIcon } from "@/components/icons/HailRadarIcon";
 import { OperationalPanel, PanelTeam, PanelOrder } from "./OperationalPanel";
 import {
@@ -227,12 +227,13 @@ const DARK_STYLE = "https://tiles.openfreemap.org/styles/dark";
 /* ------------------------------------------------------------------ */
 /*  Layer config                                                       */
 /* ------------------------------------------------------------------ */
-type LayerKey = "teams" | "orders" | "operations" | "radar" | "storms" | "hail" | "pdr";
+type LayerKey = "teams" | "orders" | "operations" | "network" | "radar" | "storms" | "hail" | "pdr";
 
 const LAYER_DEFS: { key: LayerKey; label: string; icon: any; color: string }[] = [
   { key: "teams", label: "Equipes", icon: Users, color: "#22d3ee" },
   { key: "orders", label: "Ordens", icon: FileText, color: "#a855f7" },
-  { key: "operations", label: "Operações", icon: Wrench, color: "#f59e0b" },
+  { key: "operations", label: "Operações", icon: Wrench, color: "#10b981" },
+  { key: "network", label: "Rede / Arcos", icon: Network, color: "#38bdf8" },
   { key: "radar", label: "Radar", icon: Radar, color: "#3b82f6" },
   { key: "storms", label: "Tempestades", icon: Zap, color: "#eab308" },
   { key: "hail", label: "Granizo", icon: CloudRain, color: "#ef4444" },
@@ -307,6 +308,7 @@ export function OperationalMap() {
     teams: true,
     orders: true,
     operations: true,
+    network: true,
     radar: true,
     storms: false,
     hail: true,
@@ -778,6 +780,147 @@ export function OperationalMap() {
     return { type: "FeatureCollection", features };
   }, [hailReports]);
 
+  /**
+   * Generates curved geodesic / quadratic Bézier arc coordinates
+   * between two geo-coordinates to create glowing flight/dispatch paths.
+   */
+  function createCurvedArc(
+    start: [number, number],
+    end: [number, number],
+    steps: number = 24
+  ): [number, number][] {
+    const [lng1, lat1] = start;
+    const [lng2, lat2] = end;
+
+    const dx = lng2 - lng1;
+    const dy = lat2 - lat1;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < 0.001) return [start, end];
+
+    const midLng = (lng1 + lng2) / 2;
+    const midLat = (lat1 + lat2) / 2;
+
+    const nx = -dy / dist;
+    const ny = dx / dist;
+
+    const arcHeight = Math.min(dist * 0.18, 3.2);
+
+    const ctrlLng = midLng + nx * arcHeight;
+    const ctrlLat = midLat + ny * arcHeight;
+
+    const coords: [number, number][] = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const invT = 1 - t;
+      const lng = invT * invT * lng1 + 2 * invT * t * ctrlLng + t * t * lng2;
+      const lat = invT * invT * lat1 + 2 * invT * t * ctrlLat + t * t * lat2;
+      coords.push([lng, lat]);
+    }
+    return coords;
+  }
+
+  /* -------- Network curved geodesic arcs (Mission Control Topology) -- */
+  const networkGeo = useMemo(() => {
+    const features: any[] = [];
+    const teamPoints: [number, number][] = (teamsGeo.features as any[]).map((f) => f.geometry.coordinates);
+    const orderPoints = (ordersGeo.features as any[]).map((f) => ({
+      coords: f.geometry.coordinates as [number, number],
+      id: f.properties?.id,
+      status: String(f.properties?.status || "").toLowerCase(),
+    }));
+    const hailPoints = (hailGeo.features as any[]).map((f) => ({
+      coords: f.geometry.coordinates as [number, number],
+      id: f.properties?.id,
+      severity: f.properties?.severity,
+    }));
+
+    // 1. Base / Hub ➔ Orders (dispatch & coverage flight paths)
+    orderPoints.forEach((ord, idx) => {
+      if (teamPoints.length === 0) return;
+      let nearestBase = teamPoints[0];
+      let minDist = Infinity;
+      teamPoints.forEach((b) => {
+        const d = Math.hypot(b[0] - ord.coords[0], b[1] - ord.coords[1]);
+        if (d < minDist) { minDist = d; nearestBase = b; }
+      });
+
+      // Regional link limit ~800km
+      if (minDist <= 10) {
+        const isOp =
+          ord.status.includes("progress") ||
+          ord.status.includes("andamento") ||
+          ord.status.includes("executando");
+        const arc = createCurvedArc(nearestBase, ord.coords, 20);
+        features.push({
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: arc },
+          properties: {
+            id: `arc-order-${idx}`,
+            color: isOp ? "#10b981" : "#38bdf8",
+            width: isOp ? 2.2 : 1.5,
+            opacity: isOp ? 0.85 : 0.65,
+            type: isOp ? "operation" : "service",
+          },
+        });
+      }
+    });
+
+    // 2. Base / Hub ➔ Storm Threat Vectors (tactical interception arcs)
+    hailPoints.forEach((hail, hIdx) => {
+      if (teamPoints.length === 0) return;
+      let nearestBase = teamPoints[0];
+      let minDist = Infinity;
+      teamPoints.forEach((b) => {
+        const d = Math.hypot(b[0] - hail.coords[0], b[1] - hail.coords[1]);
+        if (d < minDist) { minDist = d; nearestBase = b; }
+      });
+
+      if (minDist <= 12) {
+        const arc = createCurvedArc(nearestBase, hail.coords, 24);
+        const color =
+          hail.severity === "extreme" ? "#ec4899" :
+          hail.severity === "severe" ? "#f97316" : "#eab308";
+        features.push({
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: arc },
+          properties: {
+            id: `arc-hail-${hIdx}`,
+            color,
+            width: 2,
+            opacity: 0.75,
+            type: "threat_vector",
+          },
+        });
+      }
+    });
+
+    // 3. Inter-Base Command Backbone (mesh between branches)
+    if (teamPoints.length > 1) {
+      for (let i = 0; i < teamPoints.length - 1; i++) {
+        for (let j = i + 1; j < teamPoints.length; j++) {
+          const d = Math.hypot(teamPoints[i][0] - teamPoints[j][0], teamPoints[i][1] - teamPoints[j][1]);
+          if (d <= 8) {
+            const arc = createCurvedArc(teamPoints[i], teamPoints[j], 24);
+            features.push({
+              type: "Feature",
+              geometry: { type: "LineString", coordinates: arc },
+              properties: {
+                id: `arc-backbone-${i}-${j}`,
+                color: "#06b6d4",
+                width: 1.8,
+                opacity: 0.55,
+                type: "backbone",
+              },
+            });
+          }
+        }
+      }
+    }
+
+    return { type: "FeatureCollection", features };
+  }, [teamsGeo, ordersGeo, hailGeo]);
+
   /* -------- Init map ------------------------------------------------ */
   useEffect(() => {
     if (!containerEl || mapRef.current) return;
@@ -872,6 +1015,26 @@ export function OperationalMap() {
           clusterRadius: 50,
           clusterMaxZoom: 12,
         });
+
+        // 1. Cluster outer diffuse glow
+        map.addLayer({
+          id: `${id}-cluster-glow`,
+          type: "circle",
+          source: id,
+          filter: ["has", "point_count"],
+          paint: {
+            "circle-color": color,
+            "circle-opacity": 0.18,
+            "circle-blur": 0.8,
+            "circle-radius": [
+              "step",
+              ["get", "point_count"],
+              26, 10, 34, 50, 44,
+            ],
+          },
+        });
+
+        // 2. Cluster main hub
         map.addLayer({
           id: `${id}-clusters`,
           type: "circle",
@@ -879,8 +1042,8 @@ export function OperationalMap() {
           filter: ["has", "point_count"],
           paint: {
             "circle-color": color,
-            "circle-opacity": 0.25,
-            "circle-stroke-color": color,
+            "circle-opacity": 0.35,
+            "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 2,
             "circle-radius": [
               "step",
@@ -889,6 +1052,8 @@ export function OperationalMap() {
             ],
           },
         });
+
+        // 3. Cluster count symbol
         map.addLayer({
           id: `${id}-cluster-count`,
           type: "symbol",
@@ -900,40 +1065,109 @@ export function OperationalMap() {
           },
           paint: { "text-color": "#ffffff" },
         });
+
+        // 4. Point: Outer Sonar Radar Ripple (Ring 3)
+        map.addLayer({
+          id: `${id}-radar-outer`,
+          type: "circle",
+          source: id,
+          filter: ["!", ["has", "point_count"]],
+          paint: {
+            "circle-color": "transparent",
+            "circle-radius": 18,
+            "circle-stroke-color": color,
+            "circle-stroke-width": 1,
+            "circle-stroke-opacity": 0.35,
+          },
+        });
+
+        // 5. Point: Mid Concentric Ripple (Ring 2)
+        map.addLayer({
+          id: `${id}-radar-mid`,
+          type: "circle",
+          source: id,
+          filter: ["!", ["has", "point_count"]],
+          paint: {
+            "circle-color": "transparent",
+            "circle-radius": 11,
+            "circle-stroke-color": color,
+            "circle-stroke-width": 1.5,
+            "circle-stroke-opacity": 0.65,
+          },
+        });
+
+        // 6. Point: Atmospheric Glow Halo
+        map.addLayer({
+          id: `${id}-glow`,
+          type: "circle",
+          source: id,
+          filter: ["!", ["has", "point_count"]],
+          paint: {
+            "circle-color": color,
+            "circle-radius": 24,
+            "circle-opacity": 0.22,
+            "circle-blur": 1.2,
+          },
+        });
+
+        // 7. Point: Concentric Core Dot (White-hot nucleus)
         map.addLayer({
           id: `${id}-points`,
           type: "circle",
           source: id,
           filter: ["!", ["has", "point_count"]],
           paint: {
-            "circle-color": color,
-            "circle-radius": 6,
-            "circle-stroke-color": "rgba(255,255,255,0.9)",
-            "circle-stroke-width": 1.5,
-            "circle-blur": 0.15,
+            "circle-color": "#ffffff",
+            "circle-radius": 4.5,
+            "circle-stroke-color": color,
+            "circle-stroke-width": 3,
+            "circle-opacity": 1,
           },
         });
-        // soft glow halo
-        map.addLayer(
-          {
-            id: `${id}-glow`,
-            type: "circle",
-            source: id,
-            filter: ["!", ["has", "point_count"]],
-            paint: {
-              "circle-color": color,
-              "circle-radius": 16,
-              "circle-opacity": 0.18,
-              "circle-blur": 1,
-            },
-          },
-          `${id}-points`
-        );
       };
 
       addClusterLayer("orders", "#a855f7");
       addClusterLayer("teams", "#22d3ee");
-      addClusterLayer("operations", "#f59e0b");
+      addClusterLayer("operations", "#10b981");
+
+      /* ---- Network telemetry arcs (interconnected command grid) ---- */
+      map.addSource("network", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] } as any,
+      });
+
+      // Glowing outer blur line (neon atmospheric glow)
+      map.addLayer({
+        id: "network-lines-glow",
+        type: "line",
+        source: "network",
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-color": ["get", "color"],
+          "line-width": ["*", ["get", "width"], 2.8],
+          "line-opacity": ["*", ["get", "opacity"], 0.45],
+          "line-blur": 3,
+        },
+      });
+
+      // Crisp inner laser core line (high visibility flight arc)
+      map.addLayer({
+        id: "network-lines-core",
+        type: "line",
+        source: "network",
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-color": ["get", "color"],
+          "line-width": ["get", "width"],
+          "line-opacity": ["get", "opacity"],
+        },
+      });
 
       /* ---- PDR Intel heatmap (operational opportunities) ---- */
       map.addSource("pdr-heat", {
@@ -1250,7 +1484,8 @@ export function OperationalMap() {
     safeSetData("orders", ordersGeo);
     safeSetData("teams", teamsGeo);
     safeSetData("operations", operationsGeo);
-  }, [mapReady, ordersGeo, teamsGeo, operationsGeo, safeSetData]);
+    safeSetData("network", networkGeo);
+  }, [mapReady, ordersGeo, teamsGeo, operationsGeo, networkGeo, safeSetData]);
 
   // Push hail data
   useEffect(() => {
@@ -1309,10 +1544,11 @@ export function OperationalMap() {
     try { (map.getSource("orders") as GeoJSONSource | undefined)?.setData(ordersGeo as any); } catch (e) { void e; }
     try { (map.getSource("teams") as GeoJSONSource | undefined)?.setData(teamsGeo as any); } catch (e) { void e; }
     try { (map.getSource("operations") as GeoJSONSource | undefined)?.setData(operationsGeo as any); } catch (e) { void e; }
+    try { (map.getSource("network") as GeoJSONSource | undefined)?.setData(networkGeo as any); } catch (e) { void e; }
     try { (map.getSource("hail") as GeoJSONSource | undefined)?.setData(hailGeo as any); } catch (e) { void e; }
     try { (map.getSource("hail-reports") as GeoJSONSource | undefined)?.setData(hailReportsGeo as any); } catch (e) { void e; }
     try { (map.getSource("pdr-heat") as GeoJSONSource | undefined)?.setData(pdrHeatGeo as any); } catch (e) { void e; }
-  }, [ordersGeo, teamsGeo, operationsGeo, hailGeo, hailReportsGeo, pdrHeatGeo]);
+  }, [ordersGeo, teamsGeo, operationsGeo, networkGeo, hailGeo, hailReportsGeo, pdrHeatGeo]);
 
   useEffect(() => {
     if (!mapReady || sourceRecoveryTick === 0) return;
@@ -1323,10 +1559,19 @@ export function OperationalMap() {
       try { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis ? "visible" : "none"); } catch {}
     };
     (["orders", "teams", "operations"] as const).forEach((k) => {
-      [`${k}-clusters`, `${k}-cluster-count`, `${k}-points`, `${k}-glow`].forEach((id) => setVis(id, layersRef.current[k]));
+      [
+        `${k}-clusters`,
+        `${k}-cluster-glow`,
+        `${k}-cluster-count`,
+        `${k}-points`,
+        `${k}-glow`,
+        `${k}-radar-mid`,
+        `${k}-radar-outer`,
+      ].forEach((id) => setVis(id, layersRef.current[k]));
     });
     ["hail-halo", "hail-ring", "hail-core", "hail-reports-glow", "hail-reports-core"].forEach((id) => setVis(id, layersRef.current.hail));
     ["pdr-heatmap", "pdr-points"].forEach((id) => setVis(id, layersRef.current.pdr));
+    ["network-lines-glow", "network-lines-core"].forEach((id) => setVis(id, layersRef.current.network));
   }, [mapReady, sourceRecoveryTick, syncActiveSources]);
 
   // Push PDR heatmap data
@@ -1623,6 +1868,7 @@ export function OperationalMap() {
               key === "teams" ? teamsGeo.features.length :
               key === "orders" ? ordersGeo.features.length :
               key === "operations" ? operationsGeo.features.length :
+              key === "network" ? networkGeo.features.length :
               key === "hail" ? visibleHailEvents.length :
               key === "pdr" ? opportunities.length :
               null;
