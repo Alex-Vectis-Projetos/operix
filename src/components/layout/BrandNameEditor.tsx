@@ -1,13 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Bold, Italic, Type, Sparkles } from "lucide-react";
+import { Bold, Italic, Type, Sparkles, Upload, Image as ImageIcon } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
-import { buildBrandTextStyle, gradientToCss } from "@/lib/brandStyles";
+import { buildBrandTextStyle } from "@/lib/brandStyles";
+import { uploadFile, getFileUrl } from "@/lib/storage";
+import { toast } from "sonner";
 
 export type BrandGradient = {
   type: "linear" | "radial";
@@ -36,6 +38,7 @@ export interface BrandConfig {
   glowIntensity?: number;     // backward compat (treated as text glow if no textGlowIntensity)
 
   // Logo / Icon
+  logoUrl?: string | null;
   logoSize?: "small" | "medium" | "large";
   logoSizeNum?: number;
   logoColor?: string;
@@ -88,6 +91,7 @@ function GradientPicker({
         <Label className="text-[11px] text-muted-foreground">Gradiente</Label>
         {active && (
           <button
+            type="button"
             className="text-[10px] text-muted-foreground hover:text-foreground"
             onClick={() => onChange(null)}
           >
@@ -101,6 +105,7 @@ function GradientPicker({
             active?.from === p.from && active?.to === p.to;
           return (
             <button
+              type="button"
               key={p.label}
               onClick={() =>
                 onChange({
@@ -128,6 +133,7 @@ function GradientPicker({
             <div className="flex gap-1">
               {(["linear", "radial"] as const).map((t) => (
                 <button
+                  type="button"
                   key={t}
                   onClick={() => onChange({ ...active, type: t })}
                   className={`text-[10px] px-2 py-1 rounded border transition ${
@@ -147,6 +153,7 @@ function GradientPicker({
               <div className="flex gap-1">
                 {GRADIENT_DIRECTIONS.map((d) => (
                   <button
+                    type="button"
                     key={d.angle}
                     onClick={() => onChange({ ...active, angle: d.angle })}
                     className={`text-xs w-6 h-6 rounded border transition ${
@@ -189,23 +196,72 @@ function GradientPicker({
 
 export function BrandNameEditor({
   config,
+  defaultName = "",
+  workspaceId,
   onSave,
   children,
 }: {
   config: BrandConfig;
-  onSave: (c: BrandConfig) => void;
+  defaultName?: string;
+  workspaceId?: string;
+  onSave: (c: BrandConfig) => void | Promise<void>;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<BrandConfig>(config);
+  const [draft, setDraft] = useState<BrandConfig>(() => ({
+    ...config,
+    name: config.name || defaultName || "",
+  }));
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) setDraft(config);
-  }, [open, config]);
+    if (open) {
+      setDraft({
+        ...config,
+        name: config.name || defaultName || "",
+      });
+    }
+  }, [open, config, defaultName]);
 
-  const handleSave = () => {
-    onSave(draft);
-    setOpen(false);
+  const handleSave = async () => {
+    try {
+      await onSave(draft);
+      setOpen(false);
+    } catch {
+      // onSave handles toast errors
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Por favor, selecione um arquivo de imagem válido (PNG, JPG, SVG, WebP).");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("O arquivo de imagem deve ter no máximo 2MB.");
+      return;
+    }
+
+    try {
+      setUploading(true);
+      const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+      const uploadPath = `tenants/${workspaceId || "default"}/branding/${Date.now()}_${safeName}`;
+      const { path, bucket } = await uploadFile("logos", uploadPath, file);
+      const publicUrl = getFileUrl(bucket, path);
+      setDraft((prev) => ({ ...prev, logoUrl: publicUrl }));
+      toast.success("Logotipo carregado com sucesso!");
+    } catch (err) {
+      console.error(err);
+      toast.error((err as Error).message || "Falha ao enviar logotipo.");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const fontSize = parseInt(draft.fontSize || "16", 10);
@@ -222,36 +278,50 @@ export function BrandNameEditor({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
       <PopoverContent
-        className="w-[340px] max-h-[85vh] overflow-y-auto bg-card/95 backdrop-blur-xl border-border/60 shadow-2xl"
+        className="w-[360px] max-h-[85vh] overflow-y-auto bg-card/95 backdrop-blur-xl border-border/60 shadow-2xl p-4 flex flex-col"
         side="right"
         align="start"
       >
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between pb-1 border-b border-border/40">
             <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-              <Sparkles className="h-3.5 w-3.5 text-primary" /> Personalizar marca
+              <Sparkles className="h-4 w-4 text-primary" /> Personalizar marca
             </h4>
           </div>
 
           {/* Identity */}
           <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">Nome</Label>
+            <Label className="text-[11px] text-muted-foreground font-medium">Nome da Marca / Workspace</Label>
             <Input
               value={draft.name || ""}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value.slice(0, 30) })}
-              maxLength={30}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value.slice(0, 40) })}
+              placeholder={defaultName || "Nome da sua empresa"}
+              maxLength={40}
               className="h-8 text-sm bg-muted/30 border-border"
             />
           </div>
 
           {/* Live preview */}
-          <div className="rounded-lg border border-border/60 bg-background/40 p-3">
-            <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Preview</Label>
-            <div className="flex items-center gap-2.5 mt-2 min-h-10">
-              <BrandLogo size={logoSizeNum} />
-              <span style={previewTextStyle}>
-                {draft.name || "Operix"}
-              </span>
+          <div className="rounded-lg border border-border/60 bg-background/50 p-3 shadow-inner">
+            <div className="flex items-center justify-between mb-1.5">
+              <Label className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Preview da Marca</Label>
+              <span className="text-[9px] text-primary/90 font-mono">Ao vivo</span>
+            </div>
+            <div className="flex items-center gap-2.5 p-2 rounded-md bg-muted/20 border border-border/30">
+              <BrandLogo
+                size={logoSizeNum}
+                logoUrlOverride={draft.logoUrl}
+                radiusOverride={logoRadius}
+                styleOverride={draft.logoStyle}
+              />
+              <div className="flex flex-col min-w-0">
+                <span className="truncate" style={previewTextStyle}>
+                  {draft.name || defaultName || "Operix"}
+                </span>
+                <span className="text-[9px] text-muted-foreground flex items-center gap-1 font-sans mt-0.5">
+                  <Sparkles className="h-2.5 w-2.5 text-primary" /> Powered by Operix
+                </span>
+              </div>
             </div>
           </div>
 
@@ -261,7 +331,7 @@ export function BrandNameEditor({
                 <Type className="h-3 w-3" /> Tipografia
               </TabsTrigger>
               <TabsTrigger value="logo" className="text-xs gap-1.5">
-                <Sparkles className="h-3 w-3" /> Logo
+                <ImageIcon className="h-3 w-3" /> Logotipo
               </TabsTrigger>
             </TabsList>
 
@@ -269,14 +339,15 @@ export function BrandNameEditor({
             <TabsContent value="type" className="space-y-4 pt-3">
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground">Fonte</Label>
-                <div className="grid grid-cols-2 gap-1 max-h-28 overflow-y-auto rounded border border-border/60 p-1">
+                <div className="grid grid-cols-2 gap-1 max-h-32 overflow-y-auto rounded border border-border/60 p-1">
                   {FONTS.map((f) => (
                     <button
+                      type="button"
                       key={f}
                       onClick={() => setDraft({ ...draft, fontFamily: f })}
                       className={`text-[11px] px-2 py-1 rounded text-left transition-colors truncate ${
                         draft.fontFamily === f
-                          ? "bg-primary/20 text-primary"
+                          ? "bg-primary/20 text-primary font-medium"
                           : "hover:bg-muted/50 text-muted-foreground"
                       }`}
                       style={{ fontFamily: f }}
@@ -303,7 +374,7 @@ export function BrandNameEditor({
                   type="button"
                   variant={draft.italic ? "default" : "outline"}
                   size="sm"
-                  className="h-8"
+                  className="h-8 flex-1"
                   onClick={() => setDraft({ ...draft, italic: !draft.italic })}
                 >
                   <Italic className="h-3.5 w-3.5 mr-1" /> Itálico
@@ -312,7 +383,7 @@ export function BrandNameEditor({
                   type="button"
                   variant={(draft.fontWeight ?? (draft.bold ? 700 : 600)) >= 700 ? "default" : "outline"}
                   size="sm"
-                  className="h-8"
+                  className="h-8 flex-1"
                   onClick={() => {
                     const isBold = (draft.fontWeight ?? (draft.bold ? 700 : 600)) >= 700;
                     setDraft({
@@ -389,7 +460,7 @@ export function BrandNameEditor({
                   step={1}
                 />
                 <div className="flex items-center gap-2 pt-1">
-                  <Label className="text-[10px] text-muted-foreground">Cor</Label>
+                  <Label className="text-[10px] text-muted-foreground">Cor do Glow</Label>
                   <input
                     type="color"
                     value={draft.textGlowColor || draft.color || "#e2dcc8"}
@@ -402,6 +473,47 @@ export function BrandNameEditor({
 
             {/* ============= LOGO ============= */}
             <TabsContent value="logo" className="space-y-4 pt-3">
+              {/* Upload de Logotipo Personalizado */}
+              <div className="space-y-2 p-3 rounded-lg border border-border/60 bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[11px] font-medium text-foreground">Logotipo da Empresa</Label>
+                  {draft.logoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setDraft({ ...draft, logoUrl: null })}
+                      className="text-[10px] text-destructive hover:underline"
+                    >
+                      Remover logotipo
+                    </button>
+                  )}
+                </div>
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="hidden"
+                />
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={uploading}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-8 text-xs flex-1 gap-1.5"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    {uploading ? "Enviando imagem..." : draft.logoUrl ? "Trocar imagem do logo" : "Carregar imagem do logo"}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Formatos: PNG, JPG, WebP ou SVG (máx. 2MB).
+                </p>
+              </div>
+
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground">Tamanho: {logoSizeNum}px</Label>
                 <Slider
@@ -414,7 +526,7 @@ export function BrandNameEditor({
               </div>
 
               <div className="space-y-1">
-                <Label className="text-[11px] text-muted-foreground">Border radius: {logoRadius}%</Label>
+                <Label className="text-[11px] text-muted-foreground">Arredondamento das bordas: {logoRadius}%</Label>
                 <Slider
                   value={[logoRadius]}
                   onValueChange={([v]) => setDraft({ ...draft, logoRadius: v })}
@@ -429,6 +541,7 @@ export function BrandNameEditor({
                 <div className="flex gap-1">
                   {(["transparent", "solid", "glass"] as const).map((s) => (
                     <button
+                      type="button"
                       key={s}
                       onClick={() => setDraft({ ...draft, logoStyle: s })}
                       className={`flex-1 text-[10px] px-2 py-1 rounded border transition ${
@@ -443,32 +556,9 @@ export function BrandNameEditor({
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-[11px] text-muted-foreground">Cor do ícone</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={draft.logoColor || draft.color || "#e2dcc8"}
-                    onChange={(e) => setDraft({ ...draft, logoColor: e.target.value })}
-                    className="h-8 w-10 rounded border border-border cursor-pointer bg-transparent"
-                  />
-                  <Input
-                    value={draft.logoColor || draft.color || "#e2dcc8"}
-                    onChange={(e) => setDraft({ ...draft, logoColor: e.target.value })}
-                    className="h-8 text-xs flex-1 bg-muted/30 border-border font-mono"
-                    maxLength={7}
-                  />
-                </div>
-              </div>
-
-              <GradientPicker
-                value={draft.logoGradient}
-                onChange={(g) => setDraft({ ...draft, logoGradient: g })}
-              />
-
               <div className="space-y-1 pt-1 border-t border-border/40">
                 <Label className="text-[11px] text-muted-foreground">
-                  Glow do ícone: {logoGlow}px
+                  Glow do logotipo: {logoGlow}px
                 </Label>
                 <Slider
                   value={[logoGlow]}
@@ -478,10 +568,10 @@ export function BrandNameEditor({
                   step={1}
                 />
                 <div className="flex items-center gap-2 pt-1">
-                  <Label className="text-[10px] text-muted-foreground">Cor</Label>
+                  <Label className="text-[10px] text-muted-foreground">Cor do Glow</Label>
                   <input
                     type="color"
-                    value={draft.logoGlowColor || draft.logoColor || draft.color || "#e2dcc8"}
+                    value={draft.logoGlowColor || draft.color || "rgba(249, 115, 22, 0.35)"}
                     onChange={(e) => setDraft({ ...draft, logoGlowColor: e.target.value })}
                     className="h-7 w-10 rounded border border-border cursor-pointer bg-transparent"
                   />
@@ -490,12 +580,13 @@ export function BrandNameEditor({
             </TabsContent>
           </Tabs>
 
-          <div className="flex justify-end gap-2 pt-1 border-t border-border/40">
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setOpen(false)}>
+          {/* Sticky footer with actions */}
+          <div className="sticky bottom-0 bg-card/95 backdrop-blur-md pt-3 pb-1 border-t border-border/60 flex items-center justify-between mt-4 -mx-1">
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button size="sm" className="h-7 text-xs" onClick={handleSave}>
-              Aplicar
+            <Button size="sm" className="h-8 text-xs px-4 gap-1.5" onClick={handleSave}>
+              <Sparkles className="h-3.5 w-3.5" /> Aplicar alterações
             </Button>
           </div>
         </div>

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import {
   LayoutDashboard, FileText, CreditCard, TrendingUp, BarChart3,
   Car, Users, Receipt, Shield, Wrench, Store, Zap, Brain, Workflow,
-  UserPlus, IdCard, MapPin, FileCheck2,
+  UserPlus, IdCard, MapPin, FileCheck2, Sparkles,
 } from "lucide-react";
 import { useIsPlatformOwner } from "@/hooks/useSubscription";
 import {
@@ -46,7 +46,7 @@ export const AppSidebar = memo(function AppSidebar() {
   const { t } = useLanguage();
   const { can, isLoading: permsLoading } = useCan();
   const { brandConfig, saveBrandConfig } = useCompanyLogo();
-  const { workspaceName } = useWorkspace();
+  const { workspaceName, workspaceId, canManageBranding } = useWorkspace();
   const { data: isPlatformOwner = false } = useIsPlatformOwner();
   // Platform-owner gating removed — single-workspace architecture.
 
@@ -139,28 +139,47 @@ export const AppSidebar = memo(function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border/50">
-      <div className={`flex h-14 items-center border-b border-border/50 ${collapsed ? "justify-center px-0" : "px-4"}`}>
-        {!collapsed && (
-          <div className="flex items-center gap-2.5 overflow-hidden">
-            <BrandLogo size={brandConfig.logoSizeNum ?? 30} />
+      <div className={`flex h-16 items-center border-b border-border/50 ${collapsed ? "justify-center px-0" : "px-4"}`}>
+        {collapsed ? (
+          <BrandLogo size={brandConfig.logoSizeNum ?? 30} />
+        ) : (
+          <div className="flex items-center gap-2.5 overflow-hidden w-full">
+            <BrandLogo size={brandConfig.logoSizeNum ?? 32} />
             {(() => {
               const nameStyle = buildBrandTextStyle(brandConfig);
-              return can("settings", "edit").allowed ? (
-                <BrandNameEditor config={brandConfig} onSave={handleBrandSave}>
+              const brandContent = (
+                <div className="flex flex-col min-w-0 text-left">
+                  <span className="truncate inline-block font-display font-medium text-sm leading-tight" style={nameStyle}>
+                    {displayName}
+                  </span>
+                  <span
+                    className="text-[10px] text-muted-foreground flex items-center gap-1 font-sans mt-0.5"
+                    title="Operix Enterprise Platform"
+                  >
+                    <Sparkles className="h-2.5 w-2.5 text-primary shrink-0" />
+                    <span className="truncate">Powered by Operix</span>
+                  </span>
+                </div>
+              );
+
+              return canManageBranding ? (
+                <BrandNameEditor
+                  config={brandConfig}
+                  defaultName={workspaceName || appBrand.appName}
+                  workspaceId={workspaceId ?? undefined}
+                  onSave={handleBrandSave}
+                >
                   <button
-                    className="overflow-hidden hover:opacity-80 transition-opacity cursor-pointer text-left font-display"
+                    type="button"
+                    className="overflow-hidden hover:opacity-85 transition-opacity cursor-pointer text-left font-display group py-1 flex-1 min-w-0"
                     title={t("brand.editTooltip")}
                   >
-                    <span className="truncate inline-block" style={nameStyle}>
-                      {displayName}
-                    </span>
+                    {brandContent}
                   </button>
                 </BrandNameEditor>
               ) : (
-                <Link to="/" className="overflow-hidden font-display">
-                  <span className="truncate inline-block" style={nameStyle}>
-                    {displayName}
-                  </span>
+                <Link to="/" className="overflow-hidden font-display py-1 flex-1 min-w-0">
+                  {brandContent}
                 </Link>
               );
             })()}

@@ -17,6 +17,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/api";
 import { useAuth } from "./useAuth";
+import type { BrandConfig } from "@/components/layout/BrandNameEditor";
 
 interface WorkspaceMember {
   auth_user_id: string;
@@ -31,26 +32,33 @@ interface WorkspaceMember {
 
 export type MembershipRole = "admin" | "tecnico" | "cliente" | "socio";
 
-interface AvailableWorkspace {
+export interface AvailableWorkspace {
   id: string;
   name: string;
   ownerAppUserId: string | null;
   membershipRole: MembershipRole | null;
   membershipStatus: string;
+  brandConfig: BrandConfig | null;
+  logoUrl: string | null;
 }
 
-interface WorkspaceContext {
+export interface WorkspaceContext {
   workspaceId: string | null;
   workspaceName: string | null;
   ownerAppUserId: string | null;
+  brandConfig: BrandConfig | null;
+  logoUrl: string | null;
   availableWorkspaces: AvailableWorkspace[];
   members: WorkspaceMember[];
   memberAuthIds: string[];
   myRole: MembershipRole | null;
   isAdmin: boolean;
+  isWorkspaceOwner: boolean;
+  canManageBranding: boolean;
   isLoading: boolean;
   /** Switch the active operational workspace WITHOUT reloading the page. */
   switchWorkspace: (workspaceId: string) => void;
+  updateBranding: (branding: { name?: string; brand_config?: BrandConfig | null; logo_url?: string | null }) => Promise<void>;
 }
 
 const WorkspaceCtx = createContext<WorkspaceContext | undefined>(undefined);
@@ -85,6 +93,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ownerAppUserId: string | null;
           membershipRole: MembershipRole | null;
           membershipStatus: string;
+          brandConfig?: BrandConfig | null;
+          logoUrl?: string | null;
         }>;
       }>("/account/workspaces", { timeoutMs: 8000 });
       const memberships = data.workspaces;
@@ -95,6 +105,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           workspaceId: null,
           workspaceName: null,
           ownerAppUserId: null,
+          brandConfig: null,
+          logoUrl: null,
           myRole: null,
         };
       }
@@ -117,6 +129,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         workspaceName: membership.workspaceName,
         appUserId: data.appUserId,
         ownerAppUserId: membership.ownerAppUserId,
+        brandConfig: (membership.brandConfig as BrandConfig | null) || null,
+        logoUrl: membership.logoUrl ?? null,
         myRole: membership.membershipRole,
         availableWorkspaces: memberships.map((item) => ({
           id: item.workspaceId,
@@ -124,6 +138,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ownerAppUserId: item.ownerAppUserId,
           membershipRole: item.membershipRole,
           membershipStatus: item.membershipStatus,
+          brandConfig: (item.brandConfig as BrandConfig | null) || null,
+          logoUrl: item.logoUrl ?? null,
         })),
       };
     },
@@ -149,6 +165,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const myRole =
     wsData?.myRole ?? ((members.find((m: WorkspaceMember) => m.auth_user_id === user?.id)?.role as MembershipRole) ?? null);
   const isAdmin = myRole === "admin";
+  const isWorkspaceOwner =
+    !!wsData?.appUserId && !!wsData?.ownerAppUserId && wsData.appUserId === wsData.ownerAppUserId;
+  const canManageBranding = isWorkspaceOwner || isAdmin;
 
   // Switch operational scope WITHOUT reload. Just update state + storage
   // and invalidate workspace-keyed queries so derived data refetches.
@@ -165,18 +184,37 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     queryClient.invalidateQueries({ queryKey: ["workspace-members"] });
   }, [selectedId, queryClient]);
 
+  const updateBranding = useCallback(
+    async (branding: { name?: string; brand_config?: BrandConfig | null; logo_url?: string | null }) => {
+      if (!wsData?.workspaceId) throw new Error("Nenhum workspace ativo.");
+      await apiRequest(`/workspaces/${wsData.workspaceId}/branding`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(branding),
+      });
+      queryClient.invalidateQueries({ queryKey: ["my-workspace"] });
+      queryClient.invalidateQueries({ queryKey: ["company-brand"] });
+    },
+    [wsData?.workspaceId, queryClient],
+  );
+
   const value = useMemo<WorkspaceContext>(() => ({
     workspaceId: wsData?.workspaceId ?? null,
     workspaceName: wsData?.workspaceName ?? null,
     ownerAppUserId: wsData?.ownerAppUserId ?? null,
+    brandConfig: wsData?.brandConfig ?? null,
+    logoUrl: wsData?.logoUrl ?? null,
     availableWorkspaces: wsData?.availableWorkspaces ?? [],
     members,
     memberAuthIds,
     myRole,
     isAdmin,
+    isWorkspaceOwner,
+    canManageBranding,
     isLoading: wsLoading,
     switchWorkspace,
-  }), [wsData, members, memberAuthIds, myRole, isAdmin, wsLoading, switchWorkspace]);
+    updateBranding,
+  }), [wsData, members, memberAuthIds, myRole, isAdmin, isWorkspaceOwner, canManageBranding, wsLoading, switchWorkspace, updateBranding]);
 
   return <WorkspaceCtx.Provider value={value}>{children}</WorkspaceCtx.Provider>;
 }
