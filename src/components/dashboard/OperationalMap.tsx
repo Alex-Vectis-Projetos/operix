@@ -1748,6 +1748,7 @@ export function OperationalMap() {
                 type: "raster",
                 tiles: [buildUrl(host, frames[radarIdxRef.current].path, kind)],
                 tileSize: 256,
+                maxzoom: 7,
               });
             } catch {}
           }
