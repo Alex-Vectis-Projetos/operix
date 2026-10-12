@@ -481,6 +481,7 @@ export function OperationalMap() {
   const [hailSeverityFilter, setHailSeverityFilter] = useState<Record<HailSeverity, boolean>>({
     low: true, moderate: true, severe: true, extreme: true,
   });
+  const [currentZoom, setCurrentZoom] = useState<number>(4.8);
   const [hailMinSizeMm, setHailMinSizeMm] = useState<number>(0);
   const [hailWindowHours, setHailWindowHours] = useState<number>(6); // last N hours
   const [replayCursor, setReplayCursor] = useState<number>(1); // 0..1 (1 = now / AO VIVO)
@@ -952,8 +953,13 @@ export function OperationalMap() {
         center: [2.3522, 46.6034],
         zoom: 4.8,
         attributionControl: { compact: true },
-        maxZoom: 21,
+        maxZoom: 22,
         minZoom: 2,
+      });
+
+      map.on("zoom", () => {
+        const z = map.getZoom();
+        setCurrentZoom(Math.round(z * 10) / 10);
       });
     } catch (err) {
       setMapError((err as Error)?.message ?? "init failed");
@@ -2009,8 +2015,17 @@ export function OperationalMap() {
           </div>
         )}
         {/* Diagnostic badge: provider + status */}
-        <div className="absolute top-2 left-2 z-10 text-[9px] font-mono text-cyan-200/70 bg-[#0a1628]/70 border border-cyan-500/20 rounded px-2 py-0.5 pointer-events-none">
-          OpenFreeMap · {mapReady ? "online" : "init"} · hail:{hailEvents.length}
+        <div className="absolute top-2 left-2 z-10 text-[9px] font-mono text-cyan-200/80 bg-[#0a1628]/85 border border-cyan-500/25 rounded px-2.5 py-1 pointer-events-none shadow-md backdrop-blur-sm flex items-center gap-2">
+          <span className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${mapReady ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+            <span>OpenFreeMap {mapReady ? "HD" : "init"}</span>
+          </span>
+          <span className="text-slate-500">|</span>
+          <span className="text-cyan-300 font-semibold">
+            Zoom {currentZoom} {currentZoom >= 14 ? "(Ruas / Vias)" : currentZoom >= 8 ? "(Cidade)" : "(Regional)"}
+          </span>
+          <span className="text-slate-500">|</span>
+          <span className="text-slate-400">hail: {hailEvents.length}</span>
         </div>
         {/* -------- Elegant operational legend overlay -------- */}
         {layers.hail && mapReady && <HailLegend />}
