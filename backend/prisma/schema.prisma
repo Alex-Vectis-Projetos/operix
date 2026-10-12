@@ -26,6 +26,7 @@ model User {
   clientAccessGrants ClientAccessGrant[] @relation("UserClientAccessGrants")
   weeklogValidations WeeklogValidation[] @relation("UserWeeklogValidations")
   weeklogSubmissions WeeklogValidation[] @relation("UserWeeklogSubmissions")
+  notifications      Notification[]
 
   @@map("users")
 }
@@ -71,6 +72,23 @@ model UserRole {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_roles")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String   @default("system")
+  title     String?
+  body      String?
+  payload   Json?
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
 }
 
 model Workspace {

@@ -36,7 +36,14 @@ function persist(evt: AgentEvent) {
 export function loadPersistedAgentEvents(): AgentEvent[] {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    return raw ? (JSON.parse(raw) as AgentEvent[]) : [];
+    const arr = raw ? (JSON.parse(raw) as AgentEvent[]) : [];
+    return arr.filter((e) => {
+      // Discard past spurious tile/abort errors
+      if (e.title === "Falha de rede" && (!e.detail || e.detail.includes("tile") || e.detail.includes("rainviewer") || e.detail.includes("nominatim") || e.detail.includes("openstreetmap"))) {
+        return false;
+      }
+      return true;
+    });
   } catch {
     return [];
   }
@@ -58,15 +65,18 @@ export function startOperationalObserver() {
     try {
       const res = await origFetch(...args);
       const ms = performance.now() - started;
-      // Surface slow APIs (> 4s) and 5xx as operational warnings
-      if (res.status >= 500) {
+      const urlStr = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url || "";
+      const isInternal = urlStr.includes("/api/") || urlStr.startsWith("/api");
+
+      // Surface slow APIs (> 4s) and 5xx as operational warnings for internal endpoints
+      if (isInternal && res.status >= 500) {
         agentBus.emit({
           kind: "sync_failure",
           level: "error",
           title: "API com falha",
           detail: `HTTP ${res.status} em ${shortUrl(args[0])}`,
         });
-      } else if (ms > 4000) {
+      } else if (isInternal && ms > 4000) {
         agentBus.emit({
           kind: "operational_alert",
           level: "warn",
@@ -75,13 +85,20 @@ export function startOperationalObserver() {
         });
       }
       return res;
-    } catch (err) {
-      agentBus.emit({
-        kind: "sync_failure",
-        level: "error",
-        title: "Falha de rede",
-        detail: shortUrl(args[0]),
-      });
+    } catch (err: any) {
+      // Intentional aborts (e.g. MapLibre tile cancel, component unmount) are NOT failures
+      const isAborted = err?.name === "AbortError" || err?.code === 20 || args[1]?.signal?.aborted;
+      const urlStr = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url || "";
+      const isInternal = urlStr.includes("/api/") || urlStr.startsWith("/api");
+
+      if (!isAborted && isInternal) {
+        agentBus.emit({
+          kind: "sync_failure",
+          level: "error",
+          title: "Falha de rede na API",
+          detail: shortUrl(args[0]),
+        });
+      }
       throw err;
     }
   };

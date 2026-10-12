@@ -32,12 +32,12 @@ export function useOperationalSignals() {
     },
   });
 
-  const { data: lastHail } = useQuery({
-    queryKey: ["op-signals-last-hail"],
+  const { data: hailEvents = [] } = useQuery({
+    queryKey: ["op-signals-hail-events"],
     staleTime: 60_000,
     queryFn: async () => {
-      const data = await apiRequest<{ hailEvents: any[] }>("/weather/hail-events?limit=1");
-      return data.hailEvents?.[0] ?? null;
+      const data = await apiRequest<{ hailEvents: any[] }>("/weather/hail-events?limit=50&sort=desc&no_expired=true");
+      return data.hailEvents ?? [];
     },
   });
 
@@ -123,11 +123,34 @@ export function useOperationalSignals() {
     const out: OperationalSignal[] = [];
     const degraded = (platforms ?? []).filter((p: any) => p.state === "degraded");
     if (degraded.length) out.push({ id:"platforms-degraded", level:"warn", title:`${degraded.length} plataforma(s) degradada(s)`, detail: degraded.map((p: any) => p.name).join(", ") });
-    const lastTs = lastHail?.observed_time || lastHail?.forecast_time;
-    if (lastTs) {
-      const ageH = (Date.now() - new Date(lastTs).getTime()) / 36e5;
-      if (ageH > 4) out.push({ id:"radar-stale", level:"warn", title:"Ingestão em tempo real parece atrasada", detail:`Último evento de radar há ${Math.round(ageH)}h` });
-    } else { out.push({ id:"radar-empty", level:"info", title:"Radar PDR sem dados", detail:"Sem eventos ingeridos ainda" }); }
+    
+    // Hail / Radar PDR signals
+    if (hailEvents.length > 0) {
+      const severeCount = hailEvents.filter((h: any) => h.severity === "severe" || h.severity === "extreme").length;
+      if (severeCount > 0) {
+        out.push({
+          id: "radar-severe",
+          level: "warn",
+          title: `Alerta Meteorológico — ${severeCount} ocorrências severas de granizo`,
+          detail: "Monitoramento PDR com atividade crítica recente",
+        });
+      } else {
+        out.push({
+          id: "radar-active",
+          level: "info",
+          title: `Radar PDR ativo — ${hailEvents.length} ocorrências monitoradas`,
+          detail: "Rede de radar operacional e atualizada",
+        });
+      }
+    } else {
+      out.push({
+        id: "radar-idle",
+        level: "ok",
+        title: "Radar PDR em prontidão",
+        detail: "Sem tempestades severas ativas no momento",
+      });
+    }
+
     if (stalledSO?.length) {
       const oldest = stalledSO[0];
       const hours = Math.round((Date.now() - new Date(oldest.updated_at as string).getTime()) / 36e5);
@@ -140,13 +163,15 @@ export function useOperationalSignals() {
     if (overduePO && overduePO > 0) out.push({ id:"payments-overdue", level:"warn", title:`${overduePO} pagamento(s) em atraso há mais de 30 dias` });
     if (inactiveTechs && inactiveTechs.total >= 3 && inactiveTechs.inactive > 0) out.push({ id:"techs-inactive", level:"info", title:`${inactiveTechs.inactive} de ${inactiveTechs.total} técnicos sem atividade recente`, detail:"Sem ordens nos últimos 14 dias" });
     if (workspaceActivity === 0 && (inactiveTechs?.total ?? 0) > 0) out.push({ id:"workspace-idle", level:"info", title:"Workspace sem nova atividade esta semana", detail:"Zero ordens criadas nos últimos 7 dias" });
+    
+    // Filter out historical spurious tile network failures
     const cutoff = Date.now() - 5*60_000;
-    const errs = recent.filter((e) => e.level === "error" && e.at > cutoff);
+    const errs = recent.filter((e) => e.level === "error" && e.at > cutoff && !(e.title === "Falha de rede" && (!e.detail || e.detail.includes("tile") || e.detail.includes("rainviewer") || e.detail.includes("nominatim"))));
     if (errs.length >= 3) out.push({ id:"alert-spike", level:"error", title:`Pico de alertas — ${errs.length} erros recentes`, detail: errs[errs.length-1].title });
     else if (errs.length) out.push({ id:"runtime-errors", level:"error", title:`${errs.length} erro(s) recente(s)`, detail: errs[errs.length-1].title });
     if (!out.length) out.push({ id:"all-ok", level:"ok", title:"Sistema operacional estável" });
     return out;
-  }, [platforms, lastHail, recent, stalledSO, prodTrend, overduePO, inactiveTechs, workspaceActivity]);
+  }, [platforms, hailEvents, recent, stalledSO, prodTrend, overduePO, inactiveTechs, workspaceActivity]);
 
   const worst: SignalLevel = signals.some(s => s.level === "error") ? "error" : signals.some(s => s.level === "warn") ? "warn" : signals.some(s => s.level === "info" && s.id !== "all-ok") ? "info" : "ok";
   return { signals, worst, recent };

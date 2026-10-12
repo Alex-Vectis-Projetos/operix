@@ -16,7 +16,7 @@ export function getAIConfigsSafe(): AIConfig[] {
     configs.push({
       apiKey: env.GEMINI_API_KEY,
       endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-      defaultModel: "gemini-2.5-flash",
+      defaultModel: "gemini-2.0-flash",
     });
   }
   if (env.OPENAI_API_KEY) {

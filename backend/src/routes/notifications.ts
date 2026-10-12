@@ -41,32 +41,52 @@ const PATCH_ALL_BODY = z
   .object({ is_read: z.literal(true) })
   .strict();
 
+const CREATE_BODY = z.object({
+  type: z.string().default("system"),
+  title: z.string(),
+  body: z.string().optional().nullable(),
+  payload: z.record(z.any()).optional().nullable(),
+});
+
+notificationsRouter.post("/", async (req: AuthenticatedRequest, res: Response, next) => {
+  try {
+    const userId = req.auth!.userId;
+    const input = CREATE_BODY.parse(req.body ?? {});
+    const created = await (prisma as any).notification.create({
+      data: {
+        userId,
+        type: input.type,
+        title: input.title,
+        body: input.body ?? null,
+        payload: input.payload ?? null,
+      },
+    });
+    return res.status(201).json(mapNotification(created));
+  } catch (e) {
+    next(e);
+  }
+});
+
 notificationsRouter.get("/", async (req: AuthenticatedRequest, res: Response, next) => {
   try {
     const userId = req.auth!.userId;
     const limit = Math.min(Number((req.query.limit as string) ?? 50) || 50, 200);
-    let rows: unknown[] = [];
     try {
-      rows = await prisma.$queryRawUnsafe<any>(
+      const rows = await (prisma as any).notification.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      });
+      return res.json(rows.map(mapNotification));
+    } catch {
+      // Fallback for raw query if prisma client is mid-migration
+      const rawRows = await prisma.$queryRawUnsafe<any>(
         "SELECT id, user_id, type, title, body, payload, is_read, created_at, updated_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2",
         userId,
         limit,
-      );
-    } catch {
-      rows = [];
+      ).catch(() => []);
+      return res.json((rawRows || []).map(mapNotification));
     }
-    const mapped = (rows as any[]).map((r: any) => ({
-      id: r.id,
-      user_id: r.user_id ?? userId,
-      type: r.type ?? "system",
-      title: r.title ?? null,
-      body: r.body ?? null,
-      payload: r.payload ?? null,
-      is_read: Boolean(r.is_read ?? false),
-      created_at: typeof r.created_at === "string" ? r.created_at : r.created_at?.toISOString?.() ?? new Date().toISOString(),
-      updated_at: typeof r.updated_at === "string" ? r.updated_at : r.updated_at?.toISOString?.() ?? new Date().toISOString(),
-    }));
-    return res.json(mapped);
   } catch (e) {
     next(e);
   }

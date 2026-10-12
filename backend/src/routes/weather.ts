@@ -9,7 +9,8 @@ export const weatherRouter = Router();
 /* GET /api/weather/hail-events */
 weatherRouter.get("/hail-events", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { status, severity, since, no_expired, limit = "200" } = req.query as Record<string, string>;
+    const { status, severity, since, no_expired, limit = "200", sort = "asc", order } = req.query as Record<string, string>;
+    const direction = (order || sort)?.toLowerCase() === "desc" ? "desc" : "asc";
     const where: any = {};
     if (status) where.status = status;
     if (severity) where.severity = severity;
@@ -27,10 +28,21 @@ weatherRouter.get("/hail-events", requireAuth, async (req: AuthenticatedRequest,
         { OR: [{ expiresAt: null }, { expiresAt: { gte: now } }] },
       ];
     }
-    const hailEvents = await (prisma as any).hailEvent.findMany({
-      where, orderBy: { forecastTime: "asc" },
+    const rawEvents = await (prisma as any).hailEvent.findMany({
+      where,
+      orderBy: { forecastTime: direction },
       take: Math.min(parseInt(limit) || 200, 500),
     });
+    // Ensure both camelCase and snake_case properties are available
+    const hailEvents = rawEvents.map((e: any) => ({
+      ...e,
+      forecast_time: e.forecastTime ? new Date(e.forecastTime).toISOString() : null,
+      observed_time: e.observedTime ? new Date(e.observedTime).toISOString() : null,
+      created_at: e.createdAt ? new Date(e.createdAt).toISOString() : null,
+      hail_size_mm: e.hailSizeMm ?? null,
+      radius_km: e.radiusKm ?? 15,
+      external_id: e.externalId ?? null,
+    }));
     res.json({ hailEvents });
   } catch (e) {
     res.status(500).json({ message: (e as Error).message });
