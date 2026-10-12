@@ -523,24 +523,43 @@ export function OperationalMap() {
   };
 
   const hailEntities = useMemo<HailEntity[]>(() => {
-    return (hailEvents ?? []).map((h) => {
-      const ts = new Date(
-        h.observed_time ?? h.forecast_time ?? h.expires_at ?? Date.now()
-      ).getTime();
+    return (hailEvents ?? []).map((h: any) => {
+      const rawDate =
+        h.observed_time ??
+        h.observedTime ??
+        h.forecast_time ??
+        h.forecastTime ??
+        h.expires_at ??
+        h.expiresAt ??
+        null;
+      const ts = rawDate ? new Date(rawDate).getTime() : Date.now();
+      const radiusKm = Number(h.radius_km ?? h.radiusKm ?? 25);
+      const hailSizeMm = Number(h.hail_size_mm ?? h.hailSizeMm ?? 0);
+      const sev = (String(h.severity || "moderate").toLowerCase() as HailSeverity);
+      const stat = (String(h.status || "forecast").toLowerCase() as HailStatus);
       return {
         id: h.id,
-        lat: h.lat,
-        lng: h.lng,
-        status: h.status,
-        severity: h.severity,
-        forecast: h.status === "forecast",
-        active: h.status === "ongoing",
-        confirmed: h.status === "confirmed",
+        lat: Number(h.lat),
+        lng: Number(h.lng),
+        status: stat,
+        severity: sev,
+        forecast: stat === "forecast",
+        active: stat === "ongoing",
+        confirmed: stat === "confirmed",
         timestamp: isNaN(ts) ? Date.now() : ts,
-        confidence: Number((h as any).probability ?? (h as any).confidence ?? 0),
-        source: (h as any).source ?? "unknown",
-        size: h.hail_size_mm ?? 0,
-        raw: h,
+        confidence: Number(h.probability ?? h.confidence ?? 0),
+        source: h.source ?? "meteoalarm",
+        size: hailSizeMm,
+        raw: {
+          ...h,
+          radius_km: radiusKm,
+          hail_size_mm: hailSizeMm,
+          severity: sev,
+          status: stat,
+          observed_time: h.observed_time ?? h.observedTime ?? null,
+          forecast_time: h.forecast_time ?? h.forecastTime ?? null,
+          expires_at: h.expires_at ?? h.expiresAt ?? null,
+        },
       };
     });
   }, [hailEvents]);
@@ -1263,12 +1282,20 @@ export function OperationalMap() {
     [teamsGeo],
   );
   const oppHail: OppHailEvent[] = useMemo(
-    () => visibleHailEvents.map((h) => ({
-      id: h.id, city: h.city, region: h.region, country: h.country,
-      lat: h.lat, lng: h.lng, radius_km: h.radius_km, severity: h.severity,
-      status: h.status, hail_size_mm: h.hail_size_mm, probability: h.probability,
+    () => (hailEvents ?? []).map((h: any) => ({
+      id: h.id,
+      city: h.city ?? h.region ?? "Região",
+      region: h.region ?? null,
+      country: h.country ?? "—",
+      lat: Number(h.lat),
+      lng: Number(h.lng),
+      radius_km: Number(h.radius_km ?? h.radiusKm ?? 25),
+      severity: (String(h.severity || "moderate").toLowerCase() as any),
+      status: (String(h.status || "forecast").toLowerCase() as any),
+      hail_size_mm: Number(h.hail_size_mm ?? h.hailSizeMm ?? 0),
+      probability: Number(h.probability ?? 0.5),
     })),
-    [visibleHailEvents],
+    [hailEvents],
   );
   const opportunities = useMemo(
     () => computeOpportunities(oppHail, oppOrders, oppTeams),
@@ -1778,6 +1805,7 @@ export function OperationalMap() {
         <ErrorBoundary fallback={null}>
           <OperationalOpportunities
             opportunities={opportunities}
+            totalMonitoredEvents={hailEvents.length}
             onSelect={(opp) => {
               setSelectedHailId(opp.id);
               mapRef.current?.easeTo({ center: [opp.hail.lng, opp.hail.lat], zoom: 7, duration: 700 });
