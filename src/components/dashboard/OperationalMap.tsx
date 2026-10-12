@@ -81,7 +81,7 @@ const COUNTRY_CENTROIDS: Record<string, [number, number]> = {
   US: [-95.7129, 37.0902], // EUA
 };
 
-const CITY_COORDS: Record<string, [number, number]> = {
+export const CITY_COORDS: Record<string, [number, number]> = {
   // Portugal
   lisboa: [-9.1393, 38.7223],
   lisbon: [-9.1393, 38.7223],
@@ -210,7 +210,7 @@ function normalizeGeoText(text: string): string {
     .trim();
 }
 
-function guessCityFromText(text: string): string | null {
+export function guessCityFromText(text: string): string | null {
   if (!text) return null;
   const lower = normalizeGeoText(text);
   for (const city of Object.keys(CITY_COORDS)) {
