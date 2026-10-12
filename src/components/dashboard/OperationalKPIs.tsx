@@ -47,14 +47,14 @@ export function OperationalKPIs() {
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <KpiCell label="Plataformas Ativas" value={v(activePlatforms)}
-        icon={Activity} tone="text-emerald-400" />
+        icon={Activity} tone="text-emerald-400" sub="bases operacionais" />
       <KpiCell label="Plataformas Inativas" value={v(inactive)}
-        icon={PauseCircle} tone={inactive > 0 ? "text-amber-400" : "text-muted-foreground/70"} />
+        icon={PauseCircle} tone={inactive > 0 ? "text-amber-400" : "text-muted-foreground/70"} sub="bases pausadas" />
       <KpiCell label="Alertas" value={v(alerts)}
         icon={Bell} tone={alerts > 0 ? "text-amber-400" : "text-muted-foreground/70"}
-        pulse={alerts > 0} />
+        pulse={alerts > 0} sub="clima & produção" />
       <KpiCell label="Eventos 24h" value={v(data?.realtimeEvents24h)}
-        icon={Radio} tone="text-sky-400" sub="stream backend" />
+        icon={Radio} tone="text-sky-400" sub="stream operacional" />
       <KpiCell label="Técnicos Ativos" value={v(data?.activeTechnicians)}
         icon={Users} tone="text-violet-400" sub="em operação" />
       <KpiCell label="Clientes Ativos" value={v(data?.activeClients)}
