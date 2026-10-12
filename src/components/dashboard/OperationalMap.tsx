@@ -64,14 +64,80 @@ interface HailEvent {
 }
 
 /* ------------------------------------------------------------------ */
-/*  City heuristic (kept from previous map for fallback inference)     */
+/*  City & Country centroids for comprehensive operational geocoding   */
 /* ------------------------------------------------------------------ */
+const COUNTRY_CENTROIDS: Record<string, [number, number]> = {
+  PT: [-8.2245, 39.3999], // Portugal
+  ES: [-3.7038, 40.4168], // Espanha
+  FR: [2.2137, 46.2276],  // França
+  CH: [8.2275, 46.8182],  // Suíça
+  DE: [10.4515, 51.1657], // Alemanha
+  IT: [12.5674, 41.8719], // Itália
+  GB: [-2.0000, 54.0000], // Reino Unido
+  BE: [4.4699, 50.5039],  // Bélgica
+  NL: [5.2913, 52.1326],  // Holanda
+  AT: [14.5501, 47.5162], // Áustria
+  BR: [-47.8825, -15.7942], // Brasil
+  US: [-95.7129, 37.0902], // EUA
+};
+
 const CITY_COORDS: Record<string, [number, number]> = {
+  // Portugal
+  lisboa: [-9.1393, 38.7223],
+  lisbon: [-9.1393, 38.7223],
+  porto: [-8.6291, 41.1579],
+  "vila nova de gaia": [-8.6139, 41.1333],
+  gaia: [-8.6139, 41.1333],
+  amadora: [-9.2302, 38.7538],
+  braga: [-8.4265, 41.5454],
+  coimbra: [-8.4116, 40.2033],
+  funchal: [-16.9085, 32.6669],
+  setubal: [-8.8919, 38.5244],
+  almada: [-9.1583, 38.6792],
+  queluz: [-9.2544, 38.7567],
+  faro: [-7.9304, 37.0194],
+  aveiro: [-8.6538, 40.6405],
+  viseu: [-7.9142, 40.6566],
+  leiria: [-8.8077, 39.7438],
+  guimaraes: [-8.2961, 41.4425],
+  evora: [-7.9093, 38.5714],
+  portimao: [-8.5379, 37.1363],
+  sintra: [-9.3817, 38.8029],
+  cascais: [-9.4215, 38.6979],
+  santarem: [-8.6833, 39.2333],
+  matosinhos: [-8.6869, 41.1824],
+  maia: [-8.6214, 41.2333],
+  braganca: [-6.7572, 41.8061],
+  "castelo branco": [-7.4917, 39.8222],
+  "viana do castelo": [-8.8322, 41.6918],
+
+  // Espanha
+  madrid: [-3.7038, 40.4168],
+  barcelona: [2.1734, 41.3851],
+  valencia: [-0.3763, 39.4699],
+  sevilla: [-5.9845, 37.3891],
+  sevilha: [-5.9845, 37.3891],
+  zaragoza: [-0.8891, 41.6488],
+  malaga: [-4.4214, 36.7213],
+  murcia: [-1.1307, 37.9922],
+  palma: [2.6502, 39.5696],
+  bilbao: [-2.9350, 43.2630],
+  alicante: [-0.4810, 38.3452],
+  cordoba: [-4.7794, 37.8882],
+  valladolid: [-4.7245, 41.6523],
+  vigo: [-8.7207, 42.2406],
+  gijon: [-5.6615, 43.5322],
+  granada: [-3.5986, 37.1773],
+  coruna: [-8.4115, 43.3623],
+  toledo: [-4.0273, 39.8628],
+  salamanca: [-5.6635, 40.9701],
+
+  // França
   paris: [2.3522, 48.8566],
-  lyon: [4.8357, 45.764],
+  lyon: [4.8357, 45.7640],
   marseille: [5.3698, 43.2965],
   toulouse: [1.4442, 43.6047],
-  nice: [7.262, 43.7102],
+  nice: [7.2620, 43.7102],
   nantes: [-1.5536, 47.2184],
   strasbourg: [7.7521, 48.5734],
   montpellier: [3.8767, 43.6108],
@@ -80,20 +146,73 @@ const CITY_COORDS: Record<string, [number, number]> = {
   rennes: [-1.6778, 48.1173],
   grenoble: [5.7245, 45.1885],
   rouen: [1.0999, 49.4432],
-  toulon: [5.928, 43.1242],
-  "clermont-ferrand": [3.087, 45.7772],
+  toulon: [5.9280, 43.1242],
+  "clermont-ferrand": [3.0870, 45.7772],
   "le mans": [0.1996, 48.0061],
-  dijon: [5.0415, 47.322],
+  dijon: [5.0415, 47.3220],
   angers: [-0.5632, 47.4784],
   "saint-etienne": [4.3872, 45.4397],
   tours: [0.6848, 47.3941],
+  reims: [4.0317, 49.2583],
+  "le havre": [0.1079, 49.4944],
+
+  // Suíça
   geneve: [6.1432, 46.2044],
   geneva: [6.1432, 46.2044],
+  zurich: [8.5417, 47.3769],
+  basel: [7.5886, 47.5596],
+  bern: [7.4474, 46.9480],
+  lausanne: [6.6323, 46.5197],
+  lugano: [8.9536, 46.0037],
+
+  // Alemanha
+  berlin: [13.4050, 52.5200],
+  munich: [11.5820, 48.1351],
+  munique: [11.5820, 48.1351],
+  frankfurt: [8.6821, 50.1109],
+  hamburg: [9.9937, 53.5511],
+  cologne: [6.9603, 50.9375],
+  koln: [6.9603, 50.9375],
+  stuttgart: [9.1829, 48.7758],
+  dusseldorf: [6.7735, 51.2277],
+  dortmund: [7.4653, 51.5136],
+
+  // Itália
+  roma: [12.4964, 41.9028],
+  rome: [12.4964, 41.9028],
+  milano: [9.1900, 45.4642],
+  milan: [9.1900, 45.4642],
+  napoli: [14.2681, 40.8518],
+  torino: [7.6869, 45.0703],
+  bologna: [11.3426, 44.4949],
+  firenze: [11.2558, 43.7696],
+  venezia: [12.3155, 45.4408],
+
+  // Brasil
+  "sao paulo": [-46.6333, -23.5505],
+  "rio de janeiro": [-43.1729, -22.9068],
+  brasilia: [-47.8825, -15.7942],
+  "belo horizonte": [-43.9378, -19.9208],
+  curitiba: [-49.2731, -25.4284],
+  "porto alegre": [-51.2177, -30.0346],
+  salvador: [-38.5108, -12.9714],
+  campinas: [-47.0608, -22.9056],
+  florianopolis: [-48.5496, -27.5954],
 };
+
+function normalizeGeoText(text: string): string {
+  if (!text) return "";
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .trim();
+}
 
 function guessCityFromText(text: string): string | null {
   if (!text) return null;
-  const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const lower = normalizeGeoText(text);
   for (const city of Object.keys(CITY_COORDS)) {
     if (lower.includes(city)) return city;
   }
@@ -228,6 +347,18 @@ export function OperationalMap() {
     layersRef.current = layers;
   }, [layers]);
 
+  /* -------- data: workspace registered locations ------------------- */
+  const { data: locationsList = [] } = useQuery<any[]>({
+    queryKey: ["op-map-locations"],
+    retry: 0,
+    staleTime: 60_000,
+    placeholderData: (previousData) => previousData ?? [],
+    queryFn: async () => {
+      const data = await apiRequest<any[]>("/locations").catch(() => []);
+      return Array.isArray(data) ? data : [];
+    },
+  });
+
   /* -------- data: service orders (orders + operations inferred) ----- */
   const { data: serviceOrders = [], isLoading: loadingSO } = useQuery({
     queryKey: ["op-map-orders"],
@@ -239,14 +370,25 @@ export function OperationalMap() {
         apiRequest<{ orders: any[] }>("/service-orders?limit=500").catch(() => ({ orders: [] })),
         apiRequest<{ orders?: any[] } | any[]>("/production-orders").catch(() => []),
       ]);
-      const legacyOrders = soData.orders ?? [];
+      const legacyOrders = (soData.orders ?? []).map((o: any) => ({
+        ...o,
+        car_name: o.car_name || "Veículo",
+      }));
       const prodOrders: any[] = Array.isArray(poData) ? poData : (poData?.orders ?? []);
       const mappedProdOrders = prodOrders.map((p) => ({
         id: p.id,
+        code: p.code || p.order_number || p.id,
         platform: p.platform || p.client_name || p.clientName || "Operação",
-        car_name: [p.brand, p.model].filter(Boolean).join(" "),
+        client_name: p.client_name || p.clientName || "",
+        technician_name: p.technician_name || p.technicianName || "",
+        car_name: [p.brand, p.model].filter(Boolean).join(" ") || p.car_name || "Veículo",
         license_plate: p.license_plate || p.licensePlate || "",
-        status: p.status,
+        location_id: p.location_id || p.locationId || null,
+        location_name: p.location_name || p.locationName || null,
+        operational_site_key: p.operational_site_key || p.operationalSiteKey || null,
+        notes: p.notes || "",
+        status: p.status || "open",
+        priority: p.priority || "normal",
       }));
       return [...legacyOrders, ...mappedProdOrders];
     },
@@ -254,15 +396,15 @@ export function OperationalMap() {
 
   /* -------- data: geo checkins and branch locations (teams) --------- */
   const { data: geoCheckins = [], isLoading: loadingGeo } = useQuery({
-    queryKey: ["op-map-geo"],
+    queryKey: ["op-map-geo", locationsList],
     retry: 0,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData ?? [],
     queryFn: async () => {
-      const [eventsData, locData] = await Promise.all([
-        apiRequest<{ events: any[] }>("/weather/backend-events?table_name=geolocation&action=CHECKIN&limit=300").catch(() => ({ events: [] })),
-        apiRequest<any[]>("/locations").catch(() => []),
-      ]);
+      const eventsData = await apiRequest<{ events: any[] }>(
+        "/weather/backend-events?table_name=geolocation&action=CHECKIN&limit=300"
+      ).catch(() => ({ events: [] }));
+
       const eventPoints = (eventsData.events ?? []).flatMap((event: any) => {
         const lat = Number(event.payload?.lat);
         const lng = Number(event.payload?.lng);
@@ -270,21 +412,44 @@ export function OperationalMap() {
           ? [{ ...event, payload: { ...event.payload, lat, lng } }]
           : [];
       });
-      const locationsList = Array.isArray(locData) ? locData : [];
-      const locPoints = locationsList.flatMap((loc: any) => {
-        const lat = Number(loc.latitude ?? loc.lat);
-        const lng = Number(loc.longitude ?? loc.lng);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+
+      const locPoints = locationsList.flatMap((loc: any, idx: number) => {
+        let lat = Number(loc.latitude ?? loc.lat);
+        let lng = Number(loc.longitude ?? loc.lng);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          // Resolve from address_city or name
+          const cityMatch = guessCityFromText([loc.address_city, loc.name, loc.address_state].filter(Boolean).join(" "));
+          if (cityMatch && CITY_COORDS[cityMatch]) {
+            [lng, lat] = CITY_COORDS[cityMatch];
+          } else {
+            const countryKey = (loc.address_country || "PT").toUpperCase();
+            const centroid = COUNTRY_CENTROIDS[countryKey] || COUNTRY_CENTROIDS.PT;
+            [lng, lat] = centroid;
+          }
+          // Subtle deterministic jitter for multiple locations in the same city/region
+          const jx = (((idx * 17 + 7) % 20) / 20 - 0.5) * 0.05;
+          const jy = (((idx * 23 + 11) % 20) / 20 - 0.5) * 0.05;
+          lng += jx;
+          lat += jy;
+        }
+
         return [{
           id: loc.id,
           created_at: loc.created_at || new Date().toISOString(),
           payload: {
             lat,
             lng,
-            city: loc.name || loc.address_city || loc.city || "Base Operacional",
+            name: loc.name,
+            city: loc.address_city || loc.name || "Base Operacional",
+            address: [loc.address_street, loc.address_number, loc.address_city].filter(Boolean).join(", "),
+            manager: loc.manager_name || loc.managerName || null,
+            phone: loc.phone || null,
+            status: loc.status || "active",
           },
         }];
       });
+
       return [...eventPoints, ...locPoints];
     },
   });
@@ -449,44 +614,103 @@ export function OperationalMap() {
   /* -------- GeoJSON sources ----------------------------------------- */
   const ordersGeo = useMemo(() => {
     const features: any[] = [];
-    // Deterministic jitter per order id — keeps feature references stable
-    // across re-renders, which avoids cascading recomputes (oppOrders →
-    // opportunities → pdrHeatGeo) and map source thrashing.
     const hash = (s: string) => {
       let h = 0;
       for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
       return h;
     };
+
+    // Fast lookup for workspace locations
+    const locationCoordsMap = new Map<string, [number, number]>();
+    for (const loc of locationsList) {
+      const matchedCity = guessCityFromText([loc.address_city, loc.name].filter(Boolean).join(" "));
+      const coords = (matchedCity && CITY_COORDS[matchedCity])
+        ? CITY_COORDS[matchedCity]
+        : COUNTRY_CENTROIDS[(loc.address_country || "PT").toUpperCase()] || COUNTRY_CENTROIDS.PT;
+      if (loc.id) locationCoordsMap.set(loc.id, coords);
+      if (loc.name) locationCoordsMap.set(normalizeGeoText(loc.name), coords);
+    }
+
     for (const o of serviceOrders) {
-      const text = [o.platform, o.car_name, o.license_plate].filter(Boolean).join(" ");
-      const city = guessCityFromText(text);
-      if (!city) continue;
-      const [lng, lat] = CITY_COORDS[city];
-      const h = hash(String(o.id ?? text));
-      const jx = (((h & 0xff) / 255) - 0.5) * 0.04;
-      const jy = ((((h >> 8) & 0xff) / 255) - 0.5) * 0.04;
+      let [lng, lat] = [0, 0];
+      let resolvedCity = "";
+
+      // 1. Try matching with linked location ID or location name
+      if (o.location_id && locationCoordsMap.has(o.location_id)) {
+        [lng, lat] = locationCoordsMap.get(o.location_id)!;
+        resolvedCity = o.location_name || "Base";
+      } else if (o.location_name && locationCoordsMap.has(normalizeGeoText(o.location_name))) {
+        [lng, lat] = locationCoordsMap.get(normalizeGeoText(o.location_name))!;
+        resolvedCity = o.location_name;
+      } else {
+        // 2. Try city name anywhere in order text
+        const combinedText = [
+          o.platform,
+          o.client_name,
+          o.clientName,
+          o.car_name,
+          o.license_plate,
+          o.licensePlate,
+          o.operational_site_key,
+          o.operationalSiteKey,
+          o.notes,
+        ].filter(Boolean).join(" ");
+
+        const city = guessCityFromText(combinedText);
+        if (city && CITY_COORDS[city]) {
+          [lng, lat] = CITY_COORDS[city];
+          resolvedCity = city.charAt(0).toUpperCase() + city.slice(1);
+        } else if (locationsList.length > 0) {
+          // 3. Fallback: anchor to workspace's active location
+          const firstLocation = locationsList[0];
+          const matchedCityLoc = guessCityFromText([firstLocation?.address_city, firstLocation?.name].filter(Boolean).join(" "));
+          const baseCoords = (matchedCityLoc && CITY_COORDS[matchedCityLoc])
+            ? CITY_COORDS[matchedCityLoc]
+            : COUNTRY_CENTROIDS[(firstLocation?.address_country || "PT").toUpperCase()] || COUNTRY_CENTROIDS.PT;
+          [lng, lat] = baseCoords;
+          resolvedCity = firstLocation?.name || firstLocation?.address_city || "Operação";
+        } else {
+          // 4. Fallback to default centroid (Portugal)
+          [lng, lat] = COUNTRY_CENTROIDS.PT;
+          resolvedCity = "Base Principal";
+        }
+      }
+
+      // Add deterministic jitter so overlapping orders in the same location/city have distinct spots
+      const h = hash(String(o.id ?? o.license_plate ?? o.code));
+      const jx = (((h & 0xff) / 255) - 0.5) * 0.045;
+      const jy = ((((h >> 8) & 0xff) / 255) - 0.5) * 0.045;
+
       features.push({
         type: "Feature",
         geometry: { type: "Point", coordinates: [lng + jx, lat + jy] },
         properties: {
           id: o.id,
-          city: city.charAt(0).toUpperCase() + city.slice(1),
-          platform: o.platform ?? "",
-          plate: o.license_plate ?? "",
-          status: o.status ?? "",
+          code: o.code || o.id,
+          city: resolvedCity,
+          platform: o.platform || o.client_name || "Operação",
+          plate: o.license_plate || o.licensePlate || "",
+          car_name: o.car_name || "Veículo",
+          technician: o.technician_name || "",
+          status: o.status || "open",
         },
       });
     }
     return { type: "FeatureCollection", features };
-  }, [serviceOrders]);
-
+  }, [serviceOrders, locationsList]);
 
   const teamsGeo = useMemo(() => {
     const features = geoCheckins.map((c: any) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [c.payload.lng, c.payload.lat] },
       properties: {
+        id: c.id,
+        name: c.payload.name || c.payload.city || "Base Operacional",
         city: c.payload.city ?? "Check-in",
+        address: c.payload.address || "",
+        manager: c.payload.manager || "",
+        phone: c.payload.phone || "",
+        status: c.payload.status || "active",
         when: new Date(c.created_at).toLocaleDateString(),
       },
     }));
@@ -494,12 +718,17 @@ export function OperationalMap() {
   }, [geoCheckins]);
 
   const operationsGeo = useMemo(() => {
-    // PDR ops = service orders flagged as in-progress; same city inference
-    const features = (ordersGeo.features as any[]).filter(
-      (f) => String(f.properties.status).toLowerCase().includes("progress") ||
-             String(f.properties.status).toLowerCase().includes("andamento") ||
-             String(f.properties.status).toLowerCase().includes("aberta")
-    );
+    // Operations = orders that are in progress or open
+    const features = (ordersGeo.features as any[]).filter((f) => {
+      const s = String(f.properties.status).toLowerCase();
+      return (
+        s.includes("progress") ||
+        s.includes("andamento") ||
+        s.includes("aberta") ||
+        s.includes("open") ||
+        s.includes("executando")
+      );
+    });
     return { type: "FeatureCollection", features };
   }, [ordersGeo]);
 
@@ -885,10 +1114,52 @@ export function OperationalMap() {
         const f = e.features?.[0];
         if (!f) return;
         const p = f.properties || {};
-        const html = sourceId === "teams"
-          ? `<strong>${p.city}</strong><br/>${p.when}`
-          : `<strong>${p.city || "—"}</strong><br/>${p.platform || ""} ${p.plate || ""}<br/><span style="opacity:.7">${p.status || ""}</span>`;
-        new maplibregl.Popup({ closeButton: false, offset: 12 })
+        let html = "";
+        if (sourceId === "teams") {
+          html = `
+            <div style="min-width:180px; font-family:system-ui,sans-serif; color:#e2e8f0;">
+              <div style="display:inline-flex; align-items:center; gap:4px; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#22d3ee; margin-bottom:4px;">
+                <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#22d3ee;"></span>
+                Base Operacional
+              </div>
+              <div style="font-weight:700; font-size:13px; color:#fff; line-height:1.2;">${p.name || p.city}</div>
+              ${p.address ? `<div style="font-size:10px; color:#94a3b8; margin-top:3px;">${p.address}</div>` : ""}
+              ${p.manager ? `<div style="font-size:10px; color:#cbd5e1; margin-top:4px;"><strong>Responsável:</strong> ${p.manager}</div>` : ""}
+              ${p.phone ? `<div style="font-size:10px; color:#94a3b8; margin-top:2px;">Tel: ${p.phone}</div>` : ""}
+              <div style="margin-top:6px; font-size:9px; color:#64748b;">${p.when || "Ativo no workspace"}</div>
+            </div>`;
+        } else if (sourceId === "operations") {
+          html = `
+            <div style="min-width:190px; font-family:system-ui,sans-serif; color:#e2e8f0;">
+              <div style="display:inline-flex; align-items:center; gap:4px; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#f59e0b; margin-bottom:4px;">
+                <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#f59e0b;"></span>
+                Operação Ativa
+              </div>
+              <div style="font-weight:700; font-size:13px; color:#fff;">${p.car_name || p.plate || "Veículo"}</div>
+              <div style="font-size:10px; color:#94a3b8; margin-top:2px;">Placa: <strong style="color:#fff;">${p.plate || "—"}</strong></div>
+              <div style="font-size:10px; color:#cbd5e1; margin-top:2px;">Cliente / Base: ${p.platform || p.city || "—"}</div>
+              ${p.technician ? `<div style="font-size:10px; color:#cbd5e1; margin-top:2px;">Técnico: ${p.technician}</div>` : ""}
+              <div style="margin-top:6px; display:inline-block; font-size:9px; font-weight:600; padding:2px 6px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);">
+                ${p.status || "Em andamento"}
+              </div>
+            </div>`;
+        } else {
+          html = `
+            <div style="min-width:180px; font-family:system-ui,sans-serif; color:#e2e8f0;">
+              <div style="display:inline-flex; align-items:center; gap:4px; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#a855f7; margin-bottom:4px;">
+                <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#a855f7;"></span>
+                Ordem de Produção
+              </div>
+              <div style="font-weight:700; font-size:13px; color:#fff;">${p.car_name || p.plate || "Veículo"}</div>
+              <div style="font-size:10px; color:#94a3b8; margin-top:2px;">Placa: <strong style="color:#fff;">${p.plate || "—"}</strong></div>
+              <div style="font-size:10px; color:#cbd5e1; margin-top:2px;">Cliente: ${p.platform || "—"}</div>
+              ${p.city ? `<div style="font-size:10px; color:#94a3b8; margin-top:2px;">Local: ${p.city}</div>` : ""}
+              <div style="margin-top:6px; display:inline-block; font-size:9px; font-weight:600; padding:2px 6px; border-radius:4px; background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3);">
+                ${p.status || "Aberta"}
+              </div>
+            </div>`;
+        }
+        new maplibregl.Popup({ closeButton: true, offset: 12, maxWidth: "260px" })
           .setLngLat(f.geometry.coordinates)
           .setHTML(html)
           .addTo(map);
@@ -1095,6 +1366,43 @@ export function OperationalMap() {
     const id = window.setInterval(tick, 900);
     return () => { cancelled = true; window.clearInterval(id); };
   }, [mapReady]);
+
+  /* -------- Dynamic auto-focus: fit map bounds to operational points -------- */
+  const fittedRef = useRef(false);
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || fittedRef.current) return;
+    const allPoints = [...(teamsGeo.features as any[]), ...(ordersGeo.features as any[])];
+    if (allPoints.length === 0) return;
+
+    let minLng = Infinity;
+    let minLat = Infinity;
+    let maxLng = -Infinity;
+    let maxLat = -Infinity;
+
+    for (const p of allPoints) {
+      const coords = p.geometry?.coordinates;
+      if (!Array.isArray(coords)) continue;
+      const [lng, lat] = coords;
+      if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        if (lng < minLng) minLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lng > maxLng) maxLng = lng;
+        if (lat > maxLat) maxLat = lat;
+      }
+    }
+
+    if (minLng !== Infinity && maxLng !== -Infinity) {
+      fittedRef.current = true;
+      if (Math.abs(maxLng - minLng) < 0.05 && Math.abs(maxLat - minLat) < 0.05) {
+        mapRef.current.flyTo({ center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2], zoom: 9, duration: 1000 });
+      } else {
+        mapRef.current.fitBounds(
+          [[minLng - 0.08, minLat - 0.08], [maxLng + 0.08, maxLat + 0.08]],
+          { padding: 50, maxZoom: 12, duration: 1000 }
+        );
+      }
+    }
+  }, [mapReady, teamsGeo, ordersGeo]);
 
   /* -------- Toggle layer visibility -------------------------------- */
   useEffect(() => {
@@ -1313,11 +1621,19 @@ export function OperationalMap() {
         <div className="flex flex-wrap gap-1.5 items-center">
           {LAYER_DEFS.map(({ key, label, icon: Icon, color }) => {
             const active = layers[key];
+            const count =
+              key === "teams" ? teamsGeo.features.length :
+              key === "orders" ? ordersGeo.features.length :
+              key === "operations" ? operationsGeo.features.length :
+              key === "hail" ? visibleHailEvents.length :
+              key === "pdr" ? opportunities.length :
+              null;
+
             return (
               <button
                 key={key}
                 onClick={() => toggleLayer(key)}
-                className="text-[10px] px-2 py-1 rounded-md border transition-all flex items-center gap-1"
+                className="text-[10px] px-2 py-1 rounded-md border transition-all flex items-center gap-1.5 cursor-pointer"
                 style={{
                   borderColor: active ? color : "hsl(220 12% 22%)",
                   background: active ? `${color}22` : "transparent",
@@ -1326,7 +1642,18 @@ export function OperationalMap() {
                 }}
               >
                 <Icon className="h-3 w-3" />
-                {label}
+                <span>{label}</span>
+                {count !== null && (
+                  <span
+                    className="text-[9px] px-1.5 py-0.2 rounded-full font-mono font-medium"
+                    style={{
+                      background: active ? `${color}33` : "rgba(255,255,255,0.06)",
+                      color: active ? color : "hsl(var(--muted-foreground))",
+                    }}
+                  >
+                    {count}
+                  </span>
+                )}
               </button>
             );
           })}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ const SEV: { key: Severity; label: string; color: string }[] = [
 
 export function HailReportDialog() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -108,6 +110,8 @@ export function HailReportDialog() {
         }),
       });
 
+      queryClient.invalidateQueries({ queryKey: ["op-map-hail-reports"] });
+      queryClient.invalidateQueries({ queryKey: ["op-map-hail"] });
       toast({ title: "Relato enviado", description: "Obrigado pela contribuição." });
       reset();
       setOpen(false);
