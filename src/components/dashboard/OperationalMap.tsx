@@ -952,7 +952,7 @@ export function OperationalMap() {
         center: [2.3522, 46.6034],
         zoom: 4.8,
         attributionControl: { compact: true },
-        maxZoom: 18,
+        maxZoom: 21,
         minZoom: 2,
       });
     } catch (err) {
@@ -1757,6 +1757,7 @@ export function OperationalMap() {
               id: layerId,
               type: "raster",
               source: srcId,
+              maxzoom: 8,
               paint: {
                 "raster-opacity": kind === "radar" ? 0.55 : 0.65,
                 "raster-fade-duration": 0,
@@ -1793,6 +1794,7 @@ export function OperationalMap() {
         if (!path) return;
         const updateRaster = (kind: "radar" | "storms") => {
           if (!map.getLayer(`${kind}-layer`)) return;
+          if (map.getZoom() >= 8) return;
           const src = map.getSource(`${kind}-src`) as any;
           if (src && typeof src.setTiles === "function") {
             try { src.setTiles([buildUrl(data.host, path, kind)]); } catch {}
