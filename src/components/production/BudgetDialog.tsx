@@ -1,3 +1,5 @@
+import { VehicleBlueprint5Views, type DamagePointData } from "./VehicleBlueprint5Views";
+import { Eye } from "lucide-react";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto } from "@/lib/apiBudgets";
@@ -1163,6 +1165,35 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   }>({ open: false, pending: null, source: "choose_step" });
   const [intervPopoverOpen, setIntervPopoverOpen] = useState(false);
   const [intervQuery, setIntervQuery] = useState("");
+  const [inspectionPoints, setInspectionPoints] = useState<DamagePointData[]>([]);
+
+  useEffect(() => {
+    const currentId = initial?.id || form.id;
+    if (open && currentId) {
+      apiRequest<{ inspection: any }>(`/budgets/${currentId}/inspection`)
+        .then((res) => {
+          if (res?.inspection?.damagePoints) {
+            setInspectionPoints(
+              res.inspection.damagePoints.map((p: any) => ({
+                id: p.id,
+                view: p.view,
+                coordX: Number(p.coordX),
+                coordY: Number(p.coordY),
+                carPartCode: p.carPartCode,
+                damageType: p.damageType,
+                dentCount: p.dentCount,
+                contracted: p.contracted,
+                estimatedAmount: p.estimatedAmount ? Number(p.estimatedAmount) : null,
+                notes: p.notes,
+              }))
+            );
+          }
+        })
+        .catch(() => setInspectionPoints([]));
+    } else if (open && !currentId) {
+      setInspectionPoints([]);
+    }
+  }, [open, initial?.id, form.id]);
 
   const [ocrDialogOpen, setOcrDialogOpen] = useState(false);
   const [ocrSelectedBudgetType, setOcrSelectedBudgetType] = useState<Budget["budget_type"] | null>(null);
@@ -2878,6 +2909,36 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
               <p className="pt-1 text-[11px] text-muted-foreground">
                 Placa / Matrícula e VIN são opcionais. Preencha apenas se disponíveis.
               </p>
+            </Section>
+
+            <Section
+              title={
+                <span className="inline-flex items-center gap-2">
+                  <Eye className="h-4 w-4 text-primary" />
+                  Mapeamento Visual do Veículo & Checklist de Entrada (5 Vistas)
+                </span>
+              }
+            >
+              <p className="mt-1 mb-3 text-xs leading-relaxed text-muted-foreground">
+                Clique nas vistas do veículo para mapear avarias. Identifique danos orçados (PDR) e danos pré-existentes (não cobrados) para resguardo jurídico.
+              </p>
+              <VehicleBlueprint5Views
+                damagePoints={inspectionPoints}
+                onChange={async (newPoints) => {
+                  setInspectionPoints(newPoints);
+                  const currentId = form.id || initial?.id;
+                  if (currentId) {
+                    try {
+                      await apiRequest(`/budgets/${currentId}/inspection`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ damage_points: newPoints }),
+                      });
+                    } catch {}
+                  }
+                }}
+                readOnly={isLocked}
+              />
             </Section>
 
             <Section
