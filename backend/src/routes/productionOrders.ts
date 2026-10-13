@@ -17,7 +17,13 @@ import {
   type FinalizeProductionOrderOptions,
 } from "../services/weeklogService.js";
 import { sendEmail } from "../lib/email/resend.js";
-import { notifyOrderAssigned, notifyCorrectionRequested } from "../services/notificationService.js";
+import {
+  notifyOrderAssigned,
+  notifyCorrectionRequested,
+  notifyObservationAdded,
+  notifyProductionStatusChanged,
+  getWorkspaceManagerUserIds,
+} from "../services/notificationService.js";
 
 export const productionOrdersRouter = Router();
 
@@ -997,6 +1003,16 @@ productionOrdersRouter.patch("/:id", async (req: Request, res: Response, next: N
       data.deliveredAt = parseDate(b.delivered_at ?? b.deliveredAt);
     }
 
+    // Helper to get actor display name
+    let cachedActorName: string | null = null;
+    const getActorName = async () => {
+      if (!cachedActorName && ctx.actorUserId) {
+        const u = await prisma.user.findUnique({ where: { id: ctx.actorUserId }, select: { fullName: true, email: true } });
+        cachedActorName = u?.fullName || u?.email || null;
+      }
+      return cachedActorName;
+    };
+
     // Delegação canônica de PATCH status="delivered" para finalizeProductionOrder (LEGACY-FINALIZE-01)
     if (b.status === "delivered") {
       const otherData = { ...data };
@@ -1007,6 +1023,34 @@ productionOrdersRouter.patch("/:id", async (req: Request, res: Response, next: N
       }
 
       const finalized = await finalizeProductionOrder(ctx, id);
+
+      // Notifica partes interessadas sobre a entrega/finalização
+      try {
+        const vehInfo = [existing.brand, existing.model, existing.licensePlate].filter(Boolean).join(" ");
+        const targetUsers: string[] = [];
+        if (existing.technicianUserId && existing.technicianUserId !== ctx.actorUserId) {
+          targetUsers.push(existing.technicianUserId);
+        }
+        if (existing.createdBy && existing.createdBy !== ctx.actorUserId) {
+          targetUsers.push(existing.createdBy);
+        }
+        if (ctx.actorUserId === existing.technicianUserId) {
+          const managers = await getWorkspaceManagerUserIds(existing.workspaceId, ctx.actorUserId);
+          targetUsers.push(...managers);
+        }
+        const author = await getActorName();
+        await notifyProductionStatusChanged(
+          targetUsers,
+          existing.code,
+          existing.status,
+          "delivered",
+          vehInfo,
+          author,
+          existing.id,
+        );
+      } catch (notifErr) {
+        console.error("[productionOrders] Falha ao despachar notificação de finalização:", notifErr);
+      }
 
       return res.json({
         ...mapOrder(finalized.productionOrder),
@@ -1025,10 +1069,72 @@ productionOrdersRouter.patch("/:id", async (req: Request, res: Response, next: N
     }
 
     const order = await prisma.productionOrder.update({ where: { id }, data });
+    const vehInfo = [order.brand, order.model, order.licensePlate].filter(Boolean).join(" ");
 
     if (data.technicianUserId && data.technicianUserId !== existing.technicianUserId && data.technicianUserId !== ctx.actorUserId) {
-      const vehInfo = [order.brand, order.model, order.licensePlate].filter(Boolean).join(" ");
       await notifyOrderAssigned(data.technicianUserId as string, order.code, vehInfo);
+    }
+
+    // 1) Notifica quando houver mudança de status de produção
+    if (data.status && data.status !== existing.status) {
+      try {
+        const targetUsers: string[] = [];
+        if (order.technicianUserId && order.technicianUserId !== ctx.actorUserId) {
+          targetUsers.push(order.technicianUserId);
+        }
+        if (order.createdBy && order.createdBy !== ctx.actorUserId) {
+          targetUsers.push(order.createdBy);
+        }
+        if (ctx.actorUserId === order.technicianUserId) {
+          const managers = await getWorkspaceManagerUserIds(order.workspaceId, ctx.actorUserId);
+          targetUsers.push(...managers);
+        }
+        const author = await getActorName();
+        await notifyProductionStatusChanged(
+          targetUsers,
+          order.code,
+          existing.status,
+          data.status as string,
+          vehInfo,
+          author,
+          order.id,
+        );
+      } catch (statusNotifErr) {
+        console.error("[productionOrders] Falha ao notificar alteração de status:", statusNotifErr);
+      }
+    }
+
+    // 2) Notifica quando observações internas forem adicionadas/atualizadas
+    if (data.notes !== undefined && data.notes !== existing.notes && typeof data.notes === "string" && data.notes.trim()) {
+      try {
+        const newNotes = data.notes.trim();
+        const oldNotes = (existing.notes || "").trim();
+        const diff = newNotes.startsWith(oldNotes) ? newNotes.slice(oldNotes.length).trim() : newNotes;
+        const snippet = (diff || newNotes).slice(0, 140);
+
+        const targetUsers: string[] = [];
+        if (order.technicianUserId && order.technicianUserId !== ctx.actorUserId) {
+          targetUsers.push(order.technicianUserId);
+        }
+        if (order.createdBy && order.createdBy !== ctx.actorUserId) {
+          targetUsers.push(order.createdBy);
+        }
+        if (ctx.actorUserId === order.technicianUserId) {
+          const managers = await getWorkspaceManagerUserIds(order.workspaceId, ctx.actorUserId);
+          targetUsers.push(...managers);
+        }
+        const author = await getActorName();
+        await notifyObservationAdded(
+          targetUsers,
+          order.code,
+          snippet,
+          vehInfo,
+          author,
+          order.id,
+        );
+      } catch (obsNotifErr) {
+        console.error("[productionOrders] Falha ao notificar observação adicionada:", obsNotifErr);
+      }
     }
 
     let weeklog: any = undefined;
@@ -1051,7 +1157,41 @@ productionOrdersRouter.post("/:id/finalize", async (req: Request, res: Response,
       return res.status(403).json({ message: "Workspace ativo não definido." });
     }
 
+    const existing = await prisma.productionOrder.findUnique({ where: { id } });
     const result = await finalizeProductionOrder(ctx, id);
+
+    if (existing) {
+      try {
+        const vehInfo = [existing.brand, existing.model, existing.licensePlate].filter(Boolean).join(" ");
+        const targetUsers: string[] = [];
+        if (existing.technicianUserId && existing.technicianUserId !== ctx.actorUserId) {
+          targetUsers.push(existing.technicianUserId);
+        }
+        if (existing.createdBy && existing.createdBy !== ctx.actorUserId) {
+          targetUsers.push(existing.createdBy);
+        }
+        if (ctx.actorUserId === existing.technicianUserId) {
+          const managers = await getWorkspaceManagerUserIds(existing.workspaceId, ctx.actorUserId);
+          targetUsers.push(...managers);
+        }
+        let authorName: string | null = null;
+        if (ctx.actorUserId) {
+          const u = await prisma.user.findUnique({ where: { id: ctx.actorUserId }, select: { fullName: true, email: true } });
+          authorName = u?.fullName || u?.email || null;
+        }
+        await notifyProductionStatusChanged(
+          targetUsers,
+          existing.code,
+          existing.status,
+          "delivered",
+          vehInfo,
+          authorName,
+          existing.id,
+        );
+      } catch (e) {
+        console.error("[productionOrders] Falha notificação finalize:", e);
+      }
+    }
 
     return res.status(200).json(result);
   } catch (error) {

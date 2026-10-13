@@ -8,6 +8,7 @@ import {
   WORKFLOW_STATUS_LABELS,
   type WorkflowStatus,
 } from "../lib/productionWorkflowStatus.js";
+import { notifyWorkflowStatusChanged, getWorkspaceManagerUserIds } from "../services/notificationService.js";
 
 export const productionWorkflowRouter = Router();
 
@@ -219,6 +220,36 @@ productionWorkflowRouter.patch("/lists/:listName/status", requireAuth, async (re
   }
 
   const updated = await prisma.productionList.findUnique({ where: { listName } });
+
+  // Notifica técnicos e gestores sobre a transição de workflow
+  try {
+    const actorUserId = req.auth?.userId;
+    const involvedOrders = await prisma.paymentOrder.findMany({
+      where: { listName, deletedAt: null },
+      select: { technicianId: true, workspaceId: true },
+    });
+    const targetUsers: string[] = [];
+    let wsId = workspaceId;
+    for (const io of involvedOrders) {
+      if (io.technicianId && io.technicianId !== actorUserId) targetUsers.push(io.technicianId);
+      if (!wsId && io.workspaceId) wsId = io.workspaceId;
+    }
+    if (wsId && actorUserId) {
+      const managers = await getWorkspaceManagerUserIds(wsId, actorUserId);
+      targetUsers.push(...managers);
+    }
+    const authorName = req.auth?.email || "Operador";
+    await notifyWorkflowStatusChanged(
+      targetUsers,
+      listName,
+      WORKFLOW_STATUS_LABELS[fromStatus] || fromStatus,
+      WORKFLOW_STATUS_LABELS[toStatus as WorkflowStatus] || toStatus,
+      authorName,
+    );
+  } catch (wErr) {
+    console.error("[workflow] Falha ao enviar notificação de status de workflow:", wErr);
+  }
+
   return res.json({
     listName,
     status: updated!.status,

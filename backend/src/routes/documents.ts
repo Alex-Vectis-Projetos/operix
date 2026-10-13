@@ -1,6 +1,7 @@
 import { Router, type Response } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
+import { notifyDocumentUpdated, getWorkspaceManagerUserIds } from "../services/notificationService.js";
 
 export const documentsRouter = Router();
 
@@ -91,6 +92,11 @@ documentsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res
   const id = req.params["id"] as string;
   const b = req.body;
 
+  const existing = await prisma.document.findUnique({ where: { id } });
+  if (!existing) {
+    return res.status(404).json({ message: "Documento não encontrado." });
+  }
+
   const data: Record<string, unknown> = {};
   if (b.name !== undefined) data.name = b.name;
   if (b.display_name !== undefined) data.displayName = b.display_name;
@@ -105,6 +111,36 @@ documentsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res
   }
 
   const doc = await prisma.document.update({ where: { id }, data });
+
+  // Notificação de atualização / validação / observação de documento
+  try {
+    const actorUserId = req.auth?.userId;
+    const authorName = req.auth?.email || "Um operador";
+    const targetUsers: string[] = [];
+
+    if (existing.uploadedBy && existing.uploadedBy !== actorUserId) {
+      targetUsers.push(existing.uploadedBy);
+    }
+    if (existing.workspaceId && actorUserId) {
+      const managers = await getWorkspaceManagerUserIds(existing.workspaceId, actorUserId);
+      targetUsers.push(...managers);
+    }
+
+    const docTitle = doc.displayName || doc.name;
+    const vs = b.visual_state as any;
+    const hasNoteOrObs = vs && (vs.notes || vs.observacao || vs.observation || vs.motivo || vs.comments);
+
+    if (b.validated === true && existing.validated !== true) {
+      await notifyDocumentUpdated(targetUsers, docTitle, "validated", authorName, doc.id);
+    } else if (hasNoteOrObs) {
+      await notifyDocumentUpdated(targetUsers, docTitle, "observation", authorName, doc.id);
+    } else if (b.name !== undefined || b.display_name !== undefined) {
+      await notifyDocumentUpdated(targetUsers, docTitle, "updated", authorName, doc.id);
+    }
+  } catch (notifErr) {
+    console.error("[documents] Falha ao enviar notificação de documento:", notifErr);
+  }
+
   return res.json(mapDoc(doc));
 });
 

@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, LogOut, Check, Trash2, FileText, CreditCard, AlertTriangle, Info, Clock, User as UserIcon, Settings as SettingsIcon, Mail, Calendar, Calculator } from "lucide-react";
+import { Bell, LogOut, Check, Trash2, FileText, CreditCard, AlertTriangle, Info, Clock, User as UserIcon, Settings as SettingsIcon, Mail, Calendar, Calculator, MessageSquare, FileCheck } from "lucide-react";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { BrandLogo } from "@/components/BrandLogo";
 import { brandConfig } from "@/brand.config";
@@ -28,6 +28,8 @@ const typeIcon: Record<string, typeof Info> = {
   workspace_invite: Mail,
   weeklog: Calendar,
   budget: Calculator,
+  observation: MessageSquare,
+  document: FileCheck,
 };
 
 function timeAgo(dateStr: string, t: (k: string, fb?: string) => string): string {
@@ -163,6 +165,8 @@ export const TopBar = memo(function TopBar() {
                           : n.type === "workspace_invite" ? "bg-sky-500/10 text-sky-400"
                           : n.type === "weeklog" ? "bg-indigo-500/10 text-indigo-400"
                           : n.type === "budget" ? "bg-amber-500/10 text-amber-400"
+                          : n.type === "observation" ? "bg-violet-500/10 text-violet-400"
+                          : n.type === "document" ? "bg-teal-500/10 text-teal-400"
                           : "bg-primary/10 text-primary"
                       }`}>
                         <Icon className="h-3.5 w-3.5" />

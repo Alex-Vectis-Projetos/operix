@@ -7,7 +7,9 @@ export type NotificationType =
   | "discrepancy"
   | "workspace_invite"
   | "weeklog"
-  | "budget";
+  | "budget"
+  | "observation"
+  | "document";
 
 export interface CreateNotificationInput {
   userId: string;
@@ -186,3 +188,151 @@ export async function notifyPaymentListReady(
     })),
   );
 }
+
+/**
+ * Helper: Retrieve all owner/admin user IDs for a given workspace.
+ */
+export async function getWorkspaceManagerUserIds(
+  workspaceId: string,
+  excludeUserId?: string,
+): Promise<string[]> {
+  try {
+    const members = await prisma.membership.findMany({
+      where: {
+        workspaceId,
+        role: { in: ["owner", "admin"] },
+        ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+      },
+      select: { userId: true },
+    });
+    return members.map((m) => m.userId);
+  } catch (err) {
+    console.error("[notificationService] Failed to get workspace managers:", err);
+    return [];
+  }
+}
+
+/**
+ * Helper: Notify when a new observation or internal note is added to a production order.
+ */
+export async function notifyObservationAdded(
+  targetUserIds: string[],
+  orderCode: string,
+  noteSnippet: string,
+  vehicleInfo?: string | null,
+  authorName?: string | null,
+  orderId?: string | null,
+) {
+  const uniqueUsers = Array.from(new Set(targetUserIds.filter(Boolean)));
+  if (!uniqueUsers.length) return null;
+
+  const authorPrefix = authorName ? `${authorName}: ` : "";
+  const vehSuffix = vehicleInfo ? ` (${vehicleInfo})` : "";
+  const cleanSnippet = noteSnippet.trim().replace(/\s+/g, " ").slice(0, 140);
+
+  return createBatchNotifications(
+    uniqueUsers.map((userId) => ({
+      userId,
+      type: "observation",
+      title: `Nova Observação na OP ${orderCode}`,
+      body: `${authorPrefix}"${cleanSnippet}"${vehSuffix}`,
+      payload: { orderCode, orderId, vehicleInfo, authorName, noteSnippet: cleanSnippet },
+    })),
+  );
+}
+
+/**
+ * Helper: Notify when a production order changes status.
+ */
+export async function notifyProductionStatusChanged(
+  targetUserIds: string[],
+  orderCode: string,
+  fromStatus: string,
+  toStatus: string,
+  vehicleInfo?: string | null,
+  authorName?: string | null,
+  orderId?: string | null,
+) {
+  const uniqueUsers = Array.from(new Set(targetUserIds.filter(Boolean)));
+  if (!uniqueUsers.length) return null;
+
+  const statusLabels: Record<string, string> = {
+    new_vehicle: "Novo Veículo",
+    in_production: "Em Produção",
+    paused: "Pausada",
+    ready_for_pickup: "Pronto para Retirada",
+    delivered: "Entregue / Concluída",
+    canceled: "Cancelada",
+  };
+  const fromLabel = statusLabels[fromStatus] || fromStatus;
+  const toLabel = statusLabels[toStatus] || toStatus;
+  const authorPrefix = authorName ? `${authorName} alterou: ` : "";
+  const vehSuffix = vehicleInfo ? ` (${vehicleInfo})` : "";
+
+  return createBatchNotifications(
+    uniqueUsers.map((userId) => ({
+      userId,
+      type: "service_order",
+      title: `Status Atualizado: OP ${orderCode}`,
+      body: `${authorPrefix}OP ${orderCode}${vehSuffix} avançou de "${fromLabel}" para "${toLabel}".`,
+      payload: { orderCode, orderId, vehicleInfo, fromStatus, toStatus, authorName },
+    })),
+  );
+}
+
+/**
+ * Helper: Notify when a document is validated, receives observations, or is updated.
+ */
+export async function notifyDocumentUpdated(
+  targetUserIds: string[],
+  documentName: string,
+  action: "validated" | "observation" | "updated",
+  authorName?: string | null,
+  documentId?: string | null,
+) {
+  const uniqueUsers = Array.from(new Set(targetUserIds.filter(Boolean)));
+  if (!uniqueUsers.length) return null;
+
+  const actionText =
+    action === "validated"
+      ? "foi validado com sucesso."
+      : action === "observation"
+      ? "recebeu uma nova observação."
+      : "foi atualizado.";
+  const authorPrefix = authorName ? `${authorName}: ` : "";
+
+  return createBatchNotifications(
+    uniqueUsers.map((userId) => ({
+      userId,
+      type: "document",
+      title: action === "validated" ? "Documento Validado" : "Documento Atualizado",
+      body: `${authorPrefix}O documento "${documentName}" ${actionText}`,
+      payload: { documentName, documentId, action, authorName },
+    })),
+  );
+}
+
+/**
+ * Helper: Notify when a workflow list changes status.
+ */
+export async function notifyWorkflowStatusChanged(
+  targetUserIds: string[],
+  listName: string,
+  fromStatus: string,
+  toStatus: string,
+  authorName?: string | null,
+) {
+  const uniqueUsers = Array.from(new Set(targetUserIds.filter(Boolean)));
+  if (!uniqueUsers.length) return null;
+
+  return createBatchNotifications(
+    uniqueUsers.map((userId) => ({
+      userId,
+      type: "payment",
+      title: `Workflow: ${listName}`,
+      body: `${authorName ? `${authorName}: ` : ""}A lista "${listName}" mudou de "${fromStatus}" para "${toStatus}".`,
+      payload: { listName, fromStatus, toStatus, authorName },
+    })),
+  );
+}
+
