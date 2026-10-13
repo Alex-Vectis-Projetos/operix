@@ -849,13 +849,14 @@ productionOrdersRouter.post("/", async (req: Request, res: Response, next: NextF
 
     const b = req.body;
 
-    // Validação da regra de atribuição de técnico (TECH-ASSIGN-01 e TECH-ASSIGN-02)
-    const rawTech = b.technician_user_id ?? b.technicianUserId;
+    // Normalização de campos vazios para null
+    const cleanStr = (v: any) => (typeof v === "string" && v.trim() === "" ? null : v ?? null);
+    const rawTech = cleanStr(b.technician_user_id ?? b.technicianUserId);
     const { technicianUserId, technicianName } = await validateTechnicianAssignment(ctx, rawTech);
 
     // Validação de linhagem de orçamento (production_orders_budget_lineage_check)
-    const rawBudgetId = b.budget_id ?? b.budgetId ?? null;
-    const rawBudgetRevisionId = b.budget_revision_id ?? b.budgetRevisionId ?? null;
+    const rawBudgetId = cleanStr(b.budget_id ?? b.budgetId);
+    const rawBudgetRevisionId = cleanStr(b.budget_revision_id ?? b.budgetRevisionId);
 
     let budgetId: string | null = null;
     let budgetRevisionId: string | null = null;
@@ -1477,3 +1478,127 @@ productionOrdersRouter.delete("/:id", async (req: Request, res: Response, next: 
     return next(error);
   }
 });
+
+/**
+ * GET /api/production-orders/:id/tasks
+ * Lista todas as tarefas operacionais de chão de fábrica vinculadas à ordem.
+ */
+productionOrdersRouter.get("/:id/tasks", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const order = await prisma.productionOrder.findFirst({
+      where: { id, workspaceId: ctx.activeWorkspaceId },
+    });
+    if (!order) {
+      return res.status(404).json({ message: "Ordem de produção não encontrada." });
+    }
+
+    const tasks = await prisma.productionTask.findMany({
+      where: { productionOrderId: id, workspaceId: ctx.activeWorkspaceId },
+      include: { contributions: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return res.status(200).json({ tasks });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * PATCH /api/production-orders/:id/tasks/:taskId
+ * Apontamento de chão de fábrica pelo técnico ou gestor (progresso, conclusão, fotos).
+ */
+productionOrdersRouter.patch("/:id/tasks/:taskId", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const taskId = req.params.taskId as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const task = await prisma.productionTask.findFirst({
+      where: { id: taskId, productionOrderId: id, workspaceId: ctx.activeWorkspaceId },
+    });
+    if (!task) {
+      return res.status(404).json({ message: "Tarefa de produção não encontrada." });
+    }
+
+    const b = req.body || {};
+    const data: Record<string, any> = {};
+
+    if (b.status !== undefined) {
+      data.status = b.status;
+      if (b.status === "in_progress" && !task.startedAt) {
+        data.startedAt = new Date();
+      } else if (b.status === "completed" && !task.completedAt) {
+        data.completedAt = new Date();
+      }
+    }
+
+    if (b.primary_technician_id !== undefined || b.primaryTechnicianId !== undefined) {
+      data.primaryTechnicianId = b.primary_technician_id ?? b.primaryTechnicianId ?? null;
+    }
+    if (b.completion_notes !== undefined || b.completionNotes !== undefined) {
+      data.completionNotes = b.completion_notes ?? b.completionNotes ?? null;
+    }
+    if (b.after_photo_path !== undefined || b.afterPhotoPath !== undefined) {
+      data.afterPhotoPath = b.after_photo_path ?? b.afterPhotoPath ?? null;
+    }
+
+    const updated = await prisma.productionTask.update({
+      where: { id: taskId },
+      data,
+      include: { contributions: true },
+    });
+
+    return res.status(200).json({ task: updated });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * GET /api/production-orders/:id/inspection
+ * Recupera o mapeamento visual do veículo e checklist de entrada vinculado à ordem.
+ */
+productionOrdersRouter.get("/:id/inspection", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const order = await prisma.productionOrder.findFirst({
+      where: { id, workspaceId: ctx.activeWorkspaceId },
+    });
+    if (!order) {
+      return res.status(404).json({ message: "Ordem de produção não encontrada." });
+    }
+
+    // Busca inspeção vinculada diretamente à ordem ou ao orçamento de origem
+    let inspection = await prisma.vehicleInspection.findFirst({
+      where: { productionOrderId: id, workspaceId: ctx.activeWorkspaceId },
+      include: { damagePoints: true },
+    });
+
+    if (!inspection && order.budgetId) {
+      inspection = await prisma.vehicleInspection.findFirst({
+        where: { budgetId: order.budgetId, workspaceId: ctx.activeWorkspaceId },
+        include: { damagePoints: true },
+      });
+    }
+
+    return res.status(200).json({ inspection: inspection || null });
+  } catch (error) {
+    return next(error);
+  }
+});
+

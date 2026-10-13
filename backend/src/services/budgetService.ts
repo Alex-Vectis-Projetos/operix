@@ -685,6 +685,26 @@ export async function approveBudgetRevision(
       );
     }
 
+    const vehicleSnap = (revision.vehicleSnapshot as any) || {};
+    const clientSnap = (revision.clientSnapshot as any) || {};
+    const dossierSnap = (revision.dossierSnapshot as any) || {};
+    const canonicalSiteKey =
+      options?.operationalSiteKey ||
+      (budget as any).siteKey ||
+      (budget as any).operationalSiteKey ||
+      dossierSnap.siteKey ||
+      dossierSnap.operationalSiteKey ||
+      clientSnap.siteKey ||
+      clientSnap.operationalSiteKey ||
+      vehicleSnap.siteKey ||
+      vehicleSnap.operationalSiteKey ||
+      null;
+    const canonicalCurrency =
+      revision.currencyCode ||
+      (budget as any).currencyCode ||
+      "EUR";
+    const structuredServices = buildStructuredProductionServices(revision, canonicalCurrency);
+
     const existingPO = budget.productionOrder;
 
     // Se já existe uma OP vinculada
@@ -785,6 +805,43 @@ export async function approveBudgetRevision(
         },
       });
     }
+
+    // Sincroniza tarefas relacionais de chão de fábrica (production_tasks)
+    await tx.productionTask.deleteMany({
+      where: { productionOrderId: resolvedPO.id, workspaceId: budget.workspaceId },
+    });
+
+    for (const service of structuredServices) {
+      const lowerName = (service.name || "").toLowerCase();
+      let category = "pdr";
+      if (service.category === "part" || lowerName.includes("desmont") || lowerName.includes("montag")) {
+        category = "assembly_disassembly";
+      } else if (lowerName.includes("pint") || lowerName.includes("peint")) {
+        category = "paint";
+      } else if (lowerName.includes("funil") || lowerName.includes("carrosserie") || lowerName.includes("lantern")) {
+        category = "bodywork";
+      }
+
+      await tx.productionTask.create({
+        data: {
+          productionOrderId: resolvedPO.id,
+          workspaceId: budget.workspaceId,
+          serviceCategory: category,
+          carPartCode: (service as any).carPartCode || "general",
+          description: service.name || service.description,
+          commercialAmount: new Prisma.Decimal(service.total),
+          currencyCode: canonicalCurrency,
+          status: "pending",
+          primaryTechnicianId: resolvedPO.technicianUserId,
+        },
+      });
+    }
+
+    // Vincula a inspeção do veículo à nova Ordem de Produção
+    await tx.vehicleInspection.updateMany({
+      where: { budgetId: budget.id, workspaceId: budget.workspaceId },
+      data: { productionOrderId: resolvedPO.id },
+    });
 
     // Atualiza status da revisão para aprovada
     const approvedRev = await tx.budgetRevision.update({

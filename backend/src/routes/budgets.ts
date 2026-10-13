@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
@@ -247,7 +248,7 @@ budgetsRouter.get("/", async (req: Request, res: Response, next: NextFunction) =
 
     const budgets = await prisma.budget.findMany({
       where: {
-        workspaceId: ctx.activeWorkspaceId,
+        workspaceId: ctx.activeWorkspaceId!,
         deletedAt: null,
         ...(isTechnicianScope ? { technicianUserId: ctx.actorUserId } : {}),
         ...(clientId ? { clientId } : {}),
@@ -400,7 +401,7 @@ budgetsRouter.post("/", async (req: Request, res: Response, next: NextFunction) 
     if (idempotencyKey) {
       const existingKeyBudget = await prisma.budget.findFirst({
         where: {
-          workspaceId: ctx.activeWorkspaceId,
+          workspaceId: ctx.activeWorkspaceId!,
           legacyLocalId: idempotencyKey,
         },
         include: { currentRevision: true, approvedRevision: true },
@@ -421,7 +422,7 @@ budgetsRouter.post("/", async (req: Request, res: Response, next: NextFunction) 
     );
 
     const { budget, revision } = await createBudget({
-      workspaceId: ctx.activeWorkspaceId,
+      workspaceId: ctx.activeWorkspaceId!,
       createdById: ctx.actorUserId,
       ...input,
       technicianUserId,
@@ -460,7 +461,7 @@ budgetsRouter.put("/:id/revisions/:revisionId", async (req: Request, res: Respon
     const input = updateRevisionSchema.parse(req.body);
 
     const budget = await prisma.budget.findFirst({
-      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId, deletedAt: null },
+      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId!, deletedAt: null },
     });
     if (!budget) {
       return res.status(404).json({ message: "Orçamento não encontrado." });
@@ -507,7 +508,7 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
     }
 
     const budget = await prisma.budget.findFirst({
-      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId, deletedAt: null },
+      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId!, deletedAt: null },
     });
     if (!budget) {
       return res.status(404).json({ message: "Orçamento não encontrado." });
@@ -602,7 +603,7 @@ budgetsRouter.post("/:id/revisions/:revisionId/reject", async (req: Request, res
     }
 
     const budget = await prisma.budget.findFirst({
-      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId, deletedAt: null },
+      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId!, deletedAt: null },
     });
     if (!budget) {
       return res.status(404).json({ message: "Orçamento não encontrado." });
@@ -790,7 +791,7 @@ budgetsRouter.post(
         data: {
           id: photoId,
           budgetId,
-          workspaceId: ctx.activeWorkspaceId,
+          workspaceId: ctx.activeWorkspaceId!,
           storagePath: finalStoragePath,
           category: b.category || "damage",
           caption: b.caption ?? null,
@@ -1062,6 +1063,123 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
       recipient: recipientEmail,
       message: "E-mail enviado com sucesso com PDF anexado.",
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * GET /api/budgets/:id/inspection
+ */
+budgetsRouter.get("/:id/inspection", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const budgetId = String(req.params.id);
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const budget = await prisma.budget.findFirst({
+      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId!, deletedAt: null },
+    });
+    if (!budget) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+
+    const inspection = await prisma.vehicleInspection.findFirst({
+      where: { budgetId, workspaceId: ctx.activeWorkspaceId },
+      include: { damagePoints: true },
+    });
+
+    return res.status(200).json({ inspection: inspection || null });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * POST /api/budgets/:id/inspection
+ * Cria ou atualiza a inspeção de entrada e seus pontos de dano do Blueprint 5 vistas.
+ */
+budgetsRouter.post("/:id/inspection", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const budgetId = String(req.params.id);
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const budget = await prisma.budget.findFirst({
+      where: { id: budgetId, workspaceId: ctx.activeWorkspaceId!, deletedAt: null },
+      include: { productionOrder: true },
+    });
+    if (!budget) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+
+    const b = req.body || {};
+    const damagePoints = Array.isArray(b.damage_points || b.damagePoints)
+      ? (b.damage_points || b.damagePoints)
+      : [];
+
+    const inspection = await prisma.$transaction(async (tx) => {
+      let existing = await tx.vehicleInspection.findFirst({
+        where: { budgetId, workspaceId: ctx.activeWorkspaceId },
+      });
+
+      if (!existing) {
+        existing = await tx.vehicleInspection.create({
+          data: {
+            workspaceId: ctx.activeWorkspaceId!,
+            budgetId,
+            productionOrderId: budget.productionOrder?.id || null,
+            acknowledgedPreExisting: Boolean(b.acknowledged_pre_existing ?? b.acknowledgedPreExisting),
+            clientSignedAt: b.client_signed_at ? new Date(b.client_signed_at) : null,
+            signatureStoragePath: b.signature_storage_path ?? null,
+            notes: b.notes ?? null,
+          },
+        });
+      } else {
+        existing = await tx.vehicleInspection.update({
+          where: { id: existing.id },
+          data: {
+            acknowledgedPreExisting: b.acknowledged_pre_existing !== undefined ? Boolean(b.acknowledged_pre_existing) : existing.acknowledgedPreExisting,
+            clientSignedAt: b.client_signed_at ? new Date(b.client_signed_at) : existing.clientSignedAt,
+            signatureStoragePath: b.signature_storage_path !== undefined ? b.signature_storage_path : existing.signatureStoragePath,
+            notes: b.notes !== undefined ? b.notes : existing.notes,
+          },
+        });
+        await tx.vehicleDamagePoint.deleteMany({
+          where: { inspectionId: existing.id, workspaceId: ctx.activeWorkspaceId },
+        });
+      }
+
+      for (const pt of damagePoints) {
+        await tx.vehicleDamagePoint.create({
+          data: {
+            inspectionId: existing.id,
+            workspaceId: ctx.activeWorkspaceId!,
+            view: String(pt.view || "top"),
+            coordX: new Prisma.Decimal(pt.coord_x ?? pt.coordX ?? 0),
+            coordY: new Prisma.Decimal(pt.coord_y ?? pt.coordY ?? 0),
+            carPartCode: String(pt.car_part_code ?? pt.carPartCode ?? "general"),
+            damageType: String(pt.damage_type ?? pt.damageType ?? "dent"),
+            dentCount: pt.dent_count != null ? Number(pt.dent_count) : (pt.dentCount != null ? Number(pt.dentCount) : null),
+            contracted: pt.contracted !== undefined ? Boolean(pt.contracted) : true,
+            estimatedAmount: pt.estimated_amount != null ? new Prisma.Decimal(pt.estimated_amount) : (pt.estimatedAmount != null ? new Prisma.Decimal(pt.estimatedAmount) : null),
+            photoStoragePath: pt.photo_storage_path ?? pt.photoStoragePath ?? null,
+            notes: pt.notes ?? null,
+          },
+        });
+      }
+
+      return await tx.vehicleInspection.findUnique({
+        where: { id: existing.id },
+        include: { damagePoints: true },
+      });
+    });
+
+    return res.status(200).json({ inspection });
   } catch (error) {
     return next(error);
   }

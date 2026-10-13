@@ -133,6 +133,8 @@ model Workspace {
   financialObligations            FinancialObligation[] @relation("FinancialObligationWorkspace")
   obligationPayments              ObligationPayment[] @relation("ObligationPaymentWorkspace")
   financeIdempotencyRecords       FinanceIdempotency[] @relation("FinanceIdempotencyWorkspace")
+  vehicleInspections              VehicleInspection[]
+  productionTasks                 ProductionTask[]
 
   @@map("workspaces")
 }
@@ -643,6 +645,8 @@ model ProductionOrder {
   budgetRevision           BudgetRevision?   @relation("ProductionOrderRevision", fields: [budgetRevisionId, budgetId], references: [id, budgetId], onDelete: Restrict)
   weeklogEntries           WeeklogEntry[]
   rectificationOriginEntry WeeklogEntry?     @relation("ProductionOrderRectificationOrigin", fields: [rectificationOriginId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  tasks                    ProductionTask[]
+  inspections              VehicleInspection[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -832,6 +836,7 @@ model Budget {
   revisions        BudgetRevision[]  @relation("BudgetRevisions")
   photos           BudgetPhoto[]
   productionOrder  ProductionOrder?
+  inspections      VehicleInspection[]
 
   @@unique([workspaceId, code])
   @@unique([workspaceId, legacyLocalId])
@@ -1831,3 +1836,94 @@ model FinanceIdempotency {
   @@unique([workspaceId, actorUserId, actionNamespace, idempotencyKey])
   @@map("finance_idempotency")
 }
+
+model VehicleInspection {
+  id                      String               @id @default(uuid())
+  workspaceId             String               @map("workspace_id")
+  budgetId                String?              @map("budget_id")
+  productionOrderId       String?              @map("production_order_id")
+  clientSignedAt          DateTime?            @map("client_signed_at")
+  signatureStoragePath    String?              @map("signature_storage_path")
+  acknowledgedPreExisting Boolean              @default(false) @map("acknowledged_pre_existing")
+  notes                   String?
+  createdAt               DateTime             @default(now()) @map("created_at")
+  updatedAt               DateTime             @updatedAt @map("updated_at")
+
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  budget          Budget?              @relation(fields: [budgetId], references: [id], onDelete: SetNull)
+  productionOrder ProductionOrder?     @relation(fields: [productionOrderId], references: [id], onDelete: SetNull)
+  damagePoints    VehicleDamagePoint[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, budgetId])
+  @@index([workspaceId, productionOrderId])
+  @@map("vehicle_inspections")
+}
+
+model VehicleDamagePoint {
+  id               String            @id @default(uuid())
+  inspectionId     String            @map("inspection_id")
+  workspaceId      String            @map("workspace_id")
+  view             String            // top | front | rear | left | right
+  coordX           Decimal           @db.Decimal(5, 2) @map("coord_x")
+  coordY           Decimal           @db.Decimal(5, 2) @map("coord_y")
+  carPartCode      String            @map("car_part_code")
+  damageType       String            @map("damage_type")
+  dentCount        Int?              @map("dent_count")
+  contracted       Boolean           @default(true)
+  estimatedAmount  Decimal?          @db.Decimal(12, 2) @map("estimated_amount")
+  photoStoragePath String?           @map("photo_storage_path")
+  notes            String?
+  createdAt        DateTime          @default(now()) @map("created_at")
+
+  inspection       VehicleInspection @relation(fields: [inspectionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@index([inspectionId, workspaceId])
+  @@map("vehicle_damage_points")
+}
+
+model ProductionTask {
+  id                  String                       @id @default(uuid())
+  productionOrderId   String                       @map("production_order_id")
+  workspaceId         String                       @map("workspace_id")
+  serviceCategory     String                       @default("pdr") @map("service_category") // pdr | assembly_disassembly | paint | bodywork
+  carPartCode         String                       @map("car_part_code")
+  description         String
+  commercialAmount    Decimal                      @default(0) @db.Decimal(12, 2) @map("commercial_amount")
+  currencyCode        String                       @default("EUR") @map("currency_code")
+  status              String                       @default("pending") // pending | in_progress | completed | blocked
+  primaryTechnicianId String?                      @map("primary_technician_id")
+  startedAt           DateTime?                    @map("started_at")
+  completedAt         DateTime?                    @map("completed_at")
+  completionNotes     String?                      @map("completion_notes")
+  afterPhotoPath      String?                      @map("after_photo_path")
+  createdAt           DateTime                     @default(now()) @map("created_at")
+  updatedAt           DateTime                     @updatedAt @map("updated_at")
+
+  productionOrder ProductionOrder              @relation(fields: [productionOrderId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workspace       Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contributions   ProductionTaskContribution[]
+
+  @@unique([id, workspaceId])
+  @@index([productionOrderId, status])
+  @@index([workspaceId, primaryTechnicianId])
+  @@map("production_tasks")
+}
+
+model ProductionTaskContribution {
+  id           String         @id @default(uuid())
+  taskId       String         @map("task_id")
+  workspaceId  String         @map("workspace_id")
+  technicianId String         @map("technician_id")
+  sharePercent Decimal        @db.Decimal(5, 2) @map("share_percent")
+  arbitratedBy String         @map("arbitrated_by")
+  arbitratedAt DateTime       @default(now()) @map("arbitrated_at")
+
+  task         ProductionTask @relation(fields: [taskId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([taskId, technicianId])
+  @@index([taskId, workspaceId])
+  @@map("production_task_contributions")
+}
+

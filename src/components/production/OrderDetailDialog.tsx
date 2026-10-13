@@ -1,3 +1,6 @@
+import { ProductionTaskList, type ProductionTaskItem } from "./ProductionTaskList";
+import { VehicleBlueprint5Views, type DamagePointData } from "./VehicleBlueprint5Views";
+import { apiRequest } from "@/lib/api";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -24,7 +27,7 @@ import {
   User as UserIcon, Phone, Mail, FileSignature,
   Car, Hash as HashIcon, CalendarDays, CalendarClock,
   Wrench, ClipboardList, Package, Coins, UserCog, FileText, Shield,
-  Play, Pause, CheckCheck, Plus as PlusIcon, Clock, History, AlertTriangle,
+  Play, Pause, Eye, CheckCheck, Plus as PlusIcon, Clock, History, AlertTriangle,
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -613,6 +616,37 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const [form, setForm] = useState<Partial<ProductionOrder>>({});
   const [internalNotes, setInternalNotes] = useState("");
   const [activeTab, setActiveTab] = useState("ficha");
+  const [productionTasks, setProductionTasks] = useState<ProductionTaskItem[]>([]);
+  const [inspectionPoints, setInspectionPoints] = useState<DamagePointData[]>([]);
+
+  useEffect(() => {
+    if (order?.id && order.id !== "__new__") {
+      apiRequest<{ tasks: ProductionTaskItem[] }>(`/production-orders/${order.id}/tasks`)
+        .then((res) => setProductionTasks(res.tasks || []))
+        .catch(() => setProductionTasks([]));
+
+      apiRequest<{ inspection: any }>(`/production-orders/${order.id}/inspection`)
+        .then((res) => {
+          if (res?.inspection?.damagePoints) {
+            setInspectionPoints(
+              res.inspection.damagePoints.map((p: any) => ({
+                id: p.id,
+                view: p.view,
+                coordX: Number(p.coordX),
+                coordY: Number(p.coordY),
+                carPartCode: p.carPartCode,
+                damageType: p.damageType,
+                dentCount: p.dentCount,
+                contracted: p.contracted,
+                estimatedAmount: p.estimatedAmount ? Number(p.estimatedAmount) : null,
+                notes: p.notes,
+              }))
+            );
+          }
+        })
+        .catch(() => setInspectionPoints([]));
+    }
+  }, [order?.id]);
   const [promotedId, setPromotedId] = useState<string | null>(null);
   const isNew = order?.id === "__new__" && !promotedId;
   const effectiveOrderId = promotedId ?? (isNew ? null : order?.id ?? null);
@@ -1112,14 +1146,20 @@ export function OrderDetailDialog({ order, onClose }: Props) {
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={handleTabChange}>
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="ficha" className="gap-2">
-              <FileText className="h-4 w-4" /> Ficha Operacional
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 gap-1 h-auto p-1">
+            <TabsTrigger value="ficha" className="gap-1.5 text-xs py-2">
+              <FileText className="h-4 w-4" /> Ficha
             </TabsTrigger>
-            <TabsTrigger value="photos" className="gap-2">
+            <TabsTrigger value="tasks" className="gap-1.5 text-xs py-2">
+              <Wrench className="h-4 w-4" /> Tarefas ({productionTasks.length})
+            </TabsTrigger>
+            <TabsTrigger value="blueprint" className="gap-1.5 text-xs py-2">
+              <Eye className="h-4 w-4" /> Blueprint 5 Vistas
+            </TabsTrigger>
+            <TabsTrigger value="photos" className="gap-1.5 text-xs py-2">
               <Car className="h-4 w-4" /> Fotos
             </TabsTrigger>
-            <TabsTrigger value="timeline" className="gap-2">
+            <TabsTrigger value="timeline" className="gap-1.5 text-xs py-2">
               <CalendarClock className="h-4 w-4" /> Histórico
             </TabsTrigger>
           </TabsList>
