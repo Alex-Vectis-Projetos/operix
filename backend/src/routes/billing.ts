@@ -122,9 +122,9 @@ const adminPaymentUpsertSchema = z.object({
 billingRouter.post("/webhooks/stripe", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const querySchema = z.object({
-      env: z.enum(["sandbox", "live"]),
+      env: z.enum(["sandbox", "live"]).default("sandbox"),
     });
-    const { env: stripeEnv } = querySchema.parse(req.query);
+    const { env: stripeEnv } = querySchema.parse(req.query ?? {});
     const signature = req.headers["stripe-signature"];
     const rawBody = (req as typeof req & { rawBody?: string }).rawBody;
 
