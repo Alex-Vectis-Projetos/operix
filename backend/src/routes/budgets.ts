@@ -30,6 +30,7 @@ import {
 } from "../lib/minio.js";
 import { buildSimplePdf, generateBudgetPdfBuffer } from "../lib/pdf/simplePdf.js";
 import { sendEmail } from "../lib/email/resend.js";
+import { notifyBudgetApproved } from "../services/notificationService.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -565,6 +566,11 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
         operationalSiteKey: input.operationalSiteKey,
       }
     );
+
+    const notifyTarget = (result.budget as any).userId || (result.budget as any).technicianUserId;
+    if (notifyTarget && notifyTarget !== ctx.actorUserId) {
+      await notifyBudgetApproved(notifyTarget, (result.budget as any).code, (result.budget as any).clientName);
+    }
 
     return res.status(200).json({
       budget: formatBudget(result.budget),

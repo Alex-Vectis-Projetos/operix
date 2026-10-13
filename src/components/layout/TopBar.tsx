@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, LogOut, Check, Trash2, FileText, CreditCard, AlertTriangle, Info, Clock, User as UserIcon, Settings as SettingsIcon } from "lucide-react";
+import { Bell, LogOut, Check, Trash2, FileText, CreditCard, AlertTriangle, Info, Clock, User as UserIcon, Settings as SettingsIcon, Mail, Calendar, Calculator } from "lucide-react";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { BrandLogo } from "@/components/BrandLogo";
 import { brandConfig } from "@/brand.config";
@@ -25,6 +25,9 @@ const typeIcon: Record<string, typeof Info> = {
   service_order: FileText,
   payment: CreditCard,
   discrepancy: AlertTriangle,
+  workspace_invite: Mail,
+  weeklog: Calendar,
+  budget: Calculator,
 };
 
 function timeAgo(dateStr: string, t: (k: string, fb?: string) => string): string {
@@ -157,6 +160,9 @@ export const TopBar = memo(function TopBar() {
                       <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
                         n.type === "discrepancy" ? "bg-destructive/10 text-destructive"
                           : n.type === "payment" ? "bg-emerald-500/10 text-emerald-500"
+                          : n.type === "workspace_invite" ? "bg-sky-500/10 text-sky-400"
+                          : n.type === "weeklog" ? "bg-indigo-500/10 text-indigo-400"
+                          : n.type === "budget" ? "bg-amber-500/10 text-amber-400"
                           : "bg-primary/10 text-primary"
                       }`}>
                         <Icon className="h-3.5 w-3.5" />
@@ -168,7 +174,11 @@ export const TopBar = memo(function TopBar() {
                           </p>
                           <span className="text-[10px] text-muted-foreground shrink-0 ml-2">{timeAgo(n.created_at, t)}</span>
                         </div>
-                        {n.message && <p className="text-[11px] text-muted-foreground truncate mt-0.5">{n.message}</p>}
+                        {(n.body || n.message) && (
+                          <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">
+                            {n.body || n.message}
+                          </p>
+                        )}
                       </div>
                       {!n.is_read && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
                     </div>

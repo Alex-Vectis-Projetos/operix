@@ -17,6 +17,7 @@ import {
   type FinalizeProductionOrderOptions,
 } from "../services/weeklogService.js";
 import { sendEmail } from "../lib/email/resend.js";
+import { notifyOrderAssigned, notifyCorrectionRequested } from "../services/notificationService.js";
 
 export const productionOrdersRouter = Router();
 
@@ -905,6 +906,11 @@ productionOrdersRouter.post("/", async (req: Request, res: Response, next: NextF
       },
     });
 
+    if (order.technicianUserId && order.technicianUserId !== ctx.actorUserId) {
+      const vehInfo = [order.brand, order.model, order.licensePlate].filter(Boolean).join(" ");
+      await notifyOrderAssigned(order.technicianUserId, order.code, vehInfo);
+    }
+
     let weeklog: any = undefined;
     if (order.status === "delivered") {
       weeklog = await upsertWeeklogFromProduction(order.id, ctx.actorUserId);
@@ -1019,6 +1025,11 @@ productionOrdersRouter.patch("/:id", async (req: Request, res: Response, next: N
     }
 
     const order = await prisma.productionOrder.update({ where: { id }, data });
+
+    if (data.technicianUserId && data.technicianUserId !== existing.technicianUserId && data.technicianUserId !== ctx.actorUserId) {
+      const vehInfo = [order.brand, order.model, order.licensePlate].filter(Boolean).join(" ");
+      await notifyOrderAssigned(data.technicianUserId as string, order.code, vehInfo);
+    }
 
     let weeklog: any = undefined;
     if (order.status === "delivered") {
@@ -1278,6 +1289,11 @@ productionOrdersRouter.post("/:id/request-budget-correction", async (req: Reques
         recipient: null,
         error: "Aucun destinataire configuré pour la notification.",
       };
+    }
+
+    const targetUserId = budgetRecord?.userId || budgetRecord?.technicianUserId;
+    if (targetUserId) {
+      await notifyCorrectionRequested(targetUserId, budgetRecord?.code || "N/A", order.code, reason, requesterName);
     }
 
     return res.json({

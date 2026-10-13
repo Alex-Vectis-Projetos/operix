@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Response } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
+import { notifyWorkspaceInvite, notifyInviteAccepted } from "../services/notificationService.js";
 
 export const invitesRouter = Router();
 invitesRouter.use(requireAuth);
@@ -33,7 +34,7 @@ invitesRouter.post("/workspaces/:workspaceId/invites", async (req: Authenticated
 
     const workspace = await prisma.workspace.findUnique({
       where: { id: workspaceId },
-      select: { id: true, ownerUserId: true },
+      select: { id: true, name: true, ownerUserId: true },
     });
     if (!workspace) return res.status(404).json({ message: "Workspace not found." });
 
@@ -73,6 +74,8 @@ invitesRouter.post("/workspaces/:workspaceId/invites", async (req: Authenticated
         createdBy: appUser.id,
       },
     });
+
+    await notifyWorkspaceInvite(targetProfile.id, workspace.name, role, invite.id);
 
     return res.status(201).json({ invite: { id: invite.id, status: invite.status } });
   } catch (error) {
@@ -194,7 +197,7 @@ invitesRouter.patch("/invites/:inviteId/accept", async (req: AuthenticatedReques
 
     const invite = await prisma.workspaceInvite.findUnique({
       where: { id: inviteId },
-      select: { id: true, workspaceId: true, targetProfileId: true, role: true, status: true },
+      select: { id: true, workspaceId: true, targetProfileId: true, role: true, status: true, createdBy: true },
     });
 
     if (!invite || invite.targetProfileId !== profile.id) {
@@ -206,7 +209,7 @@ invitesRouter.patch("/invites/:inviteId/accept", async (req: AuthenticatedReques
 
     const appUser = await prisma.appUser.findUnique({
       where: { authUserId: req.auth!.userId },
-      select: { id: true },
+      select: { id: true, name: true },
     });
     if (!appUser) return res.status(404).json({ message: "App user not found." });
 
@@ -233,6 +236,21 @@ invitesRouter.patch("/invites/:inviteId/accept", async (req: AuthenticatedReques
         data: { workspaceId: invite.workspaceId },
       });
     });
+
+    // Notify the inviter in-app
+    if (invite.createdBy) {
+      const creatorAppUser = await prisma.appUser.findUnique({
+        where: { id: invite.createdBy },
+        select: { authUserId: true },
+      });
+      const ws = await prisma.workspace.findUnique({
+        where: { id: invite.workspaceId },
+        select: { name: true },
+      });
+      if (creatorAppUser?.authUserId) {
+        await notifyInviteAccepted(creatorAppUser.authUserId, appUser.name || "Novo membro", ws?.name || "Workspace");
+      }
+    }
 
     return res.json({ message: "Convite aceito." });
   } catch (error) {
