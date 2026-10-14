@@ -35,6 +35,7 @@ export interface ConfrontationFilePreview {
   fileName: string;
   columns: string[];
   suggestedMapping: ConfrontationColumnMapping;
+  rawRows: Record<string, any>[];
   sampleRows: Record<string, any>[];
   totalRows: number;
 }
@@ -143,6 +144,7 @@ export async function previewConfrontationFile(
       fileName: file.fileName,
       columns,
       suggestedMapping: mapping,
+      rawRows,
       sampleRows: rawRows.slice(0, 5),
       totalRows: rawRows.length,
     };
@@ -156,10 +158,14 @@ export async function previewConfrontationFile(
   });
 
   const convertedRows = extracted.rows.map((r: any) => ({
-    "Placa": r.licensePlate || "",
-    "VIN": r.vin || "",
-    "Serviço": Array.isArray(r.services) ? r.services.map((s: any) => s.name || s.description || "").join(", ") : "",
-    "Valor": r.totalAmount || "0",
+    "Placa": r.rawLicensePlate || r.licensePlate || "",
+    "VIN": r.rawVin || r.vin || "",
+    "Serviço": Array.isArray(r.rawServices)
+      ? r.rawServices.map((s: any) => s.description || s.name || "").join(", ")
+      : Array.isArray(r.services)
+        ? r.services.map((s: any) => s.name || s.description || "").join(", ")
+        : "",
+    "Valor": r.rawTotalText || r.totalAmount || "0",
   }));
 
   const columns = ["Placa", "VIN", "Serviço", "Valor"];
@@ -174,6 +180,7 @@ export async function previewConfrontationFile(
       taxType: "HT",
       granularity: "auto",
     },
+    rawRows: convertedRows,
     sampleRows: convertedRows.slice(0, 5),
     totalRows: convertedRows.length,
   };
@@ -230,6 +237,15 @@ function detectMappingHeuristics(columns: string[], rows: Record<string, any>[])
   };
 }
 
+function extractSignatureRef(weeklog: any): string | null {
+  if (!weeklog) return null;
+  const validation = weeklog.validations?.[0];
+  if (validation) {
+    return validation.signatureStoragePath ? `WL-${weeklog.id}-SIG` : `WL-${weeklog.id}`;
+  }
+  return weeklog.status === "validated" ? `WL-${weeklog.id}` : null;
+}
+
 /**
  * 2. Execute Confrontation Engine
  */
@@ -273,7 +289,15 @@ export async function executeConfrontationHub(
       weeklog: { status: "validated" },
     },
     include: {
-      weeklog: true,
+      weeklog: {
+        include: {
+          validations: {
+            where: { status: "validated" },
+            orderBy: { validationSequence: "desc" },
+            take: 1,
+          },
+        },
+      },
       productionOrder: true,
     },
     orderBy: { createdAt: "asc" },
@@ -373,13 +397,13 @@ export async function executeConfrontationHub(
         services: servicesList,
         hasPaymentListItem: false,
         weeklogId: entry.weeklogId,
-        weeklogSignatureRef: (entry.weeklog as any)?.signedBy ? `WL-${entry.weeklogId}` : null,
+        weeklogSignatureRef: extractSignatureRef(entry.weeklog),
       });
     } else {
       const existing = internalByPlate.get(p)!;
       if (!existing.weeklogId && entry.weeklogId) {
         existing.weeklogId = entry.weeklogId;
-        existing.weeklogSignatureRef = (entry.weeklog as any)?.signedBy ? `WL-${entry.weeklogId}` : null;
+        existing.weeklogSignatureRef = extractSignatureRef(entry.weeklog);
       }
     }
   }

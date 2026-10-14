@@ -13,6 +13,7 @@ export interface ConfrontationFilePreview {
   fileName: string;
   columns: string[];
   suggestedMapping: ConfrontationColumnMapping;
+  rawRows?: Record<string, any>[];
   sampleRows: Record<string, any>[];
   totalRows: number;
 }

@@ -136,8 +136,9 @@ export function ConfrontationHub() {
       const serviceCol = mapping.serviceColumn || "";
       const amountCol = mapping.amountColumn || "";
 
-      // Convert rows
-      const rows = preview.sampleRows.map((r) => {
+      // Convert all parsed rows from the document
+      const allRows = preview.rawRows && preview.rawRows.length > 0 ? preview.rawRows : preview.sampleRows;
+      const rows = allRows.map((r) => {
         let amtStr = String(r[amountCol] || "0").replace(/[^0-9,.-]/g, "").replace(",", ".");
         return {
           licensePlate: plateCol ? String(r[plateCol] || "") : null,
