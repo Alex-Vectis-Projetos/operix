@@ -197,6 +197,8 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       const payload = localBudgetToApiPayload(b);
       const existing = (apiBudgets || []).find((x) => x.id === b.id);
 
+      let savedResult: any = null;
+
       if (existing) {
         const revId =
           existing.currentRevisionId ||
@@ -214,6 +216,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           revisionId: revId,
           patch: payload,
         });
+        savedResult = updated;
         const targetRevisionId = updated.revision.id;
 
         if (
@@ -231,6 +234,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         }
       } else {
         const created = await createBudgetMutation.mutateAsync(payload);
+        savedResult = created;
         const createdBudgetId = created.budget.id;
         const createdRevId = created.budget.currentRevisionId || created.revision.id;
         if (b.status === "approved" && createdRevId) {
@@ -250,6 +254,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         setOpen(false);
         setEditing(null);
       }
+      return savedResult;
     } catch (err: any) {
       toast.error(err?.message || "Erro ao salvar orçamento.");
       throw err;

@@ -2348,7 +2348,19 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     if (saving) return;
     setSaving(true);
     try {
-      await onSave({ ...form, updated_at: new Date().toISOString() });
+      const savedRes: any = await onSave({ ...form, updated_at: new Date().toISOString() });
+      const targetId = savedRes?.id || savedRes?.budget?.id || form.id || initial?.id;
+      if (targetId && inspectionPoints.length > 0) {
+        try {
+          await apiRequest(`/budgets/${targetId}/inspection`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ damage_points: inspectionPoints }),
+          });
+        } catch (e) {
+          console.error("Erro ao salvar pontos de inspeção:", e);
+        }
+      }
       toast.success(langDisplay === "fr" ? "Devis enregistré avec succès." : "Orçamento salvo com sucesso.");
       onOpenChange(false);
     } catch (err) {
