@@ -23,6 +23,7 @@ import {
   transitionPaymentList,
 } from "../services/paymentListService.js";
 import { decideConfrontationResult, getConfrontation, runConfrontation } from "../services/confrontationService.js";
+import { previewConfrontationFile, executeConfrontationHub } from "../services/confrontationHubService.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const jsonUploadSchema = z.object({
@@ -184,6 +185,25 @@ async function assertPaymentListAccess(
   }
   return { list, isInternalManager };
 }
+
+paymentListsRouter.post("/confrontation/preview", upload.single("file"), async (req: Request, res: Response) => {
+  try {
+    const file = uploadInput(req);
+    const preview = await previewConfrontationFile(req.ctx!, file);
+    return res.json(preview);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.post("/confrontation/execute", async (req: Request, res: Response) => {
+  try {
+    const result = await executeConfrontationHub(req.ctx!, req.body);
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
 
 paymentListsRouter.get("/:id/confrontation", async (req: Request, res: Response) => {
   try {
