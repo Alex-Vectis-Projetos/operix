@@ -4,10 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, ShieldAlert, Wrench, Trash2, Plus, CheckCircle2, Eye } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Shield, ShieldAlert, Wrench, Trash2, Plus, CheckCircle2, Eye, Sun, Moon, Maximize2, ZoomIn, Car, AlertTriangle, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type VehicleViewType = "top" | "front" | "rear" | "left" | "right";
+export type VehicleBodyType = "sedan" | "hatchback" | "suv" | "pickup";
 
 export interface DamagePointData {
   id?: string;
@@ -28,59 +30,159 @@ interface VehicleBlueprintProps {
   onChange?: (points: DamagePointData[]) => void;
   readOnly?: boolean;
   className?: string;
+  initialBodyType?: VehicleBodyType;
 }
 
-const CAR_PARTS: { code: string; label: string }[] = [
-  { code: "hood", label: "Capô" },
-  { code: "roof", label: "Teto" },
-  { code: "trunk", label: "Porta-Malas / Traseira" },
-  { code: "front_bumper", label: "Para-choque Dianteiro" },
-  { code: "rear_bumper", label: "Para-choque Traseiro" },
-  { code: "front_left_fender", label: "Para-lama Diant. Esq." },
-  { code: "front_right_fender", label: "Para-lama Diant. Dir." },
-  { code: "rear_left_quarter", label: "Lateral Traseira Esq." },
-  { code: "rear_right_quarter", label: "Lateral Traseira Dir." },
-  { code: "front_left_door", label: "Porta Diant. Esq." },
-  { code: "front_right_door", label: "Porta Diant. Dir." },
-  { code: "rear_left_door", label: "Porta Tras. Esq." },
-  { code: "rear_right_door", label: "Porta Tras. Dir." },
-  { code: "left_rail", label: "Coluna / Arco Esq." },
-  { code: "right_rail", label: "Coluna / Arco Dir." },
-  { code: "general", label: "Outro Componente" },
+export const CAR_PARTS: { code: string; label: string; views: VehicleViewType[] }[] = [
+  { code: "hood", label: "Capô", views: ["top", "front"] },
+  { code: "roof", label: "Teto", views: ["top", "left", "right"] },
+  { code: "trunk", label: "Tampa do Porta-Malas / Traseira", views: ["top", "rear"] },
+  { code: "windshield", label: "Para-brisa Dianteiro", views: ["top", "front"] },
+  { code: "rear_glass", label: "Vidro Traseiro", views: ["top", "rear"] },
+  { code: "front_bumper", label: "Para-choque Dianteiro", views: ["front", "left", "right"] },
+  { code: "rear_bumper", label: "Para-choque Traseiro", views: ["rear", "left", "right"] },
+  { code: "front_grille", label: "Grade Dianteira", views: ["front"] },
+  { code: "left_headlight", label: "Farol Dianteiro Esquerdo", views: ["front"] },
+  { code: "right_headlight", label: "Farol Dianteiro Direito", views: ["front"] },
+  { code: "left_taillight", label: "Lanterna Traseira Esquerda", views: ["rear"] },
+  { code: "right_taillight", label: "Lanterna Traseira Direita", views: ["rear"] },
+  { code: "front_left_fender", label: "Para-lama Dianteiro Esquerdo", views: ["left", "top"] },
+  { code: "front_right_fender", label: "Para-lama Dianteiro Direito", views: ["right", "top"] },
+  { code: "front_left_door", label: "Porta Dianteira Esquerda", views: ["left"] },
+  { code: "front_right_door", label: "Porta Dianteira Direita", views: ["right"] },
+  { code: "rear_left_door", label: "Porta Traseira Esquerda", views: ["left"] },
+  { code: "rear_right_door", label: "Porta Traseira Direita", views: ["right"] },
+  { code: "rear_left_quarter", label: "Lateral / Para-lama Traseiro Esquerdo", views: ["left", "top"] },
+  { code: "rear_right_quarter", label: "Lateral / Para-lama Traseiro Direito", views: ["right", "top"] },
+  { code: "left_mirror", label: "Retrovisor Esquerdo", views: ["left", "front"] },
+  { code: "right_mirror", label: "Retrovisor Direito", views: ["right", "front"] },
+  { code: "left_rail", label: "Coluna / Arco Superior Esquerdo", views: ["left"] },
+  { code: "right_rail", label: "Coluna / Arco Superior Direito", views: ["right"] },
+  { code: "left_sill", label: "Soleira Esquerda", views: ["left"] },
+  { code: "right_sill", label: "Soleira Direita", views: ["right"] },
+  { code: "general", label: "Outro Componente Automotivo", views: ["top", "front", "rear", "left", "right"] },
 ];
 
-const DAMAGE_TYPES: { code: string; label: string }[] = [
-  { code: "hail", label: "Granizo (PDR)" },
-  { code: "dent_small", label: "Amassado Pequeno" },
-  { code: "dent_medium", label: "Amassado Médio" },
-  { code: "dent_large", label: "Amassado Grande" },
-  { code: "crease", label: "Vinco" },
-  { code: "scratch", label: "Arranhão / Risco" },
-  { code: "paint_damage", label: "Dano de Pintura" },
-  { code: "crack", label: "Trinca / Quebra" },
+export const DAMAGE_TYPES: { code: string; label: string }[] = [
+  { code: "hail", label: "Granizo / Mossa (PDR)" },
+  { code: "dent_small", label: "Amassado Leve (< 3cm)" },
+  { code: "dent_medium", label: "Amassado Médio (3cm - 8cm)" },
+  { code: "dent_large", label: "Amassado Severo (> 8cm)" },
+  { code: "crease", label: "Vinco / Linha de Estamparia" },
+  { code: "scratch", label: "Risco / Arranhão Profundo" },
+  { code: "paint_damage", label: "Pintura Danificada / Lascada" },
+  { code: "crack", label: "Trinca / Quebra de Peça" },
 ];
+
+const BODY_TYPES: { code: VehicleBodyType; label: string; icon: string }[] = [
+  { code: "sedan", label: "Sedã (4 Portas)", icon: "🚗" },
+  { code: "hatchback", label: "Hatchback", icon: "🚙" },
+  { code: "suv", label: "SUV / Crossover", icon: "🚙" },
+  { code: "pickup", label: "Picape", icon: "🛻" },
+];
+
+// Mapeamento pericial de regiões por coordenadas percentuais
+function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft = false): string {
+  if (view === "top") {
+    if (y < 35) return x < 25 ? "front_left_fender" : x > 75 ? "front_right_fender" : "hood";
+    if (y < 46) return "windshield";
+    if (y < 74) return x < 20 ? "front_left_door" : x > 80 ? "front_right_door" : "roof";
+    if (y < 84) return "rear_glass";
+    return x < 25 ? "rear_left_quarter" : x > 75 ? "rear_right_quarter" : "trunk";
+  }
+
+  if (view === "front") {
+    if (y > 68) return "front_bumper";
+    if (y > 45 && y <= 68) {
+      if (x < 28) return "left_headlight";
+      if (x > 72) return "right_headlight";
+      return "front_grille";
+    }
+    if (y > 25 && y <= 45) return "hood";
+    return "windshield";
+  }
+
+  if (view === "rear") {
+    if (y > 68) return "rear_bumper";
+    if (y > 42 && y <= 68) {
+      if (x < 28) return "left_taillight";
+      if (x > 72) return "right_taillight";
+      return "trunk";
+    }
+    return "rear_glass";
+  }
+
+  if (view === "left" || view === "right") {
+    // Para laterais:
+    // facingLeft: dianteira à esquerda (x < 30 = frente)
+    // facingRight: dianteira à direita (x > 70 = frente)
+    const isFrontSide = facingLeft ? x < 30 : x > 70;
+    const isRearSide = facingLeft ? x > 70 : x < 30;
+    const isMidFront = facingLeft ? x >= 30 && x < 52 : x >= 48 && x < 70;
+    const isMidRear = facingLeft ? x >= 52 && x <= 70 : x >= 30 && x < 48;
+
+    if (y < 32) return "roof";
+    if (y > 78) return view === "left" ? "left_sill" : "right_sill";
+
+    if (isFrontSide) return view === "left" ? "front_left_fender" : "front_right_fender";
+    if (isRearSide) return view === "left" ? "rear_left_quarter" : "rear_right_quarter";
+    if (isMidFront) return view === "left" ? "front_left_door" : "front_right_door";
+    if (isMidRear) return view === "left" ? "rear_left_door" : "rear_right_door";
+  }
+
+  return "general";
+}
 
 export function VehicleBlueprint5Views({
   damagePoints,
   onChange,
   readOnly = false,
   className,
+  initialBodyType = "sedan",
 }: VehicleBlueprintProps) {
-  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
+  const [bodyType, setBodyType] = useState<VehicleBodyType>(initialBodyType);
   const [activeView, setActiveView] = useState<VehicleViewType | "all">("all");
+  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
+  const [isCadTheme, setIsCadTheme] = useState<boolean>(true); // CAD Dark vs Ficha Clara
+  const [hoveredPart, setHoveredPart] = useState<string | null>(null);
+  const [hoverCoords, setHoverCoords] = useState<{ x: number; y: number } | null>(null);
 
-  const handleSvgClick = (view: VehicleViewType, e: React.MouseEvent<SVGSVGElement>) => {
+  // Modal de confirmação para troca de carroceria com histórico preservado
+  const [pendingBodyType, setPendingBodyType] = useState<VehicleBodyType | null>(null);
+  const [showBodyTypeConfirm, setShowBodyTypeConfirm] = useState<boolean>(false);
+
+  const handleSelectBodyType = (newType: VehicleBodyType) => {
+    if (newType === bodyType) return;
+    if (damagePoints.length > 0) {
+      setPendingBodyType(newType);
+      setShowBodyTypeConfirm(true);
+    } else {
+      setBodyType(newType);
+    }
+  };
+
+  const confirmBodyTypeChange = () => {
+    if (pendingBodyType) {
+      setBodyType(pendingBodyType);
+      setPendingBodyType(null);
+    }
+    setShowBodyTypeConfirm(false);
+  };
+
+  const handleSvgClick = (view: VehicleViewType, e: React.MouseEvent<SVGSVGElement>, facingLeft = false) => {
     if (readOnly || !onChange) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.round(((e.clientX - rect.left) / rect.width) * 100);
     const y = Math.round(((e.clientY - rect.top) / rect.height) * 100);
 
+    const detectedCode = detectCarPart(view, x, y, facingLeft);
+
     const newPoint: DamagePointData = {
       view,
       coordX: x,
       coordY: y,
-      carPartCode: view === "top" ? (y < 35 ? "hood" : y < 70 ? "roof" : "trunk") : "general",
+      carPartCode: detectedCode,
       damageType: "hail",
       dentCount: 1,
       contracted: true,
@@ -91,6 +193,22 @@ export function VehicleBlueprint5Views({
     const nextPoints = [...damagePoints, newPoint];
     onChange(nextPoints);
     setSelectedPointIndex(nextPoints.length - 1);
+  };
+
+  const handleSvgMouseMove = (view: VehicleViewType, e: React.MouseEvent<SVGSVGElement>, facingLeft = false) => {
+    if (readOnly) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.round(((e.clientX - rect.left) / rect.width) * 100);
+    const y = Math.round(((e.clientY - rect.top) / rect.height) * 100);
+    const partCode = detectCarPart(view, x, y, facingLeft);
+    const partObj = CAR_PARTS.find((p) => p.code === partCode);
+    setHoveredPart(partObj ? partObj.label : null);
+    setHoverCoords({ x, y });
+  };
+
+  const handleSvgMouseLeave = () => {
+    setHoveredPart(null);
+    setHoverCoords(null);
   };
 
   const updateSelectedPoint = (patch: Partial<DamagePointData>) => {
@@ -109,459 +227,344 @@ export function VehicleBlueprint5Views({
 
   const selectedPoint = selectedPointIndex !== null ? damagePoints[selectedPointIndex] : null;
 
-  return (
-    <div className={cn("flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-sm", className)}>
-      {/* Barra de Ferramentas / Filtros */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="gap-1.5 px-2.5 py-1 text-xs font-semibold">
-            <Eye className="h-3.5 w-3.5 text-primary" />
-            Blueprint do Veículo (5 Vistas)
-          </Badge>
-          <span className="text-xs text-muted-foreground">
-            {damagePoints.length} marcadores ({damagePoints.filter((p) => p.contracted).length} orçados,{" "}
-            {damagePoints.filter((p) => !p.contracted).length} pré-existentes)
-          </span>
+  // Obter caminhos de imagem para a carroceria ativa
+  const getAssetPath = (viewName: string) => {
+    const themePrefix = isCadTheme ? "cad" : "light";
+    return `/blueprints/${bodyType}/${themePrefix}_${viewName}.png`;
+  };
+
+  // Renderizador de marcadores sobre uma vista
+  const renderMarkersOnView = (view: VehicleViewType) => {
+    return damagePoints.map((point, index) => {
+      if (point.view !== view) return null;
+      const isSelected = selectedPointIndex === index;
+
+      return (
+        <g
+          key={point.id || index}
+          className="cursor-pointer transition-transform hover:scale-125"
+          onClick={(e) => {
+            e.stopPropagation();
+            setSelectedPointIndex(index);
+          }}
+        >
+          {/* Anel de seleção e pulso se selecionado */}
+          {isSelected && (
+            <circle
+              cx={`${point.coordX}%`}
+              cy={`${point.coordY}%`}
+              r="14"
+              className={cn(
+                "animate-ping stroke-2 opacity-75 fill-none",
+                point.contracted ? "stroke-cyan-400" : "stroke-amber-400"
+              )}
+            />
+          )}
+
+          {/* Sombra de contorno */}
+          <circle
+            cx={`${point.coordX}%`}
+            cy={`${point.coordY}%`}
+            r="10"
+            className="fill-black/60 stroke-black/80 stroke-1"
+          />
+
+          {/* Marcador colorido */}
+          <circle
+            cx={`${point.coordX}%`}
+            cy={`${point.coordY}%`}
+            r="8"
+            className={cn(
+              "stroke-2 transition-colors",
+              point.contracted
+                ? "fill-blue-600 stroke-cyan-300 drop-shadow-[0_0_8px_rgba(56,189,248,0.8)]"
+                : "fill-amber-600 stroke-amber-300 drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]"
+            )}
+          />
+
+          {/* Número do dano */}
+          <text
+            x={`${point.coordX}%`}
+            y={`${point.coordY}%`}
+            dy="3.5"
+            textAnchor="middle"
+            className="fill-white font-bold text-[10px] select-none pointer-events-none"
+          >
+            {index + 1}
+          </text>
+        </g>
+      );
+    });
+  };
+
+  // Renderiza uma vista técnica com camadas 1, 2 e 3
+  const renderTechnicalViewBox = (
+    view: VehicleViewType,
+    title: string,
+    viewName: string,
+    aspectClass: string,
+    facingLeft = false
+  ) => {
+    const isFocus = activeView === view;
+    const viewPoints = damagePoints.filter((p) => p.view === view);
+
+    return (
+      <div
+        className={cn(
+          "relative flex flex-col rounded-lg border transition-all duration-200 overflow-hidden",
+          isCadTheme
+            ? "bg-[#090e1a] border-cyan-950/60 shadow-inner"
+            : "bg-[#f8fafc] border-slate-200 shadow-sm",
+          isFocus ? "ring-2 ring-cyan-500 shadow-[0_0_20px_rgba(56,189,248,0.25)]" : "hover:border-cyan-800/60"
+        )}
+      >
+        {/* Cabeçalho da Vista */}
+        <div
+          className={cn(
+            "flex items-center justify-between px-3 py-1.5 text-xs font-semibold border-b",
+            isCadTheme ? "bg-slate-900/80 border-slate-800 text-cyan-300" : "bg-slate-100 border-slate-200 text-slate-800"
+          )}
+        >
+          <div className="flex items-center gap-2">
+            <span>{title}</span>
+            {viewPoints.length > 0 && (
+              <Badge variant="secondary" className="h-4 px-1.5 text-[10px] bg-cyan-900/60 text-cyan-200 border border-cyan-700/50">
+                {viewPoints.length} {viewPoints.length === 1 ? "dano" : "danos"}
+              </Badge>
+            )}
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-cyan-400"
+            title="Ampliar / Focar esta vista"
+            onClick={() => setActiveView(activeView === view ? "all" : view)}
+          >
+            {activeView === view ? <Maximize2 className="h-3.5 w-3.5" /> : <ZoomIn className="h-3.5 w-3.5" />}
+          </Button>
         </div>
 
+        {/* Canvas da Vista (Camada 1: Imagem CAD + Camada 2: Interatividade + Camada 3: Marcadores) */}
+        <div
+          className={cn(
+            "relative w-full flex items-center justify-center p-3 select-none",
+            aspectClass,
+            isCadTheme
+              ? "bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]"
+              : "bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px]"
+          )}
+        >
+          {/* Camada 1: Ilustração Técnica Vetorial Exata (Asset do Veículo) */}
+          <img
+            src={getAssetPath(viewName)}
+            alt={title}
+            className="absolute inset-2 w-[calc(100%-16px)] h-[calc(100%-16px)] object-contain pointer-events-none transition-all duration-300"
+            style={{
+              filter: isCadTheme ? "drop-shadow(0 0 1px rgba(56,189,248,0.4))" : undefined,
+            }}
+          />
+
+          {/* Camada 2 & 3: SVG Interativo de Clique e Marcadores */}
+          <svg
+            className="absolute inset-2 w-[calc(100%-16px)] h-[calc(100%-16px)] cursor-crosshair"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            onClick={(e) => handleSvgClick(view, e, facingLeft)}
+            onMouseMove={(e) => handleSvgMouseMove(view, e, facingLeft)}
+            onMouseLeave={handleSvgMouseLeave}
+          >
+            {/* Camada 3: Marcadores Periciais */}
+            {renderMarkersOnView(view)}
+          </svg>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className={cn("flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-sm", className)}>
+      {/* BARRA SUPERIOR DE CONTROLE PERICIAL */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+        {/* Identificação e Contadores */}
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground">Filtrar Vista:</span>
-          {(["all", "top", "front", "rear", "left", "right"] as const).map((v) => (
-            <Button
-              key={v}
-              size="sm"
-              variant={activeView === v ? "default" : "outline"}
-              className="h-7 px-2 text-xs capitalize"
-              onClick={() => setActiveView(v)}
-            >
-              {v === "all" ? "Todas" : v === "top" ? "Superior" : v === "front" ? "Frente" : v === "rear" ? "Traseira" : v === "left" ? "Lat. Esq." : "Lat. Dir."}
-            </Button>
-          ))}
+          <Badge variant="outline" className="gap-1.5 px-2.5 py-1 text-xs font-semibold border-cyan-800 text-cyan-400 bg-cyan-950/30">
+            <Eye className="h-3.5 w-3.5 text-cyan-400" />
+            Blueprint de Inspeção (5 Vistas)
+          </Badge>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{damagePoints.length}</span> marcadores
+            <span className="text-slate-600">|</span>
+            <span className="text-cyan-400 font-medium">{damagePoints.filter((p) => p.contracted).length} orçados</span>
+            <span className="text-slate-600">|</span>
+            <span className="text-amber-400 font-medium">{damagePoints.filter((p) => !p.contracted).length} pré-existentes</span>
+          </div>
+        </div>
+
+        {/* Controles de Carroceria, Vista e Tema */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Seletor de Carroceria */}
+          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg border">
+            {BODY_TYPES.map((bt) => (
+              <Button
+                key={bt.code}
+                size="sm"
+                variant={bodyType === bt.code ? "default" : "ghost"}
+                className={cn(
+                  "h-7 px-2 text-xs font-medium gap-1",
+                  bodyType === bt.code && "bg-cyan-600 text-white shadow-sm"
+                )}
+                onClick={() => handleSelectBodyType(bt.code)}
+                title={`Carroceria ${bt.label}`}
+              >
+                <span>{bt.icon}</span>
+                <span className="hidden sm:inline">{bt.label.split(" ")[0]}</span>
+              </Button>
+            ))}
+          </div>
+
+          {/* Alternância CAD Dark vs Ficha Impressa */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 px-2.5 text-xs gap-1.5 border-slate-700"
+            onClick={() => setIsCadTheme(!isCadTheme)}
+            title={isCadTheme ? "Mudar para Ficha Técnica Clara" : "Mudar para CAD Blueprint Dark"}
+          >
+            {isCadTheme ? <Sun className="h-3.5 w-3.5 text-amber-400" /> : <Moon className="h-3.5 w-3.5 text-cyan-400" />}
+            <span className="hidden md:inline">{isCadTheme ? "Modo Impresso" : "CAD Dark"}</span>
+          </Button>
+
+          {/* Filtro / Navegação de Vistas */}
+          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg border">
+            {(["all", "top", "front", "rear", "left", "right"] as const).map((v) => (
+              <Button
+                key={v}
+                size="sm"
+                variant={activeView === v ? "default" : "ghost"}
+                className={cn(
+                  "h-7 px-2 text-xs",
+                  activeView === v && "bg-primary text-primary-foreground font-semibold"
+                )}
+                onClick={() => setActiveView(v)}
+              >
+                {v === "all" ? "Prancha Completa" : v === "top" ? "Superior" : v === "front" ? "Frente" : v === "rear" ? "Traseira" : v === "left" ? "Lat. Esq." : "Lat. Dir."}
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Legenda de Proteção Jurídica */}
-      <div className="flex flex-wrap items-center gap-4 rounded-lg bg-muted/40 px-3 py-2 text-xs">
-        <div className="flex items-center gap-1.5">
-          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white shadow">
-            +
-          </span>
-          <span className="font-medium text-foreground">Intervenção Contratada (Orçado / Executar)</span>
+      {/* LEGENDA JURÍDICA & HUD DE PEÇA DETECTADA */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs border">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white shadow">
+              ●
+            </span>
+            <span className="font-medium text-foreground">Serviço Contratado (Orçado / Executar)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-amber-600 text-[10px] font-bold text-white shadow">
+              ▲
+            </span>
+            <span className="font-medium text-foreground">Dano Pré-existente (Checklist Entrada / Isenção)</span>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white shadow">
-            !
-          </span>
-          <span className="font-medium text-foreground">Dano Pré-existente (Checklist Entrada / Não Mexer)</span>
-        </div>
-        {!readOnly && (
-          <span className="ml-auto text-[11px] italic text-muted-foreground">
-            * Clique em qualquer área do diagrama para adicionar uma avaria.
-          </span>
+
+        {/* HUD de Peça Sob o Cursor */}
+        {hoveredPart ? (
+          <div className="flex items-center gap-1.5 font-mono text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
+            <Car className="h-3 w-3" />
+            <span>Peça sob mira: <strong>{hoveredPart}</strong></span>
+          </div>
+        ) : (
+          <div className="text-muted-foreground text-[11px] italic">
+            Clique na imagem para plotar um ponto de avaria com vinculação de peça.
+          </div>
         )}
       </div>
 
-      {/* Grid das Vistas Ortogonais */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-        {/* Painel Central das Vistas */}
-        <div className={cn("grid gap-4", selectedPoint ? "md:col-span-8" : "md:col-span-12")}>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {/* VISTA SUPERIOR (TOP) */}
-            {(activeView === "all" || activeView === "top") && (
-              <div className="relative flex flex-col items-center rounded-xl border bg-background/50 p-3 shadow-inner">
-                <span className="mb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                  Vista Superior (Teto / Capô)
-                </span>
-                <div className="relative h-64 w-36 cursor-crosshair">
-                  <svg
-                    viewBox="0 0 100 200"
-                    className="h-full w-full stroke-foreground/70 fill-background"
-                    onClick={(e) => handleSvgClick("top", e)}
-                  >
-                    {/* Silhueta Top-Down do Carro */}
-                    <rect x="2" y="2" width="96" height="196" fill="transparent" stroke="none" />
-                    {/* Contorno Geral */}
-                    <path
-                      d="M 25 10 C 35 5, 65 5, 75 10 C 85 20, 88 50, 88 90 C 88 150, 85 185, 75 195 C 65 198, 35 198, 25 195 C 15 185, 12 150, 12 90 C 12 50, 15 20, 25 10 Z"
-                      strokeWidth="2.5"
-                    />
-                    {/* Capô */}
-                    <path d="M 22 25 C 35 22, 65 22, 78 25 C 78 55, 22 55, 22 25" strokeWidth="1.5" strokeDasharray="2,2" />
-                    {/* Para-brisa Dianteiro */}
-                    <path d="M 20 60 C 35 55, 65 55, 80 60 C 76 75, 24 75, 20 60" strokeWidth="1.8" />
-                    {/* Teto Solar / Painel Central */}
-                    <rect x="25" y="80" width="50" height="55" rx="4" strokeWidth="1.8" />
-                    {/* Vidro Traseiro */}
-                    <path d="M 22 142 C 35 146, 65 146, 78 142 C 75 158, 25 158, 22 142" strokeWidth="1.8" />
-                    {/* Porta-malas */}
-                    <path d="M 25 165 C 35 163, 65 163, 75 165 C 75 185, 25 185, 25 165" strokeWidth="1.5" strokeDasharray="2,2" />
-                    {/* Retrovisores */}
-                    <path d="M 12 65 L 4 68 L 4 75 L 12 73 Z" strokeWidth="1.5" />
-                    <path d="M 88 65 L 96 68 L 96 75 L 88 73 Z" strokeWidth="1.5" />
-
-                    {/* Marcadores */}
-                    {damagePoints
-                      .map((pt, idx) => ({ pt, idx }))
-                      .filter(({ pt }) => pt.view === "top")
-                      .map(({ pt, idx }) => (
-                        <g
-                          key={idx}
-                          transform={`translate(${pt.coordX}, ${pt.coordY})`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedPointIndex(idx);
-                          }}
-                          className="cursor-pointer transition-transform hover:scale-125"
-                        >
-                          <circle
-                            r="6"
-                            className={cn(
-                              "stroke-white stroke-2 shadow-lg",
-                              pt.contracted ? "fill-blue-600" : "fill-amber-500",
-                              selectedPointIndex === idx && "ring-4 ring-primary"
-                            )}
-                          />
-                          <text
-                            textAnchor="middle"
-                            dy="2.5"
-                            className="fill-white text-[7px] font-black select-none pointer-events-none"
-                          >
-                            {idx + 1}
-                          </text>
-                        </g>
-                      ))}
-                  </svg>
-                </div>
-              </div>
-            )}
-
-            {/* VISTA FRONTAL (FRONT) */}
-            {(activeView === "all" || activeView === "front") && (
-              <div className="relative flex flex-col items-center rounded-xl border bg-background/50 p-3 shadow-inner">
-                <span className="mb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                  Vista Frontal
-                </span>
-                <div className="relative h-44 w-52 cursor-crosshair">
-                  <svg
-                    viewBox="0 0 200 120"
-                    className="h-full w-full stroke-foreground/70 fill-background"
-                    onClick={(e) => handleSvgClick("front", e)}
-                  >
-                    <rect x="2" y="2" width="196" height="116" fill="transparent" stroke="none" />
-                    {/* Cabine / Teto frontal */}
-                    <path d="M 50 45 C 70 20, 130 20, 150 45 Z" strokeWidth="2" />
-                    {/* Para-brisa */}
-                    <path d="M 55 45 C 70 25, 130 25, 145 45 Z" strokeWidth="1.5" />
-                    {/* Capô e Para-choque */}
-                    <path d="M 25 50 C 35 48, 165 48, 175 50 C 185 60, 185 95, 175 105 C 160 110, 40 110, 25 105 C 15 95, 15 60, 25 50 Z" strokeWidth="2.5" />
-                    {/* Grade Central */}
-                    <rect x="75" y="65" width="50" height="30" rx="4" strokeWidth="1.5" strokeDasharray="3,2" />
-                    {/* Faróis */}
-                    <polygon points="35,55 65,58 60,70 30,68" strokeWidth="1.8" />
-                    <polygon points="165,55 135,58 140,70 170,68" strokeWidth="1.8" />
-                    {/* Rodas Frontais */}
-                    <rect x="20" y="85" width="12" height="25" rx="2" strokeWidth="2" />
-                    <rect x="168" y="85" width="12" height="25" rx="2" strokeWidth="2" />
-
-                    {/* Marcadores */}
-                    {damagePoints
-                      .map((pt, idx) => ({ pt, idx }))
-                      .filter(({ pt }) => pt.view === "front")
-                      .map(({ pt, idx }) => (
-                        <g
-                          key={idx}
-                          transform={`translate(${(pt.coordX / 100) * 200}, ${(pt.coordY / 100) * 120})`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedPointIndex(idx);
-                          }}
-                          className="cursor-pointer transition-transform hover:scale-125"
-                        >
-                          <circle
-                            r="6"
-                            className={cn(
-                              "stroke-white stroke-2 shadow-lg",
-                              pt.contracted ? "fill-blue-600" : "fill-amber-500",
-                              selectedPointIndex === idx && "ring-4 ring-primary"
-                            )}
-                          />
-                          <text
-                            textAnchor="middle"
-                            dy="2.5"
-                            className="fill-white text-[7px] font-black select-none pointer-events-none"
-                          >
-                            {idx + 1}
-                          </text>
-                        </g>
-                      ))}
-                  </svg>
-                </div>
-              </div>
-            )}
-
-            {/* VISTA TRASEIRA (REAR) */}
-            {(activeView === "all" || activeView === "rear") && (
-              <div className="relative flex flex-col items-center rounded-xl border bg-background/50 p-3 shadow-inner">
-                <span className="mb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                  Vista Traseira
-                </span>
-                <div className="relative h-44 w-52 cursor-crosshair">
-                  <svg
-                    viewBox="0 0 200 120"
-                    className="h-full w-full stroke-foreground/70 fill-background"
-                    onClick={(e) => handleSvgClick("rear", e)}
-                  >
-                    <rect x="2" y="2" width="196" height="116" fill="transparent" stroke="none" />
-                    {/* Teto traseiro */}
-                    <path d="M 50 45 C 70 20, 130 20, 150 45 Z" strokeWidth="2" />
-                    {/* Vidro Traseiro */}
-                    <path d="M 55 45 C 70 25, 130 25, 145 45 Z" strokeWidth="1.5" />
-                    {/* Traseira e Para-choque */}
-                    <path d="M 25 50 C 35 48, 165 48, 175 50 C 185 60, 185 95, 175 105 C 160 110, 40 110, 25 105 C 15 95, 15 60, 25 50 Z" strokeWidth="2.5" />
-                    {/* Placa */}
-                    <rect x="80" y="70" width="40" height="18" rx="2" strokeWidth="1.5" />
-                    {/* Lanternas */}
-                    <polygon points="30,55 60,56 58,68 32,68" strokeWidth="1.8" />
-                    <polygon points="170,55 140,56 142,68 168,68" strokeWidth="1.8" />
-                    {/* Escapamentos */}
-                    <circle cx="50" cy="103" r="4" strokeWidth="1.5" />
-                    <circle cx="150" cy="103" r="4" strokeWidth="1.5" />
-
-                    {/* Marcadores */}
-                    {damagePoints
-                      .map((pt, idx) => ({ pt, idx }))
-                      .filter(({ pt }) => pt.view === "rear")
-                      .map(({ pt, idx }) => (
-                        <g
-                          key={idx}
-                          transform={`translate(${(pt.coordX / 100) * 200}, ${(pt.coordY / 100) * 120})`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedPointIndex(idx);
-                          }}
-                          className="cursor-pointer transition-transform hover:scale-125"
-                        >
-                          <circle
-                            r="6"
-                            className={cn(
-                              "stroke-white stroke-2 shadow-lg",
-                              pt.contracted ? "fill-blue-600" : "fill-amber-500",
-                              selectedPointIndex === idx && "ring-4 ring-primary"
-                            )}
-                          />
-                          <text
-                            textAnchor="middle"
-                            dy="2.5"
-                            className="fill-white text-[7px] font-black select-none pointer-events-none"
-                          >
-                            {idx + 1}
-                          </text>
-                        </g>
-                      ))}
-                  </svg>
-                </div>
-              </div>
-            )}
+      {/* ÁREA GRÁFICA DO BLUEPRINT: MODO PRANCHA GERAL OU MODO VISTA FOCAL */}
+      {activeView === "all" ? (
+        /* PRANCHA COMPLETA 5 VISTAS (FOLHA TÉCNICA AUTOMOTIVA) */
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+          {/* Coluna Esquerda: Frente e Traseira */}
+          <div className="md:col-span-4 flex flex-col gap-3">
+            {renderTechnicalViewBox("front", "1. Vista Frontal", "front", "h-48 md:h-56", false)}
+            {renderTechnicalViewBox("rear", "2. Vista Traseira", "rear", "h-48 md:h-56", false)}
           </div>
 
-          {/* VISTAS LATERAIS (LEFT & RIGHT) */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {/* LATERAL ESQUERDA (LEFT) */}
-            {(activeView === "all" || activeView === "left") && (
-              <div className="relative flex flex-col items-center rounded-xl border bg-background/50 p-3 shadow-inner">
-                <span className="mb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                  Lateral Esquerda (Lado Motorista)
-                </span>
-                <div className="relative h-44 w-full cursor-crosshair">
-                  <svg
-                    viewBox="0 0 300 100"
-                    className="h-full w-full stroke-foreground/70 fill-background"
-                    onClick={(e) => handleSvgClick("left", e)}
-                  >
-                    <rect x="2" y="2" width="296" height="96" fill="transparent" stroke="none" />
-                    {/* Perfil Sedan */}
-                    <path
-                      d="M 15 70 C 20 65, 30 55, 60 55 C 80 55, 95 30, 130 25 C 190 25, 215 30, 245 55 C 275 55, 285 62, 290 70 C 290 80, 275 82, 260 82 C 255 70, 235 70, 230 82 L 95 82 C 90 70, 70 70, 65 82 L 20 82 Z"
-                      strokeWidth="2.2"
-                    />
-                    {/* Janelas / Vidros */}
-                    <path d="M 105 32 L 150 32 L 150 52 L 95 52 Z" strokeWidth="1.5" />
-                    <path d="M 155 32 L 205 32 L 225 52 L 155 52 Z" strokeWidth="1.5" />
-                    {/* Linha das Portas */}
-                    <line x1="152" y1="32" x2="152" y2="80" strokeWidth="1.5" />
-                    <line x1="95" y1="52" x2="95" y2="80" strokeWidth="1.5" />
-                    <line x1="225" y1="52" x2="225" y2="80" strokeWidth="1.5" />
-                    {/* Rodas */}
-                    <circle cx="78" cy="80" r="14" strokeWidth="2" />
-                    <circle cx="242" cy="80" r="14" strokeWidth="2" />
+          {/* Coluna Central: Vista Superior (Teto, Capô e Porta-Malas) */}
+          <div className="md:col-span-4">
+            {renderTechnicalViewBox("top", "3. Vista Superior (Capô, Teto, Tampa)", "top", "h-96 md:h-[464px]", false)}
+          </div>
 
-                    {/* Marcadores */}
-                    {damagePoints
-                      .map((pt, idx) => ({ pt, idx }))
-                      .filter(({ pt }) => pt.view === "left")
-                      .map(({ pt, idx }) => (
-                        <g
-                          key={idx}
-                          transform={`translate(${(pt.coordX / 100) * 300}, ${(pt.coordY / 100) * 100})`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedPointIndex(idx);
-                          }}
-                          className="cursor-pointer transition-transform hover:scale-125"
-                        >
-                          <circle
-                            r="6"
-                            className={cn(
-                              "stroke-white stroke-2 shadow-lg",
-                              pt.contracted ? "fill-blue-600" : "fill-amber-500",
-                              selectedPointIndex === idx && "ring-4 ring-primary"
-                            )}
-                          />
-                          <text
-                            textAnchor="middle"
-                            dy="2.5"
-                            className="fill-white text-[7px] font-black select-none pointer-events-none"
-                          >
-                            {idx + 1}
-                          </text>
-                        </g>
-                      ))}
-                  </svg>
-                </div>
-              </div>
-            )}
-
-            {/* LATERAL DIREITA (RIGHT) */}
-            {(activeView === "all" || activeView === "right") && (
-              <div className="relative flex flex-col items-center rounded-xl border bg-background/50 p-3 shadow-inner">
-                <span className="mb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                  Lateral Direita (Lado Passageiro)
-                </span>
-                <div className="relative h-44 w-full cursor-crosshair">
-                  <svg
-                    viewBox="0 0 300 100"
-                    className="h-full w-full stroke-foreground/70 fill-background"
-                    onClick={(e) => handleSvgClick("right", e)}
-                  >
-                    <rect x="2" y="2" width="296" height="96" fill="transparent" stroke="none" />
-                    {/* Perfil Invertido */}
-                    <g transform="translate(300, 0) scale(-1, 1)">
-                      <path
-                        d="M 15 70 C 20 65, 30 55, 60 55 C 80 55, 95 30, 130 25 C 190 25, 215 30, 245 55 C 275 55, 285 62, 290 70 C 290 80, 275 82, 260 82 C 255 70, 235 70, 230 82 L 95 82 C 90 70, 70 70, 65 82 L 20 82 Z"
-                        strokeWidth="2.2"
-                      />
-                      <path d="M 105 32 L 150 32 L 150 52 L 95 52 Z" strokeWidth="1.5" />
-                      <path d="M 155 32 L 205 32 L 225 52 L 155 52 Z" strokeWidth="1.5" />
-                      <line x1="152" y1="32" x2="152" y2="80" strokeWidth="1.5" />
-                      <line x1="95" y1="52" x2="95" y2="80" strokeWidth="1.5" />
-                      <line x1="225" y1="52" x2="225" y2="80" strokeWidth="1.5" />
-                      <circle cx="78" cy="80" r="14" strokeWidth="2" />
-                      <circle cx="242" cy="80" r="14" strokeWidth="2" />
-                    </g>
-
-                    {/* Marcadores */}
-                    {damagePoints
-                      .map((pt, idx) => ({ pt, idx }))
-                      .filter(({ pt }) => pt.view === "right")
-                      .map(({ pt, idx }) => (
-                        <g
-                          key={idx}
-                          transform={`translate(${(pt.coordX / 100) * 300}, ${(pt.coordY / 100) * 100})`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedPointIndex(idx);
-                          }}
-                          className="cursor-pointer transition-transform hover:scale-125"
-                        >
-                          <circle
-                            r="6"
-                            className={cn(
-                              "stroke-white stroke-2 shadow-lg",
-                              pt.contracted ? "fill-blue-600" : "fill-amber-500",
-                              selectedPointIndex === idx && "ring-4 ring-primary"
-                            )}
-                          />
-                          <text
-                            textAnchor="middle"
-                            dy="2.5"
-                            className="fill-white text-[7px] font-black select-none pointer-events-none"
-                          >
-                            {idx + 1}
-                          </text>
-                        </g>
-                      ))}
-                  </svg>
-                </div>
-              </div>
-            )}
+          {/* Coluna Direita: Laterais Esquerda e Direita */}
+          <div className="md:col-span-4 flex flex-col gap-3">
+            {renderTechnicalViewBox("left", "4. Lateral Esquerda (Motorista)", "left", "h-48 md:h-56", true)}
+            {renderTechnicalViewBox("right", "5. Lateral Direita (Passageiro)", "right", "h-48 md:h-56", false)}
           </div>
         </div>
+      ) : (
+        /* MODO VISTA FOCAL AMPLIADA (ZOOM PERICIAL) */
+        <div className="flex flex-col gap-2">
+          {activeView === "front" && renderTechnicalViewBox("front", "Vista Frontal Ampliada", "front", "h-[450px]", false)}
+          {activeView === "rear" && renderTechnicalViewBox("rear", "Vista Traseira Ampliada", "rear", "h-[450px]", false)}
+          {activeView === "top" && renderTechnicalViewBox("top", "Vista Superior Ampliada", "top", "h-[500px]", false)}
+          {activeView === "left" && renderTechnicalViewBox("left", "Lateral Esquerda Ampliada", "left", "h-[450px]", true)}
+          {activeView === "right" && renderTechnicalViewBox("right", "Lateral Direita Ampliada", "right", "h-[450px]", false)}
+          <div className="flex justify-end">
+            <Button size="sm" variant="outline" onClick={() => setActiveView("all")} className="text-xs gap-1">
+              <Eye className="h-3.5 w-3.5" /> Voltar para Prancha Completa (5 Vistas)
+            </Button>
+          </div>
+        </div>
+      )}
 
-        {/* Painel de Edição do Ponto Selecionado */}
-        {selectedPoint && (
-          <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4 shadow-sm md:col-span-4">
-            <div className="flex items-center justify-between border-b pb-2">
-              <div className="flex items-center gap-2">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-                  {selectedPointIndex! + 1}
-                </span>
-                <span className="text-sm font-semibold">Editar Avaria #{selectedPointIndex! + 1}</span>
-              </div>
-              {!readOnly && (
-                <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={removeSelectedPoint}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
+      {/* PAINEL DE INSPEÇÃO: DETALHES DO PONTO SELECIONADO OU LISTA PERICIAL */}
+      {selectedPoint && !readOnly ? (
+        <div className="rounded-xl border border-cyan-800/80 bg-slate-900/60 p-4 shadow-md backdrop-blur">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white shadow",
+                  selectedPoint.contracted ? "bg-blue-600" : "bg-amber-600"
+                )}
+              >
+                {(selectedPointIndex ?? 0) + 1}
+              </span>
+              <span className="font-semibold text-sm text-foreground">
+                Editar Ponto de Avaria #{ (selectedPointIndex ?? 0) + 1 }
+              </span>
+              <Badge variant="outline" className="capitalize text-xs font-mono">
+                Vista: {selectedPoint.view} ({selectedPoint.coordX}%, {selectedPoint.coordY}%)
+              </Badge>
             </div>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 px-2.5 text-xs gap-1"
+              onClick={removeSelectedPoint}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Remover Ponto
+            </Button>
+          </div>
 
-            {/* Classificação: Orçado vs Pré-existente */}
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-semibold">Classificação Operacional</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={selectedPoint.contracted ? "default" : "outline"}
-                  className={cn("h-8 gap-1.5 text-xs", selectedPoint.contracted && "bg-blue-600 hover:bg-blue-700")}
-                  disabled={readOnly}
-                  onClick={() => updateSelectedPoint({ contracted: true })}
-                >
-                  <Wrench className="h-3.5 w-3.5" />
-                  Orçado (PDR)
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={!selectedPoint.contracted ? "default" : "outline"}
-                  className={cn("h-8 gap-1.5 text-xs", !selectedPoint.contracted && "bg-amber-500 hover:bg-amber-600 text-white")}
-                  disabled={readOnly}
-                  onClick={() => updateSelectedPoint({ contracted: false })}
-                >
-                  <ShieldAlert className="h-3.5 w-3.5" />
-                  Pré-existente
-                </Button>
-              </div>
-              {!selectedPoint.contracted && (
-                <p className="text-[11px] leading-tight text-amber-600 dark:text-amber-400">
-                  Proteção Jurídica: Registrado no checklist de entrada; não será cobrado nem reparado.
-                </p>
-              )}
-            </div>
-
-            {/* Peça / Região do Carro */}
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Componente / Peça</Label>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+            {/* Peça Afetada */}
+            <div className="space-y-1">
+              <Label className="text-xs">Peça da Carroceria</Label>
               <Select
                 value={selectedPoint.carPartCode}
                 onValueChange={(val) => updateSelectedPoint({ carPartCode: val })}
-                disabled={readOnly}
               >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Selecione a peça" />
+                <SelectTrigger className="h-8">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {CAR_PARTS.map((p) => (
-                    <SelectItem key={p.code} value={p.code} className="text-xs">
+                    <SelectItem key={p.code} value={p.code}>
                       {p.label}
                     </SelectItem>
                   ))}
@@ -570,77 +573,171 @@ export function VehicleBlueprint5Views({
             </div>
 
             {/* Tipo de Dano */}
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Tipo de Intervenção / Avaria</Label>
+            <div className="space-y-1">
+              <Label className="text-xs">Tipo de Dano / Avaria</Label>
               <Select
                 value={selectedPoint.damageType}
                 onValueChange={(val) => updateSelectedPoint({ damageType: val })}
-                disabled={readOnly}
               >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Selecione o dano" />
+                <SelectTrigger className="h-8">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {DAMAGE_TYPES.map((d) => (
-                    <SelectItem key={d.code} value={d.code} className="text-xs">
-                      {d.label}
+                  {DAMAGE_TYPES.map((dt) => (
+                    <SelectItem key={dt.code} value={dt.code}>
+                      {dt.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Quantidade e Valor */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Qtd. Amassados</Label>
-                <Input
-                  type="number"
-                  min="1"
-                  value={selectedPoint.dentCount ?? 1}
-                  onChange={(e) => updateSelectedPoint({ dentCount: Number(e.target.value) || 1 })}
-                  className="h-8 text-xs"
-                  disabled={readOnly}
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Valor (€)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={selectedPoint.estimatedAmount ?? ""}
-                  onChange={(e) => updateSelectedPoint({ estimatedAmount: e.target.value })}
-                  placeholder="0.00"
-                  className="h-8 text-xs"
-                  disabled={readOnly || !selectedPoint.contracted}
-                />
-              </div>
-            </div>
-
-            {/* Observações */}
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Observações do Técnico</Label>
+            {/* Qtd Mossas / Severidade */}
+            <div className="space-y-1">
+              <Label className="text-xs">Contagem de Mossas / Intensidade</Label>
               <Input
-                value={selectedPoint.notes ?? ""}
-                onChange={(e) => updateSelectedPoint({ notes: e.target.value })}
-                placeholder="Ex: vinco profundo, sem quebra de verniz"
-                className="h-8 text-xs"
-                disabled={readOnly}
+                type="number"
+                min={1}
+                max={500}
+                className="h-8"
+                value={selectedPoint.dentCount ?? 1}
+                onChange={(e) => updateSelectedPoint({ dentCount: parseInt(e.target.value) || 1 })}
               />
             </div>
 
-            <Button
-              size="sm"
-              variant="outline"
-              className="mt-2 h-8 text-xs"
-              onClick={() => setSelectedPointIndex(null)}
-            >
-              Concluir Edição
-            </Button>
+            {/* Classificação Jurídica: Contratado vs Pré-existente */}
+            <div className="space-y-1">
+              <Label className="text-xs">Enquadramento Pericial</Label>
+              <Select
+                value={selectedPoint.contracted ? "contracted" : "pre_existing"}
+                onValueChange={(val) => updateSelectedPoint({ contracted: val === "contracted" })}
+              >
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="contracted">🛠️ Serviço Contratado (Orçado)</SelectItem>
+                  <SelectItem value="pre_existing">⚠️ Dano Pré-existente (Checklist Entrada)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Anotação Técnica */}
+            <div className="md:col-span-3 space-y-1">
+              <Label className="text-xs">Parecer Técnico / Anotação da Avaria</Label>
+              <Input
+                className="h-8"
+                placeholder="Ex.: Mossas concentradas na nervura central, sem quebra de verniz."
+                value={selectedPoint.notes ?? ""}
+                onChange={(e) => updateSelectedPoint({ notes: e.target.value })}
+              />
+            </div>
+
+            {/* Registro de Foto */}
+            <div className="space-y-1">
+              <Label className="text-xs">Evidência Fotográfica</Label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  className="h-8 text-xs font-mono"
+                  placeholder="URL ou código da foto..."
+                  value={selectedPoint.photoStoragePath ?? ""}
+                  onChange={(e) => updateSelectedPoint({ photoStoragePath: e.target.value })}
+                />
+                <Button size="sm" variant="outline" className="h-8 px-2" title="Anexar Foto">
+                  <Camera className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      ) : null}
+
+      {/* TABELA / DOSSIÊ DOS PONTOS DE AVARIA CADASTRADOS */}
+      {damagePoints.length > 0 && (
+        <div className="rounded-lg border bg-muted/20 p-3">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Dossiê de Danos Registrados ({damagePoints.length})
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              Clique em um item para destacar e editar
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {damagePoints.map((pt, idx) => {
+              const partName = CAR_PARTS.find((p) => p.code === pt.carPartCode)?.label || pt.carPartCode;
+              const typeName = DAMAGE_TYPES.find((d) => d.code === pt.damageType)?.label || pt.damageType;
+              const isSelected = selectedPointIndex === idx;
+
+              return (
+                <div
+                  key={pt.id || idx}
+                  onClick={() => setSelectedPointIndex(idx)}
+                  className={cn(
+                    "flex items-center justify-between gap-2 p-2 rounded border text-xs cursor-pointer transition-all",
+                    isSelected
+                      ? "bg-cyan-950/40 border-cyan-500 shadow-sm"
+                      : "bg-background/80 hover:bg-muted border-slate-800/60"
+                  )}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={cn(
+                        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white",
+                        pt.contracted ? "bg-blue-600" : "bg-amber-600"
+                      )}
+                    >
+                      {idx + 1}
+                    </span>
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-medium truncate text-foreground">{partName}</span>
+                      <span className="text-[11px] text-muted-foreground truncate">
+                        {typeName} {pt.dentCount && pt.dentCount > 1 ? `(${pt.dentCount} un.)` : ""}
+                      </span>
+                    </div>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "shrink-0 text-[10px] px-1.5 py-0 h-4",
+                      pt.contracted ? "border-blue-700 text-blue-400" : "border-amber-700 text-amber-400"
+                    )}
+                  >
+                    {pt.contracted ? "Orçado" : "Checklist"}
+                  </Badge>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* DIÁLOGO DE CONFIRMAÇÃO PARA ALTERAÇÃO DE CARROCERIA */}
+      <Dialog open={showBodyTypeConfirm} onOpenChange={setShowBodyTypeConfirm}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-500">
+              <AlertTriangle className="h-5 w-5" />
+              Alterar Modelo de Carroceria?
+            </DialogTitle>
+            <DialogDescription className="pt-2 text-sm">
+              Este veículo já possui <strong>{damagePoints.length} marcadores de danos</strong> registrados.
+              Ao alterar a carroceria para{" "}
+              <strong>{BODY_TYPES.find((b) => b.code === pendingBodyType)?.label}</strong>, o histórico pericial e
+              as peças nominais vinculadas serão preservados, mas as coordenadas gráficas anteriores podem necessitar
+              de reposicionamento no novo diagrama.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:justify-end">
+            <Button variant="outline" size="sm" onClick={() => setShowBodyTypeConfirm(false)}>
+              Cancelar
+            </Button>
+            <Button variant="default" size="sm" onClick={confirmBodyTypeChange}>
+              Confirmar e Ajustar Modelo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
