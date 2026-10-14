@@ -18,6 +18,13 @@ import {
   reverseExpense,
   reverseObligationPayment,
   settleObligation,
+  listProfitRules,
+  createProfitRule,
+  deleteProfitRule,
+  applyDistributionRule,
+  listTechniciansFinance,
+  getTechnicianStatement,
+  settleTechnicianBalance,
   type CancelDistributionInput,
   type CancelObligationInput,
   type CommandEnvelope,
@@ -26,6 +33,8 @@ import {
   type CreateObligationInput,
   type ReverseExpenseInput,
   type ReverseObligationPaymentInput,
+  type CreateProfitRuleInput,
+  type ApplyRuleToPaymentListInput,
 } from "@/lib/apiFinanceV2";
 
 export * from "@/lib/apiFinanceV2";
