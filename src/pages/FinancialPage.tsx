@@ -7,6 +7,10 @@ import {
   DollarSign,
   ShieldAlert,
   Wallet,
+  Users,
+  BookOpen,
+  ShieldCheck,
+  Activity,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,7 +23,9 @@ import { DistributionsTab } from "@/components/finance/DistributionsTab";
 import { ObligationsTab } from "@/components/finance/ObligationsTab";
 import { TechnicianStatementTab } from "@/components/finance/TechnicianStatementTab";
 import { TechnicianFinanceView } from "@/components/finance/TechnicianFinanceView";
-import { Users } from "lucide-react";
+import { AccountingControlCenter } from "@/components/accounting/AccountingControlCenter";
+import FinancialAuditTab from "@/components/financial/FinancialAuditTab";
+import FinancialIntegrityTab from "@/components/financial/FinancialIntegrityTab";
 
 export default function FinancialPage() {
   const { workspaceId, myRole, isAdmin: wsIsAdmin, ownerAppUserId } = useWorkspace();
@@ -28,7 +34,16 @@ export default function FinancialPage() {
 
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab");
-  const validTabs = ["overview", "expenses", "distributions", "obligations", "technicians"];
+  const validTabs = [
+    "overview",
+    "accounting",
+    "technicians",
+    "expenses",
+    "distributions",
+    "obligations",
+    "audit",
+    "integrity",
+  ];
   const [mainTab, setMainTab] = useState(
     initialTab && validTabs.includes(initialTab) ? initialTab : "overview"
   );
@@ -90,7 +105,7 @@ export default function FinancialPage() {
           <div>
             <h1 className="text-lg font-semibold text-foreground">Gestão Financeira & Caixa</h1>
             <p className="text-xs text-muted-foreground">
-              Controle canônico de recebimentos, despesas, repasses e liquidações por moeda.
+              Controle canônico de recebimentos, despesas operacionais, contabilidade, repasses e integridade por moeda.
             </p>
           </div>
         </div>
@@ -98,52 +113,83 @@ export default function FinancialPage() {
 
       {/* Main Canonical Navigation Tabs */}
       <Tabs value={mainTab} onValueChange={setMainTab} className="space-y-4 min-w-0 max-w-full w-full">
-        <TabsList className="grid w-full grid-cols-5 max-w-2xl bg-muted p-1">
-          <TabsTrigger value="overview" className="text-xs" data-testid="tab-finance-overview">
-            <Wallet className="h-3.5 w-3.5 mr-1.5" />
-            Visão Geral
-          </TabsTrigger>
-          <TabsTrigger value="technicians" className="text-xs" data-testid="tab-finance-technicians">
-            <Users className="h-3.5 w-3.5 mr-1.5" />
-            Acerto Técnicos
-          </TabsTrigger>
-          <TabsTrigger value="expenses" className="text-xs" data-testid="tab-finance-expenses">
-            <Receipt className="h-3.5 w-3.5 mr-1.5" />
-            Despesas
-          </TabsTrigger>
-          <TabsTrigger value="distributions" className="text-xs" data-testid="tab-finance-distributions">
-            <PieChart className="h-3.5 w-3.5 mr-1.5" />
-            Distribuições
-          </TabsTrigger>
-          <TabsTrigger value="obligations" className="text-xs" data-testid="tab-finance-obligations">
-            <DollarSign className="h-3.5 w-3.5 mr-1.5" />
-            Obrigações
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto pb-1">
+          <TabsList className="inline-flex h-auto p-1 bg-muted rounded-lg gap-1">
+            <TabsTrigger value="overview" className="text-xs py-1.5 px-3 whitespace-nowrap" data-testid="tab-finance-overview">
+              <Wallet className="h-3.5 w-3.5 mr-1.5" />
+              Visão Geral
+            </TabsTrigger>
+            <TabsTrigger value="accounting" className="text-xs py-1.5 px-3 whitespace-nowrap" data-testid="tab-finance-accounting">
+              <BookOpen className="h-3.5 w-3.5 mr-1.5" />
+              Contabilidade
+            </TabsTrigger>
+            <TabsTrigger value="technicians" className="text-xs py-1.5 px-3 whitespace-nowrap" data-testid="tab-finance-technicians">
+              <Users className="h-3.5 w-3.5 mr-1.5" />
+              Detalhamento Técnicos
+            </TabsTrigger>
+            <TabsTrigger value="expenses" className="text-xs py-1.5 px-3 whitespace-nowrap" data-testid="tab-finance-expenses">
+              <Receipt className="h-3.5 w-3.5 mr-1.5" />
+              Despesas Gerais
+            </TabsTrigger>
+            <TabsTrigger value="distributions" className="text-xs py-1.5 px-3 whitespace-nowrap" data-testid="tab-finance-distributions">
+              <PieChart className="h-3.5 w-3.5 mr-1.5" />
+              Distribuições & Rateio
+            </TabsTrigger>
+            <TabsTrigger value="obligations" className="text-xs py-1.5 px-3 whitespace-nowrap" data-testid="tab-finance-obligations">
+              <DollarSign className="h-3.5 w-3.5 mr-1.5" />
+              Obrigações & Pagamentos
+            </TabsTrigger>
+            <TabsTrigger value="audit" className="text-xs py-1.5 px-3 whitespace-nowrap" data-testid="tab-finance-audit">
+              <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+              Auditoria
+            </TabsTrigger>
+            <TabsTrigger value="integrity" className="text-xs py-1.5 px-3 whitespace-nowrap" data-testid="tab-finance-integrity">
+              <Activity className="h-3.5 w-3.5 mr-1.5" />
+              Integridade
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* Tab 1: Per-Currency Overview */}
         <TabsContent value="overview" className="space-y-4">
           <FinanceSummaryCards />
         </TabsContent>
 
-        {/* Tab 2: Technician Statements & Settlements (Alex Rule) */}
+        {/* Tab 2: Accounting Control Center (Alex Orbit & Modules) */}
+        <TabsContent value="accounting" className="space-y-4 min-w-0 max-w-full">
+          <div className="min-h-[60svh] min-w-0 max-w-full w-full overflow-visible md:min-h-[600px] md:overflow-hidden">
+            <AccountingControlCenter embedded />
+          </div>
+        </TabsContent>
+
+        {/* Tab 3: Technician Statements & Settlements (3-Part Extrato per Alex Rule) */}
         <TabsContent value="technicians" className="space-y-4">
           <TechnicianStatementTab canMutate={isFullManager} />
         </TabsContent>
 
-        {/* Tab 3: Expenses */}
+        {/* Tab 4: Canonical Expenses */}
         <TabsContent value="expenses" className="space-y-4">
           <ExpensesTab canMutate={isFullManager} />
         </TabsContent>
 
-        {/* Tab 4: Distributions */}
+        {/* Tab 5: Distributions & Batch Profit Rules */}
         <TabsContent value="distributions" className="space-y-4">
           <DistributionsTab canMutate={isFullManager} />
         </TabsContent>
 
-        {/* Tab 5: Obligations */}
+        {/* Tab 6: Obligations & Settlements */}
         <TabsContent value="obligations" className="space-y-4">
           <ObligationsTab canMutate={isFullManager} />
+        </TabsContent>
+
+        {/* Tab 7: Immutable Financial Audit Trail */}
+        <TabsContent value="audit" className="space-y-4">
+          <FinancialAuditTab />
+        </TabsContent>
+
+        {/* Tab 8: Integrity & Drift Check */}
+        <TabsContent value="integrity" className="space-y-4">
+          <FinancialIntegrityTab />
         </TabsContent>
       </Tabs>
     </div>

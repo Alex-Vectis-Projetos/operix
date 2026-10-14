@@ -1,36 +1,62 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getCurrentUserId, logSaveError, logSavePayload } from "@/lib/authUser";
 import { useWorkspace } from "@/hooks/useWorkspace";
-import { useAuth } from "@/hooks/useAuth";
-import { invalidateAccountingDownstream } from "@/lib/financialSync";
 import {
-  listFinancialRecords,
-  createFinancialRecord,
-  updateFinancialRecord,
-  deleteFinancialRecord,
-} from "@/lib/apiFinance";
+  listExpenses,
+  createExpense,
+  reverseExpense,
+  generateIdempotencyKey,
+  type Expense,
+} from "@/lib/apiFinanceV2";
 import type { ModuleEntry } from "./ModulePanel";
 
-type ModuleKey = "rentals" | "expenses" | "fuel" | "travel" | "purchases" | "government" | "withdrawals";
+export type ModuleKey =
+  | "rentals"
+  | "expenses"
+  | "fuel"
+  | "travel"
+  | "purchases"
+  | "government"
+  | "withdrawals";
 
-const CATEGORY_MAP: Record<ModuleKey, { type: string; category?: string; source?: string }> = {
-  rentals: { type: "expense", category: "rent" },
-  expenses: { type: "expense" },
-  fuel: { type: "expense", category: "fuel" },
-  travel: { type: "expense", category: "travel" },
-  purchases: { type: "expense", category: "material" },
-  government: { type: "expense", category: "tax" },
-  withdrawals: { type: "expense", category: "salary" },
+export const CATEGORY_MAP: Record<ModuleKey, { primaryCategory: string; matchingCategories: string[] }> = {
+  rentals: {
+    primaryCategory: "rent",
+    matchingCategories: ["rent", "aluguel", "alugueis", "locacao"],
+  },
+  expenses: {
+    primaryCategory: "operational",
+    matchingCategories: ["operational", "despesa", "outros", "other"],
+  },
+  fuel: {
+    primaryCategory: "fuel",
+    matchingCategories: ["fuel", "combustivel", "gasolina", "diesel"],
+  },
+  travel: {
+    primaryCategory: "travel",
+    matchingCategories: ["travel", "viagem", "viagens", "translado", "hotel", "hospedagem"],
+  },
+  purchases: {
+    primaryCategory: "materials",
+    matchingCategories: ["materials", "material", "compras", "ferramentas", "equipamentos"],
+  },
+  government: {
+    primaryCategory: "tax",
+    matchingCategories: ["tax", "governo", "impostos", "taxas", "visto"],
+  },
+  withdrawals: {
+    primaryCategory: "advance",
+    matchingCategories: ["advance", "salary", "retirada", "retiradas", "adiantamento", "vale"],
+  },
 };
 
-function buildEntries(data: any[], editable: boolean): ModuleEntry[] {
-  return (data || []).map((r: any) => ({
-    id: r.id,
-    label: r.label || r.notes || r.source || "—",
-    amount: Number(r.amount || 0),
-    notes: r.notes || "",
-    created_at: r.created_at,
-    editable,
+function buildEntriesFromExpenses(expenses: Expense[]): ModuleEntry[] {
+  return expenses.map((exp) => ({
+    id: exp.id,
+    label: exp.description || "Despesa sem descrição",
+    amount: parseFloat(exp.amount) || 0,
+    notes: exp.context ? `Ref: ${exp.context.kind}` : undefined,
+    created_at: exp.occurredOn || exp.createdAt,
+    editable: exp.status === "effective",
   }));
 }
 
@@ -38,117 +64,106 @@ export function useAccountingModule(
   moduleKey: ModuleKey,
   year?: number,
   techId?: string | null,
-  month?: number | null, // 1-12
+  month?: number | null // 1-12
 ) {
   const queryClient = useQueryClient();
   const { workspaceId } = useWorkspace();
-  const { user } = useAuth();
-  const config = CATEGORY_MAP[moduleKey];
+  const config = CATEGORY_MAP[moduleKey] || { primaryCategory: "operational", matchingCategories: [] };
 
-  const isFuelMirror = moduleKey === "fuel";
   const selectedYear = year ?? null;
   const selectedMonth = month && month >= 1 && month <= 12 ? month : null;
   const selectedTech = techId || null;
 
-  const monthRange = (() => {
-    if (!selectedYear || !selectedMonth) return null;
-    const start = new Date(Date.UTC(selectedYear, selectedMonth - 1, 1));
-    const end = new Date(Date.UTC(selectedYear, selectedMonth, 0, 23, 59, 59));
-    return { startISO: start.toISOString(), endISO: end.toISOString() };
-  })();
-
   const query = useQuery({
-    queryKey: isFuelMirror
-      ? ["accounting-module", "fuel", "fleet-mirror", workspaceId, selectedYear, selectedMonth, selectedTech]
-      : ["accounting-module", moduleKey, workspaceId, user?.id, selectedYear, selectedMonth, selectedTech],
+    queryKey: ["canonical-accounting-expenses", workspaceId, moduleKey, selectedYear, selectedMonth, selectedTech],
     enabled: !!workspaceId,
-    retry: 0,
     queryFn: async () => {
-      if (isFuelMirror) {
-        // Espelho da Frota: módulo Fleet ainda não migrado do Supabase
-        // (fora da onda 2). Sem dados até a migração da frota.
-        return [] as any[];
-      }
+      const res = await listExpenses();
+      const allExpenses = res.items || [];
 
-      return listFinancialRecords({
-        workspace_id: workspaceId!,
-        type: "expense",
-        category: config.category ?? (moduleKey === "expenses" ? "other" : undefined),
-        year_reference: selectedYear ?? undefined,
-        assigned_user_id: selectedTech ?? undefined,
-        created_from: monthRange?.startISO,
-        created_to: monthRange?.endISO,
+      // Filter only effective expenses
+      return allExpenses.filter((e) => {
+        if (e.status !== "effective") return false;
+
+        // 1. Category Match
+        const cat = (e.category || "").toLowerCase();
+        const matchesCategory =
+          cat === config.primaryCategory ||
+          config.matchingCategories.some((c) => cat.includes(c));
+        if (!matchesCategory) return false;
+
+        // 2. Date Filtering (year & month based on occurredOn)
+        const dateStr = e.occurredOn || e.createdAt;
+        if (selectedYear) {
+          if (!dateStr.startsWith(String(selectedYear))) return false;
+        }
+
+        if (selectedMonth) {
+          const monthPart = dateStr.slice(5, 7);
+          const monthNum = parseInt(monthPart, 10);
+          if (monthNum !== selectedMonth) return false;
+        }
+
+        // 3. Technician Filtering
+        // If a technician is selected, show only expenses tied to that technician
+        if (selectedTech) {
+          const isTied = e.context?.kind === "technician_person" && e.context?.id === selectedTech;
+          if (!isTied) return false;
+        }
+
+        return true;
       });
     },
   });
 
-  const isManualEditable = !isFuelMirror;
-
-  const entries: ModuleEntry[] = isFuelMirror
-    ? (query.data as any[] || []).map((r) => ({ ...r, editable: false }))
-    : buildEntries(query.data || [], isManualEditable);
-  const total = entries.reduce((s, e) => s + e.amount, 0);
+  const rawExpenses = query.data || [];
+  const entries: ModuleEntry[] = buildEntriesFromExpenses(rawExpenses);
+  const total = entries.reduce((acc, curr) => acc + curr.amount, 0);
 
   const invalidate = () => {
-    invalidateAccountingDownstream(queryClient);
+    queryClient.invalidateQueries({ queryKey: ["canonical-accounting-expenses"] });
+    queryClient.invalidateQueries({ queryKey: ["finance", "v2", "expenses"] });
+    queryClient.invalidateQueries({ queryKey: ["finance", "v2", "summary"] });
+    queryClient.invalidateQueries({ queryKey: ["finance", "v2", "technicians"] });
+    queryClient.invalidateQueries({ queryKey: ["finance", "v2", "technicians", "statement"] });
   };
 
   const addMutation = useMutation({
     mutationFn: async (entry: { label: string; amount: number; notes: string }) => {
-      if (isFuelMirror) throw new Error("Combustível é gerido na Frota");
-      if (!workspaceId) throw new Error("Workspace ativa não encontrada");
-      const currentUserId = await getCurrentUserId();
-      const yr = selectedYear ?? new Date().getFullYear();
-      // Phase 5C: scope new accounting entries to the active (year, month, tech)
-      // so the temporal source of truth from Detalhamento is respected.
-      const createdAt = selectedMonth
-        ? new Date(Date.UTC(yr, selectedMonth - 1, 15)).toISOString()
-        : undefined;
-      const payload: Record<string, unknown> = {
-        type: config.type || "expense",
-        source: "manual",
-        origin: "manual",
-        category: config.category || "other",
-        amount: entry.amount,
-        label: entry.label,
-        notes: entry.notes,
-        status: "confirmed",
-        workspace_id: workspaceId,
-        year_reference: yr,
-      };
-      if (selectedTech) payload.assigned_user_id = selectedTech;
-      if (createdAt) payload.created_at = createdAt;
-      logSavePayload("AccountingModule:insert", currentUserId, payload);
-      try {
-        await createFinancialRecord(payload);
-      } catch (error) {
-        logSaveError("AccountingModule:insert", error);
-        throw error;
-      }
-    },
-    onSuccess: invalidate,
-  });
+      if (!workspaceId) throw new Error("Workspace ativa não encontrada.");
 
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, ...entry }: { id: string; label: string; amount: number; notes: string }) => {
-      if (isFuelMirror) throw new Error("Combustível é gerido na Frota");
-      const currentUserId = await getCurrentUserId();
-      const payload = { label: entry.label, amount: entry.amount, notes: entry.notes };
-      logSavePayload("AccountingModule:update", currentUserId, payload);
-      try {
-        await updateFinancialRecord(id, payload);
-      } catch (error) {
-        logSaveError("AccountingModule:update", error);
-        throw error;
-      }
+      const yr = selectedYear ?? new Date().getFullYear();
+      const mo = selectedMonth ? String(selectedMonth).padStart(2, "0") : String(new Date().getMonth() + 1).padStart(2, "0");
+      const occurredOn = `${yr}-${mo}-15`;
+
+      const description = entry.notes?.trim()
+        ? `${entry.label.trim()} — ${entry.notes.trim()}`
+        : entry.label.trim();
+
+      await createExpense(
+        {
+          amount: entry.amount.toFixed(2),
+          currencyCode: "EUR",
+          category: config.primaryCategory,
+          occurredOn,
+          description,
+          context: selectedTech
+            ? { kind: "technician_person", id: selectedTech }
+            : undefined,
+        },
+        generateIdempotencyKey()
+      );
     },
     onSuccess: invalidate,
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      if (isFuelMirror) throw new Error("Combustível é gerido na Frota");
-      await deleteFinancialRecord(id);
+    mutationFn: async (expenseId: string) => {
+      await reverseExpense(
+        expenseId,
+        { reason: "Cancelado via módulo de Contabilidade Operacional" },
+        generateIdempotencyKey()
+      );
     },
     onSuccess: invalidate,
   });
@@ -158,9 +173,12 @@ export function useAccountingModule(
     total,
     isLoading: query.isLoading,
     add: addMutation.mutateAsync,
-    update: (id: string, e: { label: string; amount: number; notes: string }) =>
-      updateMutation.mutateAsync({ id, ...e }),
+    update: async (_id: string, _e: { label: string; amount: number; notes: string }) => {
+      // In canonical immutable model, editing an effective entry is done via reverse and re-create
+      // To preserve ledger auditability
+      throw new Error("Lançamentos canônicos são imutáveis. Cancele e crie um novo para preservar a auditoria.");
+    },
     delete: deleteMutation.mutateAsync,
-    allowAdd: isManualEditable && !!workspaceId,
+    allowAdd: !!workspaceId,
   };
 }

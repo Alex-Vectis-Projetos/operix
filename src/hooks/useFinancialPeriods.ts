@@ -1,55 +1,61 @@
 import { useQuery } from "@tanstack/react-query";
-import { listFinancialRecords, listFinanceTechnicians } from "@/lib/apiFinance";
 import { useWorkspace } from "@/hooks/useWorkspace";
+import { listExpenses, listTechniciansFinance } from "@/lib/apiFinanceV2";
 
-/**
- * Phase 5C — Temporal Source of Truth.
- *
- * Returns the union of years actually used by the Financial module
- * inside the current workspace. Combines:
- *   - `year_reference` values stored on `financial_records`
- *   - the current year (always available so new periods can be created)
- *
- * All downstream modules (Accounting, Participation, Integrity) MUST
- * use this hook instead of inventing standalone year lists.
- */
 export function useFinancialYears(techId?: string | null) {
   const { workspaceId } = useWorkspace();
-  const tech = techId || null;
 
   return useQuery({
-    queryKey: ["financial-years", workspaceId, tech],
+    queryKey: ["canonical-financial-years", workspaceId, techId || "all"],
     enabled: !!workspaceId,
     staleTime: 30_000,
     queryFn: async (): Promise<number[]> => {
-      const data = await listFinancialRecords({
-        workspace_id: workspaceId!,
-        assigned_user_id: tech ?? undefined,
-      });
+      const currentYear = new Date().getFullYear();
+      const set = new Set<number>([currentYear]);
 
-      const set = new Set<number>();
-      (data || []).forEach((r: any) => {
-        const y = Number(r.year_reference);
-        if (y && y > 1900 && y < 3000) set.add(y);
-      });
-      // When a specific technician is selected, scope strictly to their years.
-      // Otherwise include the current year so new periods can always be created.
-      if (!tech) set.add(new Date().getFullYear());
-      return Array.from(set).sort((a, b) => a - b);
+      try {
+        const res = await listExpenses();
+        const expenses = res.items || [];
+        expenses.forEach((e) => {
+          if (techId && e.context?.kind === "technician_person" && e.context?.id !== techId) {
+            return;
+          }
+          const dateStr = e.occurredOn || e.createdAt;
+          if (dateStr && dateStr.length >= 4) {
+            const yr = parseInt(dateStr.slice(0, 4), 10);
+            if (!isNaN(yr) && yr >= 2020 && yr <= 2040) {
+              set.add(yr);
+            }
+          }
+        });
+      } catch (err) {
+        console.warn("Could not fetch expense years, fallback to current year", err);
+      }
+
+      return Array.from(set).sort((a, b) => b - a);
     },
   });
 }
 
-/**
- * Returns the technicians available in the current workspace, derived
- * exclusively from `user_roles` (role = technician). No manual insertion.
- */
 export function useWorkspaceTechnicians() {
+  const { workspaceId } = useWorkspace();
+
   return useQuery({
-    queryKey: ["workspace-technicians"],
+    queryKey: ["canonical-workspace-technicians", workspaceId],
+    enabled: !!workspaceId,
     staleTime: 30_000,
-    retry: 0,
-    queryFn: () => listFinanceTechnicians(),
+    queryFn: async () => {
+      try {
+        const res = await listTechniciansFinance();
+        return (res.items || []).map((t) => ({
+          id: t.personId,
+          name: t.name,
+        }));
+      } catch (err) {
+        console.error("Failed to fetch workspace technicians", err);
+        return [];
+      }
+    },
   });
 }
 
