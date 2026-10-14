@@ -234,9 +234,12 @@ paymentListsRouter.get("/confrontation/runs/:runId", async (req: Request, res: R
 
 paymentListsRouter.post("/confrontation/runs/:runId/decisions", async (req: Request, res: Response) => {
   try {
-    const { itemId, decision, notes } = req.body || {};
+    const itemId = req.body?.itemId || req.body?.itemKey;
+    const decision = req.body?.decision;
+    const notes = req.body?.notes || req.body?.decisionNotes;
+
     if (!itemId || !decision) {
-      return res.status(400).json({ message: "Campos obrigatórios: itemId, decision." });
+      return res.status(400).json({ message: "Campos obrigatórios: itemId (ou itemKey) e decision." });
     }
     const updated = await recordConfrontationDecision(req.ctx!, {
       runId: routeParam(req, "runId"),

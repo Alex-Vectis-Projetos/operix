@@ -763,12 +763,19 @@ export async function recordConfrontationDecision(
   ctx: RequestContext,
   input: {
     runId: string;
-    itemId: string;
+    itemId?: string;
+    itemKey?: string;
     decision: "contest" | "accept_difference" | "resolve" | "pending";
     notes?: string;
+    decisionNotes?: string;
   }
 ): Promise<ConfrontationExecutionResponse> {
   const ws = requireWorkspace(ctx);
+  const targetId = input.itemId || input.itemKey;
+  if (!targetId) {
+    throw new UnprocessableEntityError("Identificador do item não informado.");
+  }
+  const noteContent = (input.notes || input.decisionNotes || "").trim() || null;
 
   const run = await prisma.operationalConfrontationRun.findFirst({
     where: { id: input.runId, workspaceId: ws },
@@ -780,18 +787,18 @@ export async function recordConfrontationDecision(
   if (!run) throw new NotFoundError("Confronto não encontrado no workspace.");
 
   const currentDecisions = (run.decisions && typeof run.decisions === "object" ? run.decisions : {}) as Record<string, any>;
-  currentDecisions[input.itemId] = {
+  currentDecisions[targetId] = {
     decision: input.decision,
-    decisionNotes: input.notes?.trim() || null,
+    decisionNotes: noteContent,
     decidedBy: ctx.actorUserId || "operador",
     decidedAt: new Date().toISOString(),
   };
 
   const results = Array.isArray(run.resultsSnapshot) ? [...(run.resultsSnapshot as any[])] : [];
-  const targetItem = results.find((r) => r.id === input.itemId);
+  const targetItem = results.find((r) => r.id === targetId);
   if (targetItem) {
     targetItem.decision = input.decision;
-    targetItem.decisionNotes = input.notes?.trim() || null;
+    targetItem.decisionNotes = noteContent;
     targetItem.decidedBy = ctx.actorUserId || "operador";
     targetItem.decidedAt = new Date().toISOString();
   }
