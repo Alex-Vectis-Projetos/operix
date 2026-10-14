@@ -55,6 +55,7 @@ import { useLanguage } from "@/hooks/useLanguage";
 import { useRole } from "@/hooks/useRole";
 import { useExtractProductionOrder, type FieldConfidence } from "@/hooks/useExtractProductionOrder";
 import { FileUploadZone } from "@/components/service-orders/FileUploadZone";
+import { useServiceCatalogItems } from "@/hooks/useServiceCatalog";
 
 export type BudgetPartLine = {
   id: string;
@@ -65,9 +66,19 @@ export type BudgetPartLine = {
 
 export type BudgetServiceLine = {
   id: string;
+  catalogItemId?: string;
+  catalogItemCode?: string;
+  categoryCode?: string;
   description: string;
   quantity: number;
   unit_price: number;
+};
+
+export const BUDGET_TYPE_TO_CATEGORIES: Record<string, string[]> = {
+  pdr: ["pdr"],
+  assembly_disassembly: ["assembly_disassembly"],
+  body_paint: ["bodywork", "paint", "detailing", "glass_exterior"],
+  mechanics: ["mechanics", "brakes_suspension", "electrical_adas", "diagnostics", "wheels_tires", "hvac"],
 };
 
 export type BudgetLaborLine = {
@@ -1209,6 +1220,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
 
   const { lang } = useLanguage();
   const langDisplay = resolveInterventionDisplayLang(lang);
+  const { data: catalogItems = [], isLoading: isCatalogLoading } = useServiceCatalogItems();
 
   // ─── Integração Cliente → Orçamento ───
   type BudgetClient = {
@@ -1382,16 +1394,27 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   };
   // ──────────────────────────────────────
 
-  const interventionsCatalogue = useMemo(
-    () => isValidBudgetType(form.budget_type) ? getInterventionsListFor(form.budget_type, langDisplay) : [],
-    [form.budget_type, langDisplay],
-  );
+  const getAllowedInterventionsFor = (type: BudgetType | string | null | undefined): string[] => {
+    if (!type || !isValidBudgetType(type)) return [];
+    const legacyList = [...getInterventionsListFor(type, langDisplay)];
+    if (!catalogItems || catalogItems.length === 0) return legacyList;
+    const cats = BUDGET_TYPE_TO_CATEGORIES[String(type)] || [];
+    const matched = catalogItems.filter((it) => cats.includes(it.categoryCode)).map((it) => it.name);
+    return Array.from(new Set([...matched, ...legacyList]));
+  };
+
+  const interventionsCatalogue = useMemo(() => {
+    if (!isValidBudgetType(form.budget_type)) return [];
+    const allowed = getAllowedInterventionsFor(form.budget_type);
+    const currentSelected = getBudgetInterventions(form);
+    return Array.from(new Set([...allowed, ...currentSelected]));
+  }, [form.budget_type, langDisplay, catalogItems, form]);
 
   const selectedInterventions = useMemo(() => getBudgetInterventions(form), [form]);
 
   const hasIncompatibleInterventions = (nextType: BudgetType): boolean => {
     if (selectedInterventions.length === 0) return false;
-    const cat = getInterventionsListFor(nextType, langDisplay);
+    const cat = getAllowedInterventionsFor(nextType);
     return !selectedInterventions.every((v) => cat.includes(v));
   };
 
@@ -1399,9 +1422,10 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     if (isLocked) return;
     setFormSafe((f) => {
       const next = { ...f, budget_type: t, updated_at: new Date().toISOString() };
+      const allowed = getAllowedInterventionsFor(t);
       setBudgetInterventions(
         (patch) => Object.assign(next, patch),
-        selectedInterventions.filter((v) => getInterventionsListFor(t, langDisplay).includes(v)),
+        selectedInterventions.filter((v) => allowed.includes(v)),
       );
       return next;
     });
@@ -1450,9 +1474,10 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     const src = confirmBudgetType.source;
     setForm((f) => {
       const next = { ...f, budget_type: t, updated_at: new Date().toISOString() };
+      const allowed = getAllowedInterventionsFor(t);
       setBudgetInterventions(
         (patch) => Object.assign(next, patch),
-        selectedInterventions.filter((v) => getInterventionsListFor(t, langDisplay).includes(v)),
+        selectedInterventions.filter((v) => allowed.includes(v)),
       );
       return next;
     });
@@ -3390,6 +3415,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                           <TableRow key={s.id}>
                             <TableCell>
                               <Input
+                                list={`service-catalog-dl-${s.id}`}
                                 placeholder={
                                   form.budget_type === "mechanics"
                                     ? "Ex.: Diagnóstico eletrônico / Geometria"
@@ -3398,9 +3424,40 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                                       : "Ex.: Avaliação detalhada de áreas"
                                 }
                                 value={s.description}
-                                onChange={(e) => updateService(s.id, { description: e.target.value })}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  const matched = catalogItems.find(
+                                    (it) => it.name.trim().toLowerCase() === val.trim().toLowerCase(),
+                                  );
+                                  if (matched) {
+                                    const patch: Partial<BudgetServiceLine> = {
+                                      description: matched.name,
+                                      catalogItemId: matched.id,
+                                      catalogItemCode: matched.code,
+                                      categoryCode: matched.categoryCode,
+                                    };
+                                    if (matched.suggestedPrice && (!s.unit_price || s.unit_price === 0)) {
+                                      patch.unit_price = Number(matched.suggestedPrice);
+                                    }
+                                    updateService(s.id, patch);
+                                  } else {
+                                    updateService(s.id, { description: val });
+                                  }
+                                }}
                                 disabled={isLocked}
                               />
+                              <datalist id={`service-catalog-dl-${s.id}`}>
+                                {catalogItems.map((item) => (
+                                  <option key={item.id} value={item.name}>
+                                    {item.categoryName ? `${item.categoryName} — ` : ""}{item.code}
+                                  </option>
+                                ))}
+                              </datalist>
+                              {s.catalogItemCode ? (
+                                <span className="text-[10px] text-muted-foreground font-mono mt-0.5 block">
+                                  {s.categoryCode ? `${s.categoryCode} · ` : ""}{s.catalogItemCode}
+                                </span>
+                              ) : null}
                             </TableCell>
                             <TableCell className="text-right">
                               <Input

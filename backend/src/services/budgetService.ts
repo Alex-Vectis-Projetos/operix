@@ -497,6 +497,8 @@ type StructuredProductionService = {
   completed: false;
   status: "pending";
   currency: string;
+  catalogItemId?: string | null;
+  carPartCode?: string | null;
 };
 
 function strictDecimal(value: unknown, errorCode: string): Prisma.Decimal {
@@ -583,6 +585,9 @@ function buildStructuredProductionServices(
         throw new UnprocessableEntityError(`BUDGET_SERVICE_VALUE_REQUIRED: ${source.category}[${index}]`);
       }
 
+      const catalogItemId = item.catalogItemId || (item as any).catalog_item_id;
+      const carPartCode = item.carPartCode || (item as any).car_part_code;
+
       structured.push({
         id: String(item.id || `${source.category}-${index + 1}`),
         name,
@@ -594,6 +599,8 @@ function buildStructuredProductionServices(
         completed: false,
         status: "pending",
         currency: currencyCode,
+        catalogItemId: catalogItemId ? String(catalogItemId) : null,
+        carPartCode: carPartCode ? String(carPartCode) : null,
       });
     });
   }
@@ -822,17 +829,37 @@ export async function approveBudgetRevision(
         category = "bodywork";
       }
 
+      let catalogItemId: string | null = null;
+      if (service.catalogItemId) {
+        const item = await tx.serviceCatalogItem.findFirst({
+          where: {
+            id: service.catalogItemId,
+            OR: [{ workspaceId: null }, { workspaceId: budget.workspaceId }],
+          },
+          include: { category: true },
+        });
+        if (item) {
+          catalogItemId = item.id;
+          if (item.defaultStageCode) {
+            category = item.defaultStageCode;
+          } else if (item.category?.code && ["pdr", "assembly_disassembly", "bodywork", "paint", "mechanics"].includes(item.category.code)) {
+            category = item.category.code;
+          }
+        }
+      }
+
       await tx.productionTask.create({
         data: {
           productionOrderId: resolvedPO.id,
           workspaceId: budget.workspaceId,
           serviceCategory: category,
-          carPartCode: (service as any).carPartCode || "general",
+          carPartCode: service.carPartCode || (service as any).carPartCode || "general",
           description: service.name || service.description,
           commercialAmount: new Prisma.Decimal(service.total),
           currencyCode: canonicalCurrency,
           status: "pending",
           primaryTechnicianId: resolvedPO.technicianUserId,
+          catalogItemId,
         },
       });
     }
