@@ -23,7 +23,14 @@ import {
   transitionPaymentList,
 } from "../services/paymentListService.js";
 import { decideConfrontationResult, getConfrontation, runConfrontation } from "../services/confrontationService.js";
-import { previewConfrontationFile, executeConfrontationHub } from "../services/confrontationHubService.js";
+import {
+  previewConfrontationFile,
+  executeConfrontationHub,
+  recordConfrontationDecision,
+  listConfrontationRuns,
+  getConfrontationRun,
+  getConfrontationEvidence,
+} from "../services/confrontationHubService.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const jsonUploadSchema = z.object({
@@ -200,6 +207,53 @@ paymentListsRouter.post("/confrontation/execute", async (req: Request, res: Resp
   try {
     const result = await executeConfrontationHub(req.ctx!, req.body);
     return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.get("/confrontation/runs", async (req: Request, res: Response) => {
+  try {
+    const clientId = typeof req.query.clientId === "string" ? req.query.clientId : undefined;
+    const limit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : undefined;
+    const runs = await listConfrontationRuns(req.ctx!, { clientId, limit });
+    return res.json(runs);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.get("/confrontation/runs/:runId", async (req: Request, res: Response) => {
+  try {
+    const run = await getConfrontationRun(req.ctx!, routeParam(req, "runId"));
+    return res.json(run);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.post("/confrontation/runs/:runId/decisions", async (req: Request, res: Response) => {
+  try {
+    const { itemId, decision, notes } = req.body || {};
+    if (!itemId || !decision) {
+      return res.status(400).json({ message: "Campos obrigatórios: itemId, decision." });
+    }
+    const updated = await recordConfrontationDecision(req.ctx!, {
+      runId: routeParam(req, "runId"),
+      itemId,
+      decision,
+      notes,
+    });
+    return res.json(updated);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.get("/confrontation/evidence/:validationId", async (req: Request, res: Response) => {
+  try {
+    const evidence = await getConfrontationEvidence(req.ctx!, routeParam(req, "validationId"));
+    return res.json(evidence);
   } catch (error) {
     return sendError(res, error);
   }

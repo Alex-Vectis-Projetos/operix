@@ -1,8 +1,11 @@
-import { Prisma, type ConfrontationDecision, type ConfrontationStatus } from "@prisma/client";
+import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 import * as xlsx from "xlsx";
 import { prisma } from "../lib/prisma.js";
 import { ForbiddenError, NotFoundError, UnprocessableEntityError } from "../lib/objectAuth.js";
 import type { RequestContext } from "../middleware/requestContext.js";
+import { s3, getPresignedDownloadUrl } from "../lib/minio.js";
 import { aiImportExtractionProvider } from "./externalImportAdapters.js";
 
 function requireWorkspace(ctx: RequestContext): string {
@@ -55,7 +58,12 @@ export interface ExecuteConfrontationInput {
   paymentListId?: string;
   granularity?: "auto" | "synthetic" | "analytic";
   taxType?: "HT" | "TTC";
+  mappingConfirmed?: ConfrontationColumnMapping;
   rows: ExternalConfrontationRow[];
+  fileName?: string;
+  fileBase64?: string;
+  mimeType?: string;
+  fileSha256?: string;
 }
 
 export interface ConfrontationItemResult {
@@ -81,6 +89,9 @@ export interface ConfrontationItemResult {
   decidedBy?: string | null;
   decidedAt?: string | null;
   weeklogId?: string | null;
+  weeklogValidationId?: string | null;
+  validationSequence?: number | null;
+  signatureStoragePath?: string | null;
   weeklogSignatureRef?: string | null;
   paymentListId?: string | null;
 }
@@ -104,9 +115,12 @@ export interface ConfrontationExecutionResponse {
   client: { id: string; name: string };
   period?: string | null;
   paymentList?: { id: string; listNumber: string } | null;
+  fileName?: string | null;
+  storagePath?: string | null;
   granularityUsed: "synthetic" | "analytic";
   metrics: ConfrontationSummaryMetrics;
   results: ConfrontationItemResult[];
+  decisions?: Record<string, { decision: string; decisionNotes?: string | null; decidedBy?: string | null; decidedAt?: string | null }>;
 }
 
 /**
@@ -150,40 +164,74 @@ export async function previewConfrontationFile(
     };
   }
 
-  // Fallback for PDF: use AI extraction provider
-  const extracted = await aiImportExtractionProvider.extractListDocument({
-    bytes: file.bytes,
-    mimeType: file.mimeType as any,
-    fileName: file.fileName,
-  });
+  // Fallback for PDF: use AI extraction provider with resilient error handling
+  try {
+    const extracted = await aiImportExtractionProvider.extractListDocument({
+      bytes: file.bytes,
+      mimeType: file.mimeType as any,
+      fileName: file.fileName,
+    });
 
-  const convertedRows = extracted.rows.map((r: any) => ({
-    "Placa": r.rawLicensePlate || r.licensePlate || "",
-    "VIN": r.rawVin || r.vin || "",
-    "Serviço": Array.isArray(r.rawServices)
-      ? r.rawServices.map((s: any) => s.description || s.name || "").join(", ")
-      : Array.isArray(r.services)
-        ? r.services.map((s: any) => s.name || s.description || "").join(", ")
-        : "",
-    "Valor": r.rawTotalText || r.totalAmount || "0",
-  }));
+    if (!extracted || !Array.isArray(extracted.rows) || extracted.rows.length === 0) {
+      throw new UnprocessableEntityError(
+        "O documento PDF digitalizado não contém registros legíveis ou tabelas identificáveis. Verifique a qualidade do arquivo ou converta para planilha."
+      );
+    }
 
-  const columns = ["Placa", "VIN", "Serviço", "Valor"];
-  return {
-    fileName: file.fileName,
-    columns,
-    suggestedMapping: {
-      plateColumn: "Placa",
-      vinColumn: "VIN",
-      serviceColumn: "Serviço",
-      amountColumn: "Valor",
-      taxType: "HT",
-      granularity: "auto",
-    },
-    rawRows: convertedRows,
-    sampleRows: convertedRows.slice(0, 5),
-    totalRows: convertedRows.length,
-  };
+    const convertedRows = extracted.rows.map((r: any) => ({
+      "Placa": r.rawLicensePlate || r.licensePlate || "",
+      "VIN": r.rawVin || r.vin || "",
+      "Serviço": Array.isArray(r.rawServices)
+        ? r.rawServices.map((s: any) => s.description || s.name || "").join(", ")
+        : Array.isArray(r.services)
+          ? r.services.map((s: any) => s.name || s.description || "").join(", ")
+          : "",
+      "Valor": r.rawTotalText || r.totalAmount || "0",
+    }));
+
+    const validRows = convertedRows.filter((r) => r.Placa || r.VIN || (r.Valor && r.Valor !== "0"));
+    if (validRows.length === 0) {
+      throw new UnprocessableEntityError(
+        "Nenhum veículo com placa ou valor comercial foi detectado na extração do PDF. Certifique-se de que o documento contém colunas de veículos e valores."
+      );
+    }
+
+    const columns = ["Placa", "VIN", "Serviço", "Valor"];
+    return {
+      fileName: file.fileName,
+      columns,
+      suggestedMapping: {
+        plateColumn: "Placa",
+        vinColumn: "VIN",
+        serviceColumn: "Serviço",
+        amountColumn: "Valor",
+        taxType: "HT",
+        granularity: "auto",
+      },
+      rawRows: validRows,
+      sampleRows: validRows.slice(0, 5),
+      totalRows: validRows.length,
+    };
+  } catch (err: any) {
+    if (err instanceof UnprocessableEntityError || err.statusCode === 422) {
+      throw err;
+    }
+    const msg = String(err?.message || err);
+    if (
+      msg.includes("IMPORT_EXTRACTION_PROVIDER_UNAVAILABLE") ||
+      msg.includes("fetchAICompletion") ||
+      msg.includes("AI completion") ||
+      msg.includes("401") ||
+      msg.includes("403")
+    ) {
+      throw new UnprocessableEntityError(
+        "O provedor de inteligência artificial para leitura de PDF digitalizado está indisponível ou não configurado no ambiente. Para continuar sem interrupção, importe uma planilha Excel (.xlsx) ou CSV delimitado."
+      );
+    }
+    throw new UnprocessableEntityError(
+      `Falha na extração de dados do documento PDF: ${err?.message || "Arquivo ilegível ou formato não suportado."}`
+    );
+  }
 }
 
 function detectMappingHeuristics(columns: string[], rows: Record<string, any>[]): ConfrontationColumnMapping {
@@ -237,17 +285,66 @@ function detectMappingHeuristics(columns: string[], rows: Record<string, any>[])
   };
 }
 
-function extractSignatureRef(weeklog: any): string | null {
-  if (!weeklog) return null;
-  const validation = weeklog.validations?.[0];
-  if (validation) {
-    return validation.signatureStoragePath ? `WL-${weeklog.id}-SIG` : `WL-${weeklog.id}`;
-  }
-  return weeklog.status === "validated" ? `WL-${weeklog.id}` : null;
+function coverageContains(snapshot: any, entryId: string): boolean {
+  if (!snapshot) return false;
+  const entries = Array.isArray(snapshot)
+    ? snapshot
+    : typeof snapshot === "object" && Array.isArray((snapshot as any).entries)
+      ? (snapshot as any).entries
+      : [];
+  return entries.some((e: any) => {
+    if (!e || typeof e !== "object") return false;
+    return e.weeklogEntryId === entryId || e.entryId === entryId || e.id === entryId;
+  });
+}
+
+function resolveValidationForEntry(entry: any): any | null {
+  if (!entry?.weeklog?.validations || !Array.isArray(entry.weeklog.validations)) return null;
+  const validations = entry.weeklog.validations;
+  if (validations.length === 0) return null;
+
+  // Find round containing entry in coverageSnapshot
+  const matching = validations.find((v: any) => coverageContains(v.coverageSnapshot, entry.id));
+  return matching || validations[0] || null;
+}
+
+function presentStoredRun(run: any): ConfrontationExecutionResponse {
+  const decisionsMap = (run.decisions && typeof run.decisions === "object" ? run.decisions : {}) as Record<string, any>;
+  const rawResults = Array.isArray(run.resultsSnapshot) ? run.resultsSnapshot : [];
+
+  // Merge latest decisions into items
+  const results: ConfrontationItemResult[] = rawResults.map((item: any) => {
+    const dec = decisionsMap[item.id];
+    if (dec) {
+      return {
+        ...item,
+        decision: dec.decision || item.decision || "none",
+        decisionNotes: dec.decisionNotes !== undefined ? dec.decisionNotes : item.decisionNotes,
+        decidedBy: dec.decidedBy || item.decidedBy,
+        decidedAt: dec.decidedAt || item.decidedAt,
+      };
+    }
+    return item;
+  });
+
+  return {
+    runId: run.id,
+    sequence: 1,
+    createdAt: run.createdAt instanceof Date ? run.createdAt.toISOString() : String(run.createdAt),
+    client: run.client || { id: run.clientId, name: "Cliente" },
+    period: run.period || null,
+    paymentList: run.paymentList ? { id: run.paymentList.id, listNumber: run.paymentList.listNumber } : null,
+    fileName: run.fileName || null,
+    storagePath: run.storagePath || null,
+    granularityUsed: (run.granularityUsed as any) || "synthetic",
+    metrics: run.metrics as unknown as ConfrontationSummaryMetrics,
+    results,
+    decisions: decisionsMap,
+  };
 }
 
 /**
- * 2. Execute Confrontation Engine
+ * 2. Execute Confrontation Engine and Persist Snapshot
  */
 export async function executeConfrontationHub(
   ctx: RequestContext,
@@ -255,11 +352,44 @@ export async function executeConfrontationHub(
 ): Promise<ConfrontationExecutionResponse> {
   const ws = requireWorkspace(ctx);
 
+  if (!input.clientId) throw new UnprocessableEntityError("Cliente não informado.");
+  if (!input.rows || !Array.isArray(input.rows) || input.rows.length === 0) {
+    throw new UnprocessableEntityError("Nenhum registro para confrontar.");
+  }
+
   const client = await prisma.client.findFirst({
     where: { id: input.clientId, workspaceId: ws },
     select: { id: true, name: true },
   });
   if (!client) throw new NotFoundError("Cliente não encontrado.");
+
+  // Idempotency / Accidental duplication guard
+  let fileHash = input.fileSha256;
+  let fileBuffer: Buffer | null = null;
+  if (!fileHash && input.fileBase64) {
+    fileBuffer = Buffer.from(input.fileBase64, "base64");
+    fileHash = createHash("sha256").update(fileBuffer).digest("hex");
+  }
+
+  if (fileHash) {
+    const recentDuplicate = await prisma.operationalConfrontationRun.findFirst({
+      where: {
+        workspaceId: ws,
+        clientId: input.clientId,
+        fileSha256: fileHash,
+        period: input.period || null,
+        createdAt: { gte: new Date(Date.now() - 60_000) }, // created in last 60 seconds
+      },
+      include: {
+        client: { select: { id: true, name: true } },
+        paymentList: { select: { id: true, listNumber: true } },
+      },
+    });
+
+    if (recentDuplicate) {
+      return presentStoredRun(recentDuplicate);
+    }
+  }
 
   // Fetch pre-existing PaymentList if specified or available for client/period
   let targetPaymentList: any = null;
@@ -280,7 +410,7 @@ export async function executeConfrontationHub(
     });
   }
 
-  // Fetch approved WeeklogEntries for client
+  // Fetch approved WeeklogEntries for client with validations relation
   const weeklogEntries = await prisma.weeklogEntry.findMany({
     where: {
       workspaceId: ws,
@@ -294,7 +424,6 @@ export async function executeConfrontationHub(
           validations: {
             where: { status: "validated" },
             orderBy: { validationSequence: "desc" },
-            take: 1,
           },
         },
       },
@@ -340,6 +469,9 @@ export async function executeConfrontationHub(
     hasPaymentListItem: boolean;
     paymentListItemId?: string;
     weeklogId?: string | null;
+    weeklogValidationId?: string | null;
+    validationSequence?: number | null;
+    signatureStoragePath?: string | null;
     weeklogSignatureRef?: string | null;
   };
 
@@ -377,6 +509,13 @@ export async function executeConfrontationHub(
   for (const entry of weeklogEntries) {
     const p = normalizePlate(entry.licensePlate);
     if (!p) continue;
+    const val = resolveValidationForEntry(entry);
+    const sigRef = val
+      ? val.signatureStoragePath
+        ? `WL-${entry.weeklogId}-R${val.validationSequence}-SIG`
+        : `WL-${entry.weeklogId}-R${val.validationSequence}`
+      : `WL-${entry.weeklogId}`;
+
     if (!internalByPlate.has(p)) {
       const amount = new Prisma.Decimal(entry.totalAmount ?? 0);
       const servicesList: Array<{ description: string; amount: Prisma.Decimal }> = [];
@@ -397,13 +536,19 @@ export async function executeConfrontationHub(
         services: servicesList,
         hasPaymentListItem: false,
         weeklogId: entry.weeklogId,
-        weeklogSignatureRef: extractSignatureRef(entry.weeklog),
+        weeklogValidationId: val?.id || null,
+        validationSequence: val?.validationSequence || null,
+        signatureStoragePath: val?.signatureStoragePath || null,
+        weeklogSignatureRef: sigRef,
       });
     } else {
       const existing = internalByPlate.get(p)!;
       if (!existing.weeklogId && entry.weeklogId) {
         existing.weeklogId = entry.weeklogId;
-        existing.weeklogSignatureRef = extractSignatureRef(entry.weeklog);
+        existing.weeklogValidationId = val?.id || null;
+        existing.validationSequence = val?.validationSequence || null;
+        existing.signatureStoragePath = val?.signatureStoragePath || null;
+        existing.weeklogSignatureRef = sigRef;
       }
     }
   }
@@ -459,6 +604,9 @@ export async function executeConfrontationHub(
         decision: "none",
         paymentListId: internal.paymentListItemId ? targetPaymentList?.id : null,
         weeklogId: internal.weeklogId,
+        weeklogValidationId: internal.weeklogValidationId,
+        validationSequence: internal.validationSequence,
+        signatureStoragePath: internal.signatureStoragePath,
         weeklogSignatureRef: internal.weeklogSignatureRef,
       });
     } else {
@@ -515,6 +663,9 @@ export async function executeConfrontationHub(
         decision: "contest",
         decisionNotes: "Veículo validado internamente, porém ausente no documento do cliente.",
         weeklogId: internal.weeklogId,
+        weeklogValidationId: internal.weeklogValidationId,
+        validationSequence: internal.validationSequence,
+        signatureStoragePath: internal.signatureStoragePath,
         weeklogSignatureRef: internal.weeklogSignatureRef,
         paymentListId: targetPaymentList?.id,
       });
@@ -553,17 +704,219 @@ export async function executeConfrontationHub(
     netDifferenceAmount: totalInternal.minus(totalExternal).toFixed(2),
   };
 
-  const runId = `run-${Date.now().toString(36)}`;
+  // Generate Unique Run ID
+  const runId = `run-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+
+  // Store External Document in MinIO
+  let storagePath: string | null = null;
+  if (input.fileName && input.fileBase64) {
+    try {
+      const buffer = Buffer.from(input.fileBase64, "base64");
+      const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+      storagePath = `tenants/${ws}/confrontations/${runId}/original_${safeName}`;
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: "uploads",
+          Key: storagePath,
+          Body: buffer,
+          ContentType: input.mimeType || "application/octet-stream",
+        })
+      );
+    } catch (storageErr) {
+      console.warn("[confrontationHub] Could not store original file in MinIO:", storageErr);
+    }
+  }
+
+  // Persist Snapshot to PostgreSQL
+  const savedRun = await prisma.operationalConfrontationRun.create({
+    data: {
+      id: runId,
+      workspaceId: ws,
+      clientId: input.clientId,
+      period: input.period || null,
+      paymentListId: targetPaymentList?.id || input.paymentListId || null,
+      fileName: input.fileName || "confronto_externo.xlsx",
+      storagePath,
+      fileSha256: fileHash || null,
+      mimeType: input.mimeType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      sizeBytes: input.fileBase64 ? Buffer.from(input.fileBase64, "base64").length : null,
+      granularityUsed: detectedGranularity,
+      mappingConfirmed: (input.mappingConfirmed || {}) as unknown as Prisma.InputJsonValue,
+      metrics: metrics as unknown as Prisma.InputJsonValue,
+      resultsSnapshot: results as unknown as Prisma.InputJsonValue,
+      decisions: {},
+      createdBy: ctx.actorUserId || "operador",
+    },
+    include: {
+      client: { select: { id: true, name: true } },
+      paymentList: { select: { id: true, listNumber: true } },
+    },
+  });
+
+  return presentStoredRun(savedRun);
+}
+
+/**
+ * 3. Save Human Commercial Decision on Discrepancy
+ */
+export async function recordConfrontationDecision(
+  ctx: RequestContext,
+  input: {
+    runId: string;
+    itemId: string;
+    decision: "contest" | "accept_difference" | "resolve" | "pending";
+    notes?: string;
+  }
+): Promise<ConfrontationExecutionResponse> {
+  const ws = requireWorkspace(ctx);
+
+  const run = await prisma.operationalConfrontationRun.findFirst({
+    where: { id: input.runId, workspaceId: ws },
+    include: {
+      client: { select: { id: true, name: true } },
+      paymentList: { select: { id: true, listNumber: true } },
+    },
+  });
+  if (!run) throw new NotFoundError("Confronto não encontrado no workspace.");
+
+  const currentDecisions = (run.decisions && typeof run.decisions === "object" ? run.decisions : {}) as Record<string, any>;
+  currentDecisions[input.itemId] = {
+    decision: input.decision,
+    decisionNotes: input.notes?.trim() || null,
+    decidedBy: ctx.actorUserId || "operador",
+    decidedAt: new Date().toISOString(),
+  };
+
+  const results = Array.isArray(run.resultsSnapshot) ? [...(run.resultsSnapshot as any[])] : [];
+  const targetItem = results.find((r) => r.id === input.itemId);
+  if (targetItem) {
+    targetItem.decision = input.decision;
+    targetItem.decisionNotes = input.notes?.trim() || null;
+    targetItem.decidedBy = ctx.actorUserId || "operador";
+    targetItem.decidedAt = new Date().toISOString();
+  }
+
+  const updated = await prisma.operationalConfrontationRun.update({
+    where: { id: run.id },
+    data: {
+      decisions: currentDecisions as unknown as Prisma.InputJsonValue,
+      resultsSnapshot: results as unknown as Prisma.InputJsonValue,
+    },
+    include: {
+      client: { select: { id: true, name: true } },
+      paymentList: { select: { id: true, listNumber: true } },
+    },
+  });
+
+  return presentStoredRun(updated);
+}
+
+/**
+ * 4. List Previous Confrontations
+ */
+export async function listConfrontationRuns(
+  ctx: RequestContext,
+  query?: { clientId?: string; limit?: number }
+) {
+  const ws = requireWorkspace(ctx);
+  const runs = await prisma.operationalConfrontationRun.findMany({
+    where: {
+      workspaceId: ws,
+      ...(query?.clientId ? { clientId: query.clientId } : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    take: Math.min(query?.limit || 20, 50),
+    include: {
+      client: { select: { id: true, name: true } },
+      paymentList: { select: { id: true, listNumber: true } },
+    },
+  });
+
+  return runs.map((r) => ({
+    id: r.id,
+    runId: r.id,
+    client: r.client,
+    period: r.period,
+    paymentList: r.paymentList,
+    fileName: r.fileName,
+    storagePath: r.storagePath,
+    granularityUsed: r.granularityUsed,
+    metrics: r.metrics as unknown as ConfrontationSummaryMetrics,
+    createdBy: r.createdBy,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  }));
+}
+
+/**
+ * 5. Get a Specific Confrontation Run by ID
+ */
+export async function getConfrontationRun(ctx: RequestContext, runId: string): Promise<ConfrontationExecutionResponse> {
+  const ws = requireWorkspace(ctx);
+  const run = await prisma.operationalConfrontationRun.findFirst({
+    where: { id: runId, workspaceId: ws },
+    include: {
+      client: { select: { id: true, name: true } },
+      paymentList: { select: { id: true, listNumber: true } },
+    },
+  });
+  if (!run) throw new NotFoundError("Confronto não encontrado no workspace.");
+  return presentStoredRun(run);
+}
+
+/**
+ * 6. Get Evidence of Signed Weeklog
+ */
+export async function getConfrontationEvidence(
+  ctx: RequestContext,
+  validationId: string
+): Promise<{
+  available: boolean;
+  url?: string;
+  validationSequence?: number;
+  validatedAt?: string | null;
+  validatorName?: string | null;
+  message?: string;
+}> {
+  const ws = requireWorkspace(ctx);
+
+  const validation = await prisma.weeklogValidation.findFirst({
+    where: { id: validationId, workspaceId: ws },
+    include: {
+      validator: { select: { id: true, fullName: true, email: true } },
+    },
+  });
+
+  if (!validation) {
+    throw new NotFoundError("Evidência de validação não encontrada no workspace.");
+  }
+
+  if (!validation.signatureStoragePath || !validation.signatureStoragePath.trim()) {
+    return {
+      available: false,
+      validationSequence: validation.validationSequence,
+      validatedAt: validation.validatedAt ? validation.validatedAt.toISOString() : null,
+      validatorName: validation.validator?.fullName || null,
+      message: "Evidência não disponível: a rodada de validação não possui assinatura digitalizada vinculada.",
+    };
+  }
+
+  const url = await getPresignedDownloadUrl("uploads", validation.signatureStoragePath, 900);
+  if (!url) {
+    return {
+      available: false,
+      validationSequence: validation.validationSequence,
+      validatedAt: validation.validatedAt ? validation.validatedAt.toISOString() : null,
+      validatorName: validation.validator?.fullName || null,
+      message: "Evidência não disponível: não foi possível gerar acesso ao arquivo de assinatura.",
+    };
+  }
 
   return {
-    runId,
-    sequence: 1,
-    createdAt: new Date().toISOString(),
-    client,
-    period: input.period || null,
-    paymentList: targetPaymentList ? { id: targetPaymentList.id, listNumber: targetPaymentList.listNumber } : null,
-    granularityUsed: detectedGranularity,
-    metrics,
-    results,
+    available: true,
+    url,
+    validationSequence: validation.validationSequence,
+    validatedAt: validation.validatedAt ? validation.validatedAt.toISOString() : null,
+    validatorName: validation.validator?.fullName || null,
   };
 }

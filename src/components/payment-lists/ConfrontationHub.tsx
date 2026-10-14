@@ -1,26 +1,21 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo } from "react";
 import {
-  FileSpreadsheet,
   Upload,
   AlertTriangle,
   CheckCircle2,
   Clock,
   HelpCircle,
-  Car,
   FileText,
-  Filter,
   Download,
   ShieldCheck,
   RefreshCw,
   Search,
-  Check,
-  X,
   FileCheck2,
-  Building2,
-  Calendar,
-  Layers,
-  ChevronRight,
   Info,
+  History,
+  Eye,
+  ExternalLink,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,14 +46,20 @@ import { usePaymentLists } from "@/hooks/usePaymentLists";
 import {
   previewConfrontationFile,
   executeConfrontationHub,
+  listConfrontationRuns,
+  getConfrontationRun,
+  saveConfrontationDecision,
+  getConfrontationEvidence,
   type ConfrontationFilePreview,
   type ConfrontationColumnMapping,
   type ConfrontationExecutionResponse,
   type ConfrontationItemResult,
+  type ConfrontationRunSummary,
+  type ConfrontationEvidenceResponse,
 } from "@/lib/apiConfrontationHub";
 
 export function ConfrontationHub() {
-  const { data: clients = [], isLoading: isLoadingClients } = useClients();
+  const { data: clients = [] } = useClients();
   const { data: paymentLists = [] } = usePaymentLists();
 
   // Step state
@@ -91,6 +92,17 @@ export function ConfrontationHub() {
   const [decisionType, setDecisionType] = useState<"contest" | "accept_difference" | "resolve" | "pending">("contest");
   const [decisionNotes, setDecisionNotes] = useState("");
   const [isSavingDecision, setIsSavingDecision] = useState(false);
+
+  // Historical runs state
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [pastRuns, setPastRuns] = useState<ConfrontationRunSummary[]>([]);
+  const [isLoadingPastRuns, setIsLoadingPastRuns] = useState(false);
+
+  // Evidence Dialog state
+  const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
+  const [isLoadingEvidence, setIsLoadingEvidence] = useState(false);
+  const [activeEvidence, setActiveEvidence] = useState<ConfrontationEvidenceResponse | null>(null);
+  const [activeEvidenceItem, setActiveEvidenceItem] = useState<ConfrontationItemResult | null>(null);
 
   // Filtered lists for the chosen client
   const availableLists = useMemo(() => {
@@ -125,18 +137,21 @@ export function ConfrontationHub() {
   // Confirm mapping and run confrontation
   const handleConfirmMappingAndExecute = async () => {
     if (!preview || !file) return;
+
+    if (!mapping.plateColumn || !mapping.amountColumn) {
+      toast.error("Campos essenciais obrigatórios: selecione a Coluna da Placa e a Coluna do Valor.");
+      return;
+    }
+
     setMappingModalOpen(false);
     setIsExecuting(true);
 
     try {
-      // Map rows from sample or preview
-      // Send raw parsed rows using confirmed mapping columns
-      const plateCol = mapping.plateColumn || "";
+      const plateCol = mapping.plateColumn;
       const vinCol = mapping.vinColumn || "";
       const serviceCol = mapping.serviceColumn || "";
-      const amountCol = mapping.amountColumn || "";
+      const amountCol = mapping.amountColumn;
 
-      // Convert all parsed rows from the document
       const allRows = preview.rawRows && preview.rawRows.length > 0 ? preview.rawRows : preview.sampleRows;
       const rows = allRows.map((r) => {
         let amtStr = String(r[amountCol] || "0").replace(/[^0-9,.-]/g, "").replace(",", ".");
@@ -149,17 +164,32 @@ export function ConfrontationHub() {
         };
       });
 
+      // Convert file to base64 for persistent storage in MinIO
+      const fileBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = reader.result as string;
+          const b64 = res.split(",")[1] || res;
+          resolve(b64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
       const res = await executeConfrontationHub({
         clientId: selectedClientId,
         period: selectedPeriod || undefined,
-        paymentListId: selectedPaymentListId || undefined,
+        paymentListId: selectedPaymentListId === "none" ? undefined : (selectedPaymentListId || undefined),
         granularity: mapping.granularity,
         taxType: mapping.taxType,
         rows,
+        mappingConfirmed: mapping,
+        fileName: file.name,
+        fileBase64,
       });
 
       setConfrontationResult(res);
-      toast.success("Confronto OS × OP executado com sucesso!");
+      toast.success(`Confronto OS × OP #${res.sequence} executado e persistido com sucesso!`);
     } catch (err: any) {
       toast.error(err?.message || "Erro ao executar confronto.");
     } finally {
@@ -168,39 +198,112 @@ export function ConfrontationHub() {
   };
 
   // Submit human commercial decision on discrepancy
-  const handleSaveDecision = () => {
+  const handleSaveDecision = async () => {
     if (!activeItemForDecision || !confrontationResult) return;
     setIsSavingDecision(true);
 
-    // Update local state without mutating financial records
-    const updatedResults = confrontationResult.results.map((r) => {
-      if (r.id === activeItemForDecision.id) {
-        return {
-          ...r,
+    try {
+      const finalNotes = decisionNotes || (
+        decisionType === "contest"
+          ? "Conforme WEEKLOG assinada pelo chefe da oficina"
+          : decisionType === "accept_difference"
+          ? "Aceite comercial do operador registrado no histórico"
+          : decisionType === "resolve"
+          ? "Divergência resolvida comercialmente"
+          : "Pendente de alinhamento"
+      );
+
+      if (confrontationResult.runId) {
+        await saveConfrontationDecision(confrontationResult.runId, {
+          itemKey: activeItemForDecision.id,
           decision: decisionType,
-          decisionNotes: decisionNotes || (decisionType === "contest" ? "Conforme WEEKLOG assinada pelo chefe da oficina" : "Aceite comercial do operador"),
-          decidedAt: new Date().toISOString(),
-        };
+          decisionNotes: finalNotes,
+        });
       }
-      return r;
-    });
 
-    setConfrontationResult({
-      ...confrontationResult,
-      results: updatedResults,
-    });
+      const updatedResults = confrontationResult.results.map((r) => {
+        if (r.id === activeItemForDecision.id) {
+          return {
+            ...r,
+            decision: decisionType,
+            decisionNotes: finalNotes,
+            decidedAt: new Date().toISOString(),
+          };
+        }
+        return r;
+      });
 
-    toast.success(
-      decisionType === "contest"
-        ? "Contestação registrada com evidência da WEEKLOG."
-        : decisionType === "accept_difference"
-          ? "Aceite do valor externo registrado no histórico (sem alteração da Lista)."
-          : "Decisão gravada com sucesso."
-    );
+      setConfrontationResult({
+        ...confrontationResult,
+        results: updatedResults,
+      });
 
-    setActiveItemForDecision(null);
-    setDecisionNotes("");
-    setIsSavingDecision(false);
+      toast.success(
+        decisionType === "contest"
+          ? "Contestação registrada com evidência da WEEKLOG."
+          : decisionType === "accept_difference"
+            ? "Aceite do valor externo registrado no histórico (sem alteração da Lista)."
+            : "Decisão gravada com sucesso no histórico."
+      );
+
+      setActiveItemForDecision(null);
+      setDecisionNotes("");
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao persistir decisão comercial.");
+    } finally {
+      setIsSavingDecision(false);
+    }
+  };
+
+  // Load historical confrontation runs
+  const handleOpenHistory = async () => {
+    setIsLoadingPastRuns(true);
+    setHistoryOpen(true);
+    try {
+      const runs = await listConfrontationRuns(selectedClientId || undefined);
+      setPastRuns(runs);
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao carregar histórico de confrontos.");
+    } finally {
+      setIsLoadingPastRuns(false);
+    }
+  };
+
+  // Reopen a past confrontation
+  const handleSelectPastRun = async (runId: string) => {
+    setIsExecuting(true);
+    try {
+      const run = await getConfrontationRun(runId);
+      setConfrontationResult(run);
+      setSelectedClientId(run.client.id);
+      if (run.period) setSelectedPeriod(run.period);
+      setHistoryOpen(false);
+      toast.success(`Confronto #${run.sequence} carregado do histórico com sucesso.`);
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao abrir confronto anterior.");
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  // Open evidence viewer
+  const handleViewEvidence = async (item: ConfrontationItemResult) => {
+    if (!item.weeklogValidationId) {
+      toast.info("Evidência não disponível para este item.");
+      return;
+    }
+    setActiveEvidenceItem(item);
+    setIsLoadingEvidence(true);
+    setEvidenceModalOpen(true);
+    try {
+      const evidence = await getConfrontationEvidence(item.weeklogValidationId);
+      setActiveEvidence(evidence);
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao carregar evidência da assinatura.");
+      setActiveEvidence({ available: false, notes: "Erro ao obter evidência da assinatura." });
+    } finally {
+      setIsLoadingEvidence(false);
+    }
   };
 
   // Filtered comparison results
@@ -251,18 +354,31 @@ export function ConfrontationHub() {
               </div>
             </div>
 
-            {confrontationResult && (
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setConfrontationResult(null)}>
-                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  Novo Confronto
-                </Button>
-                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleExportDossierPdf}>
-                  <Download className="mr-1.5 h-3.5 w-3.5" />
-                  Exportar Dossiê de Contestação (PDF)
-                </Button>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenHistory}
+                disabled={isLoadingPastRuns}
+                className="text-xs"
+              >
+                <History className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
+                Histórico de Confrontos
+              </Button>
+
+              {confrontationResult && (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setConfrontationResult(null)} className="text-xs">
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                    Novo Confronto
+                  </Button>
+                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs" onClick={handleExportDossierPdf}>
+                    <Download className="mr-1.5 h-3.5 w-3.5" />
+                    Exportar Dossiê de Contestação (PDF)
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </CardHeader>
 
@@ -423,8 +539,10 @@ export function ConfrontationHub() {
           {/* Granularity & Scope Context Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-muted/40 border text-xs text-muted-foreground">
             <div className="flex items-center gap-4">
+              <span><strong>Confronto:</strong> #{confrontationResult.sequence}</span>
               <span><strong>Cliente:</strong> {confrontationResult.client.name}</span>
               {confrontationResult.period && <span><strong>Período:</strong> {confrontationResult.period}</span>}
+              {confrontationResult.fileName && <span><strong>Arquivo:</strong> {confrontationResult.fileName}</span>}
               <span>
                 <strong>Granularidade:</strong>{" "}
                 <Badge variant="outline" className="text-[10px] uppercase font-mono">
@@ -497,9 +615,9 @@ export function ConfrontationHub() {
               <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead className="w-[18%]">Veículo (Placa / VIN)</TableHead>
-                  <TableHead className="w-[28%]">Serviço / Granularidade</TableHead>
-                  <TableHead className="w-[12%] text-right">Valor Operix</TableHead>
-                  <TableHead className="w-[12%] text-right">Valor Cliente</TableHead>
+                  <TableHead className="w-[30%]">Serviço / Evidência</TableHead>
+                  <TableHead className="w-[11%] text-right">Valor Operix</TableHead>
+                  <TableHead className="w-[11%] text-right">Valor Cliente</TableHead>
                   <TableHead className="w-[12%] text-right">Divergência</TableHead>
                   <TableHead className="w-[18%] text-center">Decisão Comercial</TableHead>
                 </TableRow>
@@ -528,12 +646,25 @@ export function ConfrontationHub() {
 
                         <TableCell>
                           <div className="text-xs font-medium">{item.serviceDescription}</div>
-                          {item.weeklogSignatureRef && (
-                            <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
-                              <ShieldCheck className="h-3 w-3" />
-                              <span>Prova: WEEKLOG assinada ({item.weeklogSignatureRef})</span>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-2 mt-1">
+                            {item.weeklogValidationId ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 text-[11px] text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 px-1.5 flex items-center gap-1 font-medium"
+                                onClick={() => handleViewEvidence(item)}
+                              >
+                                <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                                Visualizar WEEKLOG assinada
+                              </Button>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground/80 flex items-center gap-1">
+                                <Info className="h-3 w-3" />
+                                Evidência não disponível
+                              </span>
+                            )}
+                          </div>
                           {isInProd && (
                             <div className="text-[10px] text-purple-600 dark:text-purple-400 mt-0.5">
                               OS em produção no chão de fábrica (não validada)
@@ -573,15 +704,27 @@ export function ConfrontationHub() {
 
                         <TableCell className="text-center">
                           {item.decision === "contest" ? (
-                            <Badge className="bg-amber-500/10 text-amber-600 border-amber-300">
+                            <Badge className="bg-amber-500/10 text-amber-600 border-amber-300 cursor-pointer" onClick={() => {
+                              setActiveItemForDecision(item);
+                              setDecisionType("contest");
+                              setDecisionNotes(item.decisionNotes || "");
+                            }}>
                               Contestado
                             </Badge>
                           ) : item.decision === "accept_difference" ? (
-                            <Badge className="bg-muted text-muted-foreground">
+                            <Badge className="bg-muted text-muted-foreground cursor-pointer" onClick={() => {
+                              setActiveItemForDecision(item);
+                              setDecisionType("accept_difference");
+                              setDecisionNotes(item.decisionNotes || "");
+                            }}>
                               Aceite Registrado
                             </Badge>
                           ) : item.decision === "resolve" ? (
-                            <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-300">
+                            <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-300 cursor-pointer" onClick={() => {
+                              setActiveItemForDecision(item);
+                              setDecisionType("resolve");
+                              setDecisionNotes(item.decisionNotes || "");
+                            }}>
                               Resolvido
                             </Badge>
                           ) : isDiff || isOmitted ? (
@@ -629,6 +772,13 @@ export function ConfrontationHub() {
 
           {preview && (
             <div className="space-y-4 py-2">
+              {(!mapping.plateColumn || !mapping.amountColumn) && (
+                <div className="flex items-center gap-2 p-2.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span>Para executar o confronto, é obrigatório selecionar a Coluna da Placa e a Coluna do Valor.</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div className="space-y-1">
                   <Label className="text-xs">Coluna da Placa *</Label>
@@ -767,9 +917,16 @@ export function ConfrontationHub() {
               size="sm"
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
               onClick={handleConfirmMappingAndExecute}
-              disabled={isExecuting}
+              disabled={isExecuting || !mapping.plateColumn || !mapping.amountColumn}
             >
-              Confirmar e Executar Confronto
+              {isExecuting ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Processando...
+                </>
+              ) : (
+                "Confirmar e Executar Confronto"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -799,6 +956,24 @@ export function ConfrontationHub() {
                   <span>Cliente: €{activeItemForDecision.externalAmount}</span>
                 </div>
               </div>
+
+              {activeItemForDecision.weeklogValidationId && (
+                <div className="flex items-center justify-between p-2 rounded bg-emerald-500/10 border border-emerald-500/20 text-xs">
+                  <span className="text-emerald-700 dark:text-emerald-300 font-medium flex items-center gap-1.5">
+                    <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                    Validação assinada disponível
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[11px] border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+                    onClick={() => handleViewEvidence(activeItemForDecision)}
+                  >
+                    Visualizar WEEKLOG assinada
+                  </Button>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">Ação a Tomar</Label>
@@ -861,7 +1036,188 @@ export function ConfrontationHub() {
               onClick={handleSaveDecision}
               disabled={isSavingDecision}
             >
-              Gravar Decisão
+              {isSavingDecision ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Gravando...
+                </>
+              ) : (
+                "Gravar Decisão"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 5. Historical Confrontations Dialog */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold flex items-center gap-2">
+              <History className="h-4 w-4 text-emerald-600" />
+              Histórico de Confrontos Executados
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Confrontos salvos e imutáveis. Cada execução preserva o documento original, métricas comparadas e decisões comerciais.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2">
+            {isLoadingPastRuns ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground text-xs gap-2">
+                <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+                <span>Carregando histórico do workspace...</span>
+              </div>
+            ) : pastRuns.length === 0 ? (
+              <div className="text-center py-10 text-muted-foreground text-xs">
+                Nenhum confronto salvo anteriormente neste workspace.
+              </div>
+            ) : (
+              <div className="rounded border overflow-x-auto max-h-80 text-xs">
+                <Table>
+                  <TableHeader className="bg-muted/40">
+                    <TableRow>
+                      <TableHead className="w-[12%]">Nº</TableHead>
+                      <TableHead className="w-[18%]">Data / Hora</TableHead>
+                      <TableHead className="w-[20%]">Cliente</TableHead>
+                      <TableHead className="w-[15%]">Arquivo</TableHead>
+                      <TableHead className="w-[15%] text-center">Itens / Divergências</TableHead>
+                      <TableHead className="w-[10%]">Responsável</TableHead>
+                      <TableHead className="w-[10%] text-right">Ação</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pastRuns.map((r) => (
+                      <TableRow key={r.id} className="hover:bg-muted/30 transition-colors">
+                        <TableCell className="font-mono font-bold">#{r.runNumber}</TableCell>
+                        <TableCell className="text-muted-foreground text-[11px]">
+                          {new Date(r.createdAt).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="font-medium">{r.client.name}</TableCell>
+                        <TableCell className="text-[11px] truncate max-w-[120px]" title={r.fileName || ""}>
+                          {r.fileName || "—"}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="font-semibold">{r.metrics.totalCompared}</span> itens ·{" "}
+                          <span className={r.metrics.valueDifferenceCount > 0 ? "text-amber-600 font-semibold" : "text-emerald-600"}>
+                            {r.metrics.valueDifferenceCount} div.
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-[11px] text-muted-foreground">
+                          {r.createdBy?.fullName || "Sistema"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs px-2 text-emerald-600 hover:text-emerald-700"
+                            onClick={() => handleSelectPastRun(r.id)}
+                            disabled={isExecuting}
+                          >
+                            <Eye className="mr-1 h-3 w-3" />
+                            Abrir
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setHistoryOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 6. WEEKLOG Signed Evidence Dialog */}
+      <Dialog open={evidenceModalOpen} onOpenChange={setEvidenceModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-emerald-600" />
+              Evidência da WEEKLOG Assinada
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Validação oficial pelo chefe da oficina vinculada aos serviços do veículo.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2 space-y-3">
+            {isLoadingEvidence ? (
+              <div className="flex flex-col items-center justify-center py-10 text-muted-foreground text-xs gap-2">
+                <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+                <span>Recuperando comprovante de assinatura...</span>
+              </div>
+            ) : activeEvidence && activeEvidence.available ? (
+              <div className="space-y-3">
+                <div className="p-3 rounded-lg border bg-muted/20 text-xs space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Veículo:</span>
+                    <span className="font-bold">{activeEvidenceItem?.licensePlate}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Validador Oficial:</span>
+                    <span className="font-semibold">{activeEvidence.validatorName || "Chefe de Oficina"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Data da Assinatura:</span>
+                    <span>{activeEvidence.signedAt ? new Date(activeEvidence.signedAt).toLocaleString() : "—"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Sequência / Rodada:</span>
+                    <Badge variant="outline" className="text-[10px]">
+                      Rodada #{activeEvidence.sequence || 1}
+                    </Badge>
+                  </div>
+                </div>
+
+                {activeEvidence.signatureUrl ? (
+                  <div className="space-y-2">
+                    <span className="text-xs font-medium text-muted-foreground">Assinatura Digital Gravada:</span>
+                    <div className="rounded-lg border bg-white dark:bg-zinc-950 p-4 text-center">
+                      <img
+                        src={activeEvidence.signatureUrl}
+                        alt="Assinatura da WEEKLOG"
+                        className="max-h-40 mx-auto object-contain filter dark:invert"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs h-7"
+                        onClick={() => window.open(activeEvidence.signatureUrl!, "_blank")}
+                      >
+                        <ExternalLink className="mr-1.5 h-3 w-3" />
+                        Abrir Arquivo em Nova Aba
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 text-center rounded border border-amber-500/20 bg-amber-500/5 text-xs text-amber-700 dark:text-amber-300">
+                    Validação confirmada, porém o arquivo de assinatura não foi anexado.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-6 text-center rounded-lg border border-border text-xs text-muted-foreground space-y-2">
+                <AlertTriangle className="h-8 w-8 mx-auto text-amber-500" />
+                <p className="font-semibold text-foreground">Evidência não disponível</p>
+                <p className="text-[11px]">
+                  {activeEvidence?.notes || "Não há arquivo de assinatura digital registrado para a rodada de validação deste veículo."}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEvidenceModalOpen(false)}>
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>

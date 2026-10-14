@@ -34,6 +34,10 @@ export interface ExecuteConfrontationInput {
   granularity?: "auto" | "synthetic" | "analytic";
   taxType?: "HT" | "TTC";
   rows: ExternalConfrontationRow[];
+  mappingConfirmed?: ConfrontationColumnMapping;
+  fileName?: string;
+  fileBase64?: string;
+  fileSha256?: string;
 }
 
 export interface ConfrontationItemResult {
@@ -59,6 +63,7 @@ export interface ConfrontationItemResult {
   decidedBy?: string | null;
   decidedAt?: string | null;
   weeklogId?: string | null;
+  weeklogValidationId?: string | null;
   weeklogSignatureRef?: string | null;
   paymentListId?: string | null;
 }
@@ -85,6 +90,33 @@ export interface ConfrontationExecutionResponse {
   granularityUsed: "synthetic" | "analytic";
   metrics: ConfrontationSummaryMetrics;
   results: ConfrontationItemResult[];
+  fileName?: string | null;
+  mappingConfirmed?: any;
+}
+
+export interface ConfrontationRunSummary {
+  id: string;
+  runNumber: number;
+  client: { id: string; name: string };
+  paymentList?: { id: string; listNumber: string } | null;
+  period?: string | null;
+  fileName?: string | null;
+  granularity: string;
+  metrics: ConfrontationSummaryMetrics;
+  createdAt: string;
+  createdBy?: { id: string; fullName: string } | null;
+}
+
+export interface ConfrontationEvidenceResponse {
+  available: boolean;
+  validationId?: string;
+  sequence?: number;
+  signedAt?: string;
+  validatorName?: string;
+  signatureUrl?: string | null;
+  mimeType?: string;
+  fileName?: string;
+  notes?: string;
 }
 
 export async function previewConfrontationFile(file: File): Promise<ConfrontationFilePreview> {
@@ -104,4 +136,42 @@ export async function executeConfrontationHub(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+export async function listConfrontationRuns(clientId?: string): Promise<ConfrontationRunSummary[]> {
+  const query = clientId ? `?clientId=${encodeURIComponent(clientId)}` : "";
+  return apiRequest<ConfrontationRunSummary[]>(`/payment-lists/confrontation/runs${query}`, {
+    method: "GET",
+  });
+}
+
+export async function getConfrontationRun(runId: string): Promise<ConfrontationExecutionResponse> {
+  return apiRequest<ConfrontationExecutionResponse>(`/payment-lists/confrontation/runs/${runId}`, {
+    method: "GET",
+  });
+}
+
+export async function saveConfrontationDecision(
+  runId: string,
+  input: { itemKey: string; decision: string; decisionNotes?: string }
+): Promise<{ success: boolean; decision: any }> {
+  return apiRequest<{ success: boolean; decision: any }>(
+    `/payment-lists/confrontation/runs/${runId}/decisions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function getConfrontationEvidence(
+  validationId: string
+): Promise<ConfrontationEvidenceResponse> {
+  return apiRequest<ConfrontationEvidenceResponse>(
+    `/payment-lists/confrontation/evidence/${validationId}`,
+    {
+      method: "GET",
+    }
+  );
 }

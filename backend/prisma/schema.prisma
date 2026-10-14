@@ -137,6 +137,7 @@ model Workspace {
   productionTasks                 ProductionTask[]
   serviceCatalogItems             ServiceCatalogItem[]
   workspaceServiceConfigs         WorkspaceServiceConfig[]
+  operationalConfrontationRuns    OperationalConfrontationRun[]
 
   @@map("workspaces")
 }
@@ -519,6 +520,7 @@ model Client {
   paymentLists       PaymentList[]
   reviewedExternalListImports ExternalListImport[] @relation("ExternalListImportReviewedClient")
   reviewedExternalOperationalImportItems ExternalOperationalImportItem[] @relation("ExternalOperationalImportItemReviewedClient")
+  operationalConfrontationRuns OperationalConfrontationRun[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId])
@@ -1428,6 +1430,7 @@ model PaymentList {
   confrontationRuns         PaymentListConfrontationRun[]
   confrontationResults      PaymentListConfrontationResult[]
   externalImports           ExternalListImport[]
+  operationalConfrontationRuns OperationalConfrontationRun[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, listNumber])
@@ -2043,4 +2046,34 @@ model LegacyServiceAlias {
 
   @@unique([legacyCategory, legacyLabel, locale])
   @@map("legacy_service_aliases")
+}
+
+model OperationalConfrontationRun {
+  id               String       @id @default(uuid())
+  workspaceId      String       @map("workspace_id")
+  clientId         String       @map("client_id")
+  period           String?
+  paymentListId    String?      @map("payment_list_id")
+  fileName         String       @map("file_name")
+  storagePath      String?      @map("storage_path")
+  fileSha256       String?      @map("file_sha256")
+  mimeType         String?      @map("mime_type")
+  sizeBytes        Int?         @map("size_bytes")
+  granularityUsed  String       @map("granularity_used")
+  mappingConfirmed Json         @map("mapping_confirmed")
+  metrics          Json
+  resultsSnapshot  Json         @map("results_snapshot")
+  decisions        Json         @default("{}")
+  createdBy        String       @map("created_by")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  workspace        Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client           Client       @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  paymentList      PaymentList? @relation(fields: [paymentListId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, clientId])
+  @@index([workspaceId, createdAt])
+  @@map("operational_confrontation_runs")
 }
