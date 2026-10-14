@@ -427,3 +427,149 @@ export function reverseObligationPayment(
     }
   );
 }
+
+/* ── Profit Distribution Rules (Templates & Batch Application) ── */
+
+export interface ProfitDistributionShare {
+  id: string;
+  ruleId: string;
+  participantType: "technician" | "partner" | "workspace" | "other";
+  personId?: string | null;
+  percentage: string;
+}
+
+export interface ProfitDistributionRule {
+  id: string;
+  workspaceId: string;
+  name: string;
+  siteKey?: string | null;
+  clientId?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  shares: ProfitDistributionShare[];
+}
+
+export interface CreateProfitRuleInput {
+  name: string;
+  siteKey?: string | null;
+  clientId?: string | null;
+  shares: {
+    participantType: "technician" | "partner" | "workspace" | "other";
+    personId?: string | null;
+    percentage: string;
+  }[];
+}
+
+export interface ApplyRuleToPaymentListInput {
+  paymentListId: string;
+  ruleId?: string;
+  shares?: {
+    participantType: "technician" | "partner" | "workspace" | "other";
+    personId?: string | null;
+    percentage: string;
+  }[];
+}
+
+export function listProfitRules(): Promise<{ items: ProfitDistributionRule[] }> {
+  return apiRequest<{ items: ProfitDistributionRule[] }>("/finance/v2/profit-rules");
+}
+
+export function createProfitRule(input: CreateProfitRuleInput): Promise<ProfitDistributionRule> {
+  return apiRequest<ProfitDistributionRule>("/finance/v2/profit-rules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteProfitRule(ruleId: string): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>(`/finance/v2/profit-rules/${encodeURIComponent(ruleId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function applyDistributionRule(input: ApplyRuleToPaymentListInput): Promise<{
+  paymentListId: string;
+  distributionsCount: number;
+  items: Distribution[];
+}> {
+  return apiRequest("/finance/v2/distributions/apply-rule", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/* ── Technician Financial Statement (3-Part Extrato per Alex) ── */
+
+export interface TechnicianFinanceSummary {
+  personId: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  currencyCode: string;
+  expectedGross: string;
+  receivedGross: string;
+  totalExpenses: string;
+  settledPayments: string;
+  availableBalance: string;
+}
+
+export interface TechnicianStatementItem {
+  id: string;
+  type: "earning" | "expense" | "settlement";
+  date: string;
+  description: string;
+  category?: string;
+  status: string;
+  amount: string;
+  currencyCode: string;
+  referenceId?: string | null;
+}
+
+export interface TechnicianStatement {
+  technician: {
+    id: string;
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+  };
+  summary: {
+    currencyCode: string;
+    expectedGross: string;
+    receivedGross: string;
+    totalExpenses: string;
+    settledPayments: string;
+    availableBalance: string;
+    status: "positive" | "zero" | "negative";
+  };
+  part1_earnings: TechnicianStatementItem[];
+  part2_expenses: TechnicianStatementItem[];
+  part3_settlements: TechnicianStatementItem[];
+}
+
+export function listTechniciansFinance(): Promise<{ items: TechnicianFinanceSummary[] }> {
+  return apiRequest<{ items: TechnicianFinanceSummary[] }>("/finance/v2/technicians");
+}
+
+export function getTechnicianStatement(personId: string): Promise<TechnicianStatement> {
+  return apiRequest<TechnicianStatement>(`/finance/v2/technicians/${encodeURIComponent(personId)}/statement`);
+}
+
+export function settleTechnicianBalance(
+  personId: string,
+  amount?: string
+): Promise<{
+  personId: string;
+  settledAmount: string;
+  remainingBalance: string;
+  paymentsCount: number;
+}> {
+  return apiRequest(`/finance/v2/technicians/${encodeURIComponent(personId)}/settle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(amount ? { amount } : {}),
+  });
+}
+

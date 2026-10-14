@@ -17,7 +17,9 @@ import { FinanceSummaryCards } from "@/components/finance/FinanceSummaryCards";
 import { ExpensesTab } from "@/components/finance/ExpensesTab";
 import { DistributionsTab } from "@/components/finance/DistributionsTab";
 import { ObligationsTab } from "@/components/finance/ObligationsTab";
+import { TechnicianStatementTab } from "@/components/finance/TechnicianStatementTab";
 import { TechnicianFinanceView } from "@/components/finance/TechnicianFinanceView";
+import { Users } from "lucide-react";
 
 export default function FinancialPage() {
   const { workspaceId, myRole, isAdmin: wsIsAdmin, ownerAppUserId } = useWorkspace();
@@ -26,7 +28,7 @@ export default function FinancialPage() {
 
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab");
-  const validTabs = ["overview", "expenses", "distributions", "obligations"];
+  const validTabs = ["overview", "expenses", "distributions", "obligations", "technicians"];
   const [mainTab, setMainTab] = useState(
     initialTab && validTabs.includes(initialTab) ? initialTab : "overview"
   );
@@ -96,10 +98,14 @@ export default function FinancialPage() {
 
       {/* Main Canonical Navigation Tabs */}
       <Tabs value={mainTab} onValueChange={setMainTab} className="space-y-4 min-w-0 max-w-full w-full">
-        <TabsList className="grid w-full grid-cols-4 max-w-xl bg-muted p-1">
+        <TabsList className="grid w-full grid-cols-5 max-w-2xl bg-muted p-1">
           <TabsTrigger value="overview" className="text-xs" data-testid="tab-finance-overview">
             <Wallet className="h-3.5 w-3.5 mr-1.5" />
             Visão Geral
+          </TabsTrigger>
+          <TabsTrigger value="technicians" className="text-xs" data-testid="tab-finance-technicians">
+            <Users className="h-3.5 w-3.5 mr-1.5" />
+            Acerto Técnicos
           </TabsTrigger>
           <TabsTrigger value="expenses" className="text-xs" data-testid="tab-finance-expenses">
             <Receipt className="h-3.5 w-3.5 mr-1.5" />
@@ -120,17 +126,22 @@ export default function FinancialPage() {
           <FinanceSummaryCards />
         </TabsContent>
 
-        {/* Tab 2: Expenses */}
+        {/* Tab 2: Technician Statements & Settlements (Alex Rule) */}
+        <TabsContent value="technicians" className="space-y-4">
+          <TechnicianStatementTab canMutate={isFullManager} />
+        </TabsContent>
+
+        {/* Tab 3: Expenses */}
         <TabsContent value="expenses" className="space-y-4">
           <ExpensesTab canMutate={isFullManager} />
         </TabsContent>
 
-        {/* Tab 3: Distributions */}
+        {/* Tab 4: Distributions */}
         <TabsContent value="distributions" className="space-y-4">
           <DistributionsTab canMutate={isFullManager} />
         </TabsContent>
 
-        {/* Tab 4: Obligations */}
+        {/* Tab 5: Obligations */}
         <TabsContent value="obligations" className="space-y-4">
           <ObligationsTab canMutate={isFullManager} />
         </TabsContent>

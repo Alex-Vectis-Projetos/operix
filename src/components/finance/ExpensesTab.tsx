@@ -55,6 +55,9 @@ const CATEGORY_LABELS: Record<string, string> = {
   tax: "Impostos & Taxas",
   software: "Software & TI",
   travel: "Deslocamento & Viagem",
+  fuel: "Combustível",
+  hotel: "Hospedagem & Hotel",
+  advance: "Adiantamento",
   materials: "Materiais & Equipamentos",
   other: "Outros",
 };

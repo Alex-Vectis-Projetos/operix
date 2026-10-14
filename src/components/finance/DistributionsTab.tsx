@@ -45,6 +45,7 @@ import { usePeople } from "@/hooks/usePeople";
 import { useClients } from "@/hooks/useServiceOrders";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { formatFinanceMoney, formatFinanceDate } from "@/lib/financeFormatters";
+import { ApplyProfitRuleModal } from "./ApplyProfitRuleModal";
 
 interface DistributionsTabProps {
   canMutate?: boolean;
@@ -69,6 +70,9 @@ export function DistributionsTab({ canMutate = true }: DistributionsTabProps) {
   // Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
+
+  // Apply Rule Modal State
+  const [isApplyRuleOpen, setIsApplyRuleOpen] = useState(false);
 
   // Create Dialog State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -259,17 +263,34 @@ export function DistributionsTab({ canMutate = true }: DistributionsTabProps) {
         </div>
 
         {canMutate && (
-          <Button
-            size="sm"
-            onClick={handleOpenCreate}
-            className="h-9 gap-1.5 shrink-0"
-            data-testid="btn-new-distribution"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Nova Distribuição</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsApplyRuleOpen(true)}
+              className="h-9 gap-1.5 shrink-0"
+              data-testid="btn-apply-profit-rule"
+            >
+              <PieChart className="h-4 w-4 text-primary" />
+              <span>Rateio em Lote (Regra)</span>
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleOpenCreate}
+              className="h-9 gap-1.5 shrink-0"
+              data-testid="btn-new-distribution"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Nova Distribuição</span>
+            </Button>
+          </div>
         )}
       </div>
+
+      <ApplyProfitRuleModal
+        isOpen={isApplyRuleOpen}
+        onClose={() => setIsApplyRuleOpen(false)}
+      />
 
       {/* Distributions Table */}
       {isLoading ? (

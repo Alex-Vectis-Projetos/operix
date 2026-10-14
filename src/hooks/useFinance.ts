@@ -54,6 +54,10 @@ export const financeQueryKeys = {
   obligationList: (workspaceId?: string | null) => [...financeQueryKeys.obligations(workspaceId), "list"] as const,
   obligationDetail: (workspaceId?: string | null, obligationId?: string | null) =>
     [...financeQueryKeys.obligations(workspaceId), "detail", obligationId ?? "none"] as const,
+  profitRules: (workspaceId?: string | null) => [...financeQueryKeys.all(workspaceId), "profitRules"] as const,
+  technicians: (workspaceId?: string | null) => [...financeQueryKeys.all(workspaceId), "technicians"] as const,
+  technicianStatement: (workspaceId?: string | null, personId?: string | null) =>
+    [...financeQueryKeys.technicians(workspaceId), "statement", personId ?? "none"] as const,
 };
 
 type FinanceQueryClient = Pick<QueryClient, "invalidateQueries">;
@@ -356,3 +360,90 @@ export function useReverseObligationPayment() {
     },
   });
 }
+
+/* ── Profit Rules Hooks ── */
+
+export function useProfitRules() {
+  const { workspaceId } = useWorkspace();
+  return useQuery({
+    queryKey: financeQueryKeys.profitRules(workspaceId),
+    queryFn: listProfitRules,
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useCreateProfitRule() {
+  const queryClient = useQueryClient();
+  const { workspaceId } = useWorkspace();
+  return useMutation({
+    mutationFn: (input: CreateProfitRuleInput) => createProfitRule(input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: financeQueryKeys.profitRules(workspaceId) });
+    },
+  });
+}
+
+export function useDeleteProfitRule() {
+  const queryClient = useQueryClient();
+  const { workspaceId } = useWorkspace();
+  return useMutation({
+    mutationFn: (ruleId: string) => deleteProfitRule(ruleId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: financeQueryKeys.profitRules(workspaceId) });
+    },
+  });
+}
+
+export function useApplyDistributionRule() {
+  const queryClient = useQueryClient();
+  const { workspaceId } = useWorkspace();
+  return useMutation({
+    mutationFn: (input: ApplyRuleToPaymentListInput) => applyDistributionRule(input),
+    onSuccess: async () => {
+      await Promise.all([
+        invalidateDistributionList(queryClient, workspaceId),
+        queryClient.invalidateQueries({ queryKey: financeQueryKeys.technicians(workspaceId) }),
+      ]);
+    },
+  });
+}
+
+/* ── Technician Finance & Statement Hooks ── */
+
+export function useTechniciansFinance() {
+  const { workspaceId } = useWorkspace();
+  return useQuery({
+    queryKey: financeQueryKeys.technicians(workspaceId),
+    queryFn: listTechniciansFinance,
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useTechnicianStatement(personId?: string | null) {
+  const { workspaceId } = useWorkspace();
+  return useQuery({
+    queryKey: financeQueryKeys.technicianStatement(workspaceId, personId),
+    queryFn: () => getTechnicianStatement(personId!),
+    enabled: Boolean(workspaceId && personId),
+  });
+}
+
+export function useSettleTechnicianBalance() {
+  const queryClient = useQueryClient();
+  const { workspaceId } = useWorkspace();
+  return useMutation({
+    mutationFn: ({ personId, amount }: { personId: string; amount?: string }) =>
+      settleTechnicianBalance(personId, amount),
+    onSuccess: async (_, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: financeQueryKeys.technicians(workspaceId) }),
+        queryClient.invalidateQueries({
+          queryKey: financeQueryKeys.technicianStatement(workspaceId, variables.personId),
+        }),
+        invalidateObligationList(queryClient, workspaceId),
+        invalidateFinanceSummary(queryClient, workspaceId),
+      ]);
+    },
+  });
+}
+

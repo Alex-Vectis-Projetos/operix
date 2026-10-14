@@ -6,6 +6,8 @@ import { getFinanceSummary } from "../services/financeSummaryService.js";
 import { createExpense, FinanceError, getExpense, listExpenses, presentExpense, reverseExpense } from "../services/expenseService.js";
 import { cancelDistribution, createDistribution, getDistribution, listDistributions, presentDistribution } from "../services/distributionService.js";
 import { cancelObligation, createObligation, getObligation, listObligations, presentObligation, reversePayment, settleObligation } from "../services/obligationService.js";
+import { applyRuleToPaymentList, createProfitRule, deleteProfitRule, listProfitRules } from "../services/profitRuleService.js";
+import { getTechnicianStatement, listTechniciansWithFinanceSummary, settleTechnicianBalance } from "../services/technicianFinanceService.js";
 
 export const financeV2Router = Router();
 const money = z.string().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/);
@@ -93,6 +95,80 @@ financeV2Router.post("/obligations/:obligationId/settle", requireAuth, resolveRe
 financeV2Router.post("/obligations/:obligationId/settlements/:paymentId/reverse", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try { const result = await reversePayment(ctx(req), obligationId(req), paymentId(req), reverseSchema.parse(req.body), idempotencyKey(req)); return res.json({ ...presentObligation(result.obligation, result.distribution, result.payment), idempotent: result.idempotent }); } catch (error) { return next(error); }
 });
+
+// Profit Distribution Rules (Templates & Batch Application)
+financeV2Router.get("/profit-rules", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try { return res.json({ items: await listProfitRules(ctx(req)) }); } catch (error) { return next(error); }
+});
+
+const createProfitRuleSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  siteKey: z.string().trim().nullable().optional(),
+  clientId: z.string().uuid().nullable().optional(),
+  shares: z.array(z.object({
+    participantType: z.enum(["technician", "partner", "workspace", "other"]),
+    personId: z.string().uuid().nullable().optional(),
+    percentage: money,
+  })).min(1),
+}).strict();
+
+financeV2Router.post("/profit-rules", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const result = await createProfitRule(ctx(req), createProfitRuleSchema.parse(req.body));
+    return res.status(201).json(result);
+  } catch (error) { return next(error); }
+});
+
+financeV2Router.delete("/profit-rules/:ruleId", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const ruleId = Array.isArray(req.params.ruleId) ? req.params.ruleId[0] : req.params.ruleId;
+    return res.json(await deleteProfitRule(ctx(req), ruleId));
+  } catch (error) { return next(error); }
+});
+
+const applyRuleSchema = z.object({
+  paymentListId: z.string().uuid(),
+  ruleId: z.string().uuid().optional(),
+  shares: z.array(z.object({
+    participantType: z.enum(["technician", "partner", "workspace", "other"]),
+    personId: z.string().uuid().nullable().optional(),
+    percentage: money,
+  })).optional(),
+}).strict();
+
+financeV2Router.post("/distributions/apply-rule", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const result = await applyRuleToPaymentList(ctx(req), applyRuleSchema.parse(req.body));
+    return res.status(201).json(result);
+  } catch (error) { return next(error); }
+});
+
+// Technician Financial Summary, Extrato em 3 partes, and Settlement
+financeV2Router.get("/technicians", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    return res.json({ items: await listTechniciansWithFinanceSummary(ctx(req)) });
+  } catch (error) { return next(error); }
+});
+
+financeV2Router.get("/technicians/:personId/statement", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const personId = Array.isArray(req.params.personId) ? req.params.personId[0] : req.params.personId;
+    return res.json(await getTechnicianStatement(ctx(req), personId));
+  } catch (error) { return next(error); }
+});
+
+const settleSchema = z.object({
+  amount: money.optional(),
+}).strict();
+
+financeV2Router.post("/technicians/:personId/settle", requireAuth, resolveRequestContext, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const personId = Array.isArray(req.params.personId) ? req.params.personId[0] : req.params.personId;
+    const body = settleSchema.parse(req.body || {});
+    return res.json(await settleTechnicianBalance(ctx(req), personId, body.amount));
+  } catch (error) { return next(error); }
+});
+
 financeV2Router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
   if (error instanceof z.ZodError) return res.status(422).json({ error: { code: "FINANCE_VALIDATION_INVALID", message: "Payload financeiro inválido." } });
   if (error instanceof FinanceError) return res.status(error.statusCode).json({ error: { code: error.code, message: error.message } });
