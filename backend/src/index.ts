@@ -107,8 +107,10 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err && typeof err === "object" && "statusCode" in err && typeof (err as Record<string, unknown>).statusCode === "number") {
     const status = (err as Record<string, unknown>).statusCode as number;
     const msg = err instanceof Error ? err.message : String((err as Record<string, unknown>).message || "Acesso negado.");
+    const details = (err as Record<string, any>).details;
     return res.status(status).json({
       message: msg,
+      ...(details ? { details, pendingTasks: details.pendingTasks } : {}),
     });
   }
 

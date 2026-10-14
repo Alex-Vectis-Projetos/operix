@@ -12,12 +12,14 @@ const DEFAULT_API_TIMEOUT_MS = 12000;
 export class ApiError extends Error {
   status: number;
   code?: string;
+  details?: any;
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, details?: any) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -66,7 +68,8 @@ export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promis
         typeof body === "object" && body && "code" in body && typeof body.code === "string"
           ? body.code
           : undefined;
-      throw new ApiError(message, response.status, code);
+      const details = typeof body === "object" && body && "details" in body ? (body as any).details : undefined;
+      throw new ApiError(message, response.status, code, details);
     }
 
     return body as T;

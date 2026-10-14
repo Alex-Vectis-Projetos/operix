@@ -112,6 +112,16 @@ function mapOrder(o: any) {
     createdAt: o.createdAt?.toISOString?.() ?? (o.createdAt ? String(o.createdAt) : null),
     updated_at: o.updatedAt?.toISOString?.() ?? (o.updatedAt ? String(o.updatedAt) : null),
     updatedAt: o.updatedAt?.toISOString?.() ?? (o.updatedAt ? String(o.updatedAt) : null),
+        current_stage: o.currentStage || 'awaiting_start',
+    currentStage: o.currentStage || 'awaiting_start',
+    recommended_route: o.recommendedRoute || null,
+    recommendedRoute: o.recommendedRoute || null,
+    stage_history: o.stageHistory || [],
+    stageHistory: o.stageHistory || [],
+    paused_reason: o.pausedReason || null,
+    pausedReason: o.pausedReason || null,
+    paused_previous_stage: o.pausedPreviousStage || null,
+    pausedPreviousStage: o.pausedPreviousStage || null,
     photos: Array.isArray(o.photos) ? o.photos : undefined,
   };
 }
@@ -1201,6 +1211,117 @@ productionOrdersRouter.post("/:id/finalize", async (req: Request, res: Response,
 });
 
 // PATCH /api/production-orders/:id/services/:serviceId — Conclui/marca serviço individual da OP
+
+export function generateRecommendedRoute(tasks: Array<{ category?: string; itemDescription?: string }>): string[] {
+  const route = ['awaiting_start'];
+  const cats = (tasks || []).map((t) => (t.category || '').toLowerCase());
+  const descs = (tasks || []).map((t) => (t.itemDescription || '').toLowerCase());
+  const combined = [...cats, ...descs].join(' ');
+
+  const hasDiagnosis = combined.includes('diagn') || combined.includes('avalia');
+  const hasDisassembly = combined.includes('desmont') || combined.includes('acesso') || combined.includes('forro');
+  const hasPdr = combined.includes('pdr') || combined.includes('granizo') || combined.includes('mossa') || combined.includes('martelinho');
+  const hasMechanics = combined.includes('mec') || combined.includes('suspens') || combined.includes('freio');
+  const hasBodywork = combined.includes('funilar') || combined.includes('estampar') || combined.includes('chapa');
+  const hasPaint = combined.includes('pintur') || combined.includes('verniz') || combined.includes('retoque');
+
+  if (hasDiagnosis) route.push('diagnosis');
+  if (hasDisassembly) route.push('disassembly');
+  if (hasPdr) route.push('pdr');
+  if (hasMechanics) route.push('mechanics');
+  if (hasBodywork) route.push('bodywork');
+  if (hasPaint) {
+    route.push('paint_prep');
+    route.push('paint');
+  }
+  if (hasDisassembly) route.push('assembly');
+  route.push('inspection');
+  route.push('finished');
+
+  return route;
+}
+
+productionOrdersRouter.patch('/:id/stage', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params['id'] as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: 'Workspace ativo não definido.' });
+    }
+
+    const { stage, reason } = req.body || {};
+    if (!stage || typeof stage !== 'string') {
+      return res.status(400).json({ message: 'Etapa operacional é obrigatória.' });
+    }
+
+    const order = await prisma.productionOrder.findFirst({
+      where: { id, workspaceId: ctx.activeWorkspaceId },
+      include: { tasks: true, photos: true, budget: true, budgetRevision: true },
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Ordem de produção não encontrada.' });
+    }
+
+    if (order.status === 'delivered' || order.currentStage === 'finished') {
+      return res.status(409).json({
+        message: 'ORDEM_FINALIZADA: Ordens finalizadas não permitem movimentação operacional reversa. Utilize a retificação da WEEKLOG.',
+      });
+    }
+
+    if (stage === 'finished') {
+      const finalized = await finalizeProductionOrder(ctx, id);
+      return res.status(200).json(mapOrder(finalized.productionOrder));
+    }
+
+    const isPausing = stage === 'paused';
+    const isUnpausing = order.status === 'paused' && stage !== 'paused';
+
+    let nextStatus = order.status;
+    let nextStage = stage;
+    let pausedReason = order.pausedReason;
+    let pausedPrev = order.pausedPreviousStage;
+
+    if (isPausing) {
+      nextStatus = 'paused';
+      pausedPrev = order.currentStage || 'awaiting_start';
+      pausedReason = reason || 'Impedimento operacional registrado.';
+    } else if (isUnpausing) {
+      nextStatus = 'in_production';
+      pausedReason = null;
+      pausedPrev = null;
+    } else if (stage !== 'awaiting_start' && order.status === 'new_vehicle') {
+      nextStatus = 'in_production';
+    }
+
+    const currentHistory = Array.isArray(order.stageHistory) ? (order.stageHistory as any[]) : [];
+    const transitionRecord = {
+      from: order.currentStage || 'awaiting_start',
+      to: stage,
+      changedBy: ctx.actorUserId || 'system',
+      changedAt: new Date().toISOString(),
+      reason: reason || null,
+    };
+
+    const updated = await prisma.productionOrder.update({
+      where: { id },
+      data: {
+        currentStage: nextStage,
+        status: nextStatus,
+        pausedReason,
+        pausedPreviousStage: pausedPrev,
+        startedAt: (nextStatus === 'in_production' && !order.startedAt) ? new Date() : order.startedAt,
+        stageHistory: [...currentHistory, transitionRecord],
+      },
+      include: { tasks: true, photos: true, budget: true, budgetRevision: true },
+    });
+
+    return res.status(200).json(mapOrder(updated));
+  } catch (error) {
+    return next(error);
+  }
+});
+
 productionOrdersRouter.patch("/:id/services/:serviceId", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params["id"] as string;

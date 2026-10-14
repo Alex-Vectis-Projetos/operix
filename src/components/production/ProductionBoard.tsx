@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,10 +18,17 @@ import {
   Pause,
   Loader2,
   CheckCircle2,
+  Paintbrush,
+  Filter,
+  ArrowRight,
+  Lock,
+  Eye,
+  AlertOctagon,
+  Check,
+  Search,
 } from "lucide-react";
 import {
   useProductionOrders,
-  PRODUCTION_STATUSES,
   PRIORITY_META,
   isOrderLocked,
   type ProductionOrder,
@@ -38,6 +45,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -58,77 +66,155 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { ApiError } from "@/lib/api";
 
 interface Props {
   onOpen: (o: ProductionOrder) => void;
 }
 
-type BoardColumn = {
+export interface StageConfig {
   key: string;
   label: string;
+  shortLabel: string;
+  sectorName?: string;
   description: string;
-  statuses: ProductionStatus[];
   accent: string;
   dot: string;
   icon: React.ComponentType<{ className?: string }>;
-};
+  isTerminal?: boolean;
+  isPause?: boolean;
+}
 
-const BOARD_COLUMNS: BoardColumn[] = [
+export const WORKSHOP_STAGES: StageConfig[] = [
   {
-    key: "in_production",
-    label: "Em Produção",
-    description: "Serviço em andamento",
-    statuses: ["new_vehicle", "triage", "awaiting_validation", "in_production", "finished", "invoiced"],
-    accent:
-      "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30",
+    key: "awaiting_start",
+    label: "Aguardando Início",
+    shortLabel: "Aguardando",
+    description: "OS aprovada na fila de entrada",
+    accent: "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/30",
+    dot: "bg-slate-400",
+    icon: Clock3,
+  },
+  {
+    key: "diagnosis",
+    label: "Diagnóstico",
+    shortLabel: "Diagnóstico",
+    description: "Checklist e vistoria técnica de entrada",
+    accent: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-500/30",
+    dot: "bg-cyan-500",
+    icon: ClipboardList,
+  },
+  {
+    key: "disassembly",
+    label: "Desmontagem",
+    shortLabel: "Desmontagem",
+    sectorName: "Desmontagem",
+    description: "Desmontagem de peças, forrações e presilhas",
+    accent: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
+    dot: "bg-amber-500",
+    icon: Wrench,
+  },
+  {
+    key: "pdr",
+    label: "PDR / Martelinho",
+    shortLabel: "PDR",
+    sectorName: "PDR",
+    description: "Desamassamento artesanal sem repintura",
+    accent: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30",
+    dot: "bg-blue-500",
+    icon: ShieldCheck,
+  },
+  {
+    key: "mechanics",
+    label: "Mecânica",
+    shortLabel: "Mecânica",
+    sectorName: "Mecânica",
+    description: "Reparos mecânicos, suspensão e alinhamento",
+    accent: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30",
     dot: "bg-indigo-500",
     icon: Wrench,
   },
   {
-    key: "paused",
-    label: "Pausado",
-    description: "Interrompido temporariamente",
-    statuses: ["paused"],
-    accent:
-      "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
-    dot: "bg-amber-500",
-    icon: Pause,
+    key: "bodywork",
+    label: "Funilaria",
+    shortLabel: "Funilaria",
+    sectorName: "Funilaria",
+    description: "Chapeação, alinhamento de lataria e solda",
+    accent: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/30",
+    dot: "bg-orange-500",
+    icon: Wrench,
   },
   {
-    key: "delivered",
-    label: "Finalizado",
-    description: "Concluído e entregue",
-    statuses: ["delivered"],
-    accent:
-      "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
+    key: "paint_prep",
+    label: "Preparação",
+    shortLabel: "Preparação",
+    sectorName: "Pintura",
+    description: "Lixamento, primer, aparelhamento e isolamento",
+    accent: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/30",
+    dot: "bg-yellow-500",
+    icon: Wrench,
+  },
+  {
+    key: "paint",
+    label: "Pintura",
+    shortLabel: "Pintura",
+    sectorName: "Pintura",
+    description: "Cabine de pintura, base de cor e verniz",
+    accent: "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30",
+    dot: "bg-purple-500",
+    icon: Paintbrush,
+  },
+  {
+    key: "assembly",
+    label: "Montagem",
+    shortLabel: "Montagem",
+    sectorName: "Montagem",
+    description: "Reinstalação de peças, vãos e vidraçaria",
+    accent: "bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/30",
+    dot: "bg-teal-500",
+    icon: Wrench,
+  },
+  {
+    key: "inspection",
+    label: "Inspeção Final",
+    shortLabel: "Inspeção / CQ",
+    description: "Controle de qualidade, polimento e lavagem",
+    accent: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
     dot: "bg-emerald-500",
+    icon: CheckCircle2,
+  },
+  {
+    key: "paused",
+    label: "Pausado",
+    shortLabel: "Pausado",
+    description: "Interrompido por impedimento real",
+    accent: "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30",
+    dot: "bg-rose-500",
+    icon: Pause,
+    isPause: true,
+  },
+  {
+    key: "finished",
+    label: "Finalizado",
+    shortLabel: "Finalizado",
+    description: "Concluído e transferido para WEEKLOG",
+    accent: "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30",
+    dot: "bg-green-500",
     icon: ShieldCheck,
+    isTerminal: true,
   },
 ];
 
-const STATUS_LABEL: Record<ProductionStatus, string> = {
-  new_vehicle: "Em Produção",
-  triage: "Em Produção",
-  awaiting_validation: "Em Produção",
-  in_production: "Em Produção",
-  paused: "Pausado",
-  finished: "Em Produção",
-  invoiced: "Em Produção",
-  delivered: "Finalizado",
-};
+export const STAGE_MAP = new Map<string, StageConfig>(
+  WORKSHOP_STAGES.map((s) => [s.key, s])
+);
 
-function columnFor(status: ProductionStatus): BoardColumn | undefined {
-  return BOARD_COLUMNS.find((c) => c.statuses.includes(status));
-}
-
-function getValidTransitions(currentStatus: ProductionStatus): ProductionStatus[] {
-  if (isOrderLocked(currentStatus)) {
-    return [];
-  }
-  if (currentStatus === "paused") {
-    return ["in_production", "delivered"];
-  }
-  return ["paused", "delivered"];
+export function getEffectiveStage(o: ProductionOrder): string {
+  if (o.status === "paused") return "paused";
+  if (o.status === "delivered") return "finished";
+  const stage = o.currentStage || (o as any).current_stage;
+  if (stage && STAGE_MAP.has(stage)) return stage;
+  return "awaiting_start";
 }
 
 function formatCanonicalCurrency(
@@ -161,25 +247,55 @@ function formatDate(iso?: string | null): string {
   }
 }
 
+interface BlockedTaskItem {
+  id: string;
+  category: string;
+  carPartCode: string;
+  description: string;
+  status: string;
+  missingTechnician?: boolean;
+}
+
 export function ProductionBoard({ onOpen }: Props) {
-  const { data: ordersRaw = [], isLoading, update, remove, finalize } = useProductionOrders();
-  const orders = Array.isArray(ordersRaw)
-    ? (ordersRaw as ProductionOrder[]).filter((o: ProductionOrder) => !!o)
-    : [];
+  const {
+    data: ordersRaw = [],
+    isLoading,
+    update,
+    remove,
+    finalize,
+    updateStage,
+  } = useProductionOrders();
+
+  const orders = useMemo(() => {
+    return Array.isArray(ordersRaw)
+      ? (ordersRaw as ProductionOrder[]).filter((o: ProductionOrder) => !!o)
+      : [];
+  }, [ordersRaw]);
 
   const [activeDragOrder, setActiveDragOrder] = useState<ProductionOrder | null>(null);
+  const [sectorFilter, setSectorFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
+  // Modal de Pausa
   const [pauseModal, setPauseModal] = useState<{
     open: boolean;
     order: ProductionOrder | null;
-    targetStatus: ProductionStatus;
     reason: string;
-  }>({ open: false, order: null, targetStatus: "paused", reason: "" });
+  }>({ open: false, order: null, reason: "" });
 
+  // Modal de Finalização Normal
   const [finalizeModal, setFinalizeModal] = useState<{
     open: boolean;
     order: ProductionOrder | null;
   }>({ open: false, order: null });
+
+  // Modal de Bloqueio por Tarefas Incompletas (Regra Canônica)
+  const [blockedModal, setBlockedModal] = useState<{
+    open: boolean;
+    order: ProductionOrder | null;
+    pendingTasks: BlockedTaskItem[];
+    message: string;
+  }>({ open: false, order: null, pendingTasks: [], message: "" });
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -189,137 +305,134 @@ export function ProductionBoard({ onOpen }: Props) {
     })
   );
 
-  const grouped = useMemo(() => {
-    const m = new Map<string, ProductionOrder[]>();
-    BOARD_COLUMNS.forEach((c) => m.set(c.key, []));
-    orders.forEach((o) => {
-      if (!o || !o.status) return;
-      const col = columnFor(o.status);
-      if (!col) return;
-      const arr = m.get(col.key);
-      if (arr) arr.push(o);
+  // Filtragem de Busca
+  const filteredOrders = useMemo(() => {
+    if (!searchQuery.trim()) return orders;
+    const q = searchQuery.toLowerCase().trim();
+    return orders.filter((o) => {
+      const code = (o.code || "").toLowerCase();
+      const client = (o.client_name || o.clientName || "").toLowerCase();
+      const plate = (o.license_plate || o.licensePlate || o.vin || "").toLowerCase();
+      const brand = (o.brand || "").toLowerCase();
+      const model = (o.model || "").toLowerCase();
+      const devis = (o.budget_code || o.budgetCode || "").toLowerCase();
+      return (
+        code.includes(q) ||
+        client.includes(q) ||
+        plate.includes(q) ||
+        brand.includes(q) ||
+        model.includes(q) ||
+        devis.includes(q)
+      );
     });
-    return m;
-  }, [orders]);
+  }, [orders, searchQuery]);
 
-  const applyStatusChange = (id: string, status: ProductionStatus) => {
-    const order = orders.find((o) => o && o.id === id);
-    if (!order) return;
+  // Agrupamento por etapa
+  const groupedOrders = useMemo(() => {
+    const map = new Map<string, ProductionOrder[]>();
+    WORKSHOP_STAGES.forEach((s) => map.set(s.key, []));
+
+    filteredOrders.forEach((o) => {
+      const stageKey = getEffectiveStage(o);
+      const list = map.get(stageKey) || [];
+      list.push(o);
+      map.set(stageKey, list);
+    });
+    return map;
+  }, [filteredOrders]);
+
+  // Demanda Prevista para o setor filtrado
+  const forecastedOrdersForSector = useMemo(() => {
+    if (sectorFilter === "all") return [];
+    return filteredOrders.filter((o) => {
+      if (o.status === "delivered") return false;
+      const currentStageKey = getEffectiveStage(o);
+      if (currentStageKey === sectorFilter) return false;
+
+      const route = o.recommendedRoute || (o as any).recommended_route;
+      if (!Array.isArray(route)) return false;
+
+      const targetIdx = route.indexOf(sectorFilter);
+      const currentIdx = route.indexOf(currentStageKey);
+
+      // Está na rota e o setor é posterior à etapa atual
+      return targetIdx > -1 && (currentIdx === -1 || targetIdx > currentIdx);
+    });
+  }, [filteredOrders, sectorFilter]);
+
+  // Ação de transição para Finalizado
+  const handleFinalizeRequest = async (order: ProductionOrder) => {
+    try {
+      await finalize.mutateAsync(order.id);
+      setFinalizeModal({ open: false, order: null });
+      toast.success(`Ordem ${order.code} finalizada e integrada à WEEKLOG!`);
+    } catch (err: any) {
+      setFinalizeModal({ open: false, order: null });
+      const apiErr = err as ApiError;
+      if (
+        apiErr.status === 422 ||
+        apiErr.code === "UNRESOLVED_PRODUCTION_TASKS" ||
+        apiErr.details?.code === "UNRESOLVED_PRODUCTION_TASKS"
+      ) {
+        const tasks: BlockedTaskItem[] =
+          apiErr.details?.pendingTasks ||
+          apiErr.details?.unresolvedTasks ||
+          [];
+        setBlockedModal({
+          open: true,
+          order,
+          pendingTasks: tasks,
+          message:
+            apiErr.message ||
+            "Existem tarefas operacionais pendentes ou sem técnico responsável assinado.",
+        });
+      } else {
+        toast.error(err?.message || "Falha ao finalizar ordem de produção.");
+      }
+    }
+  };
+
+  // Movimentação de Etapa
+  const handleMoveStage = (order: ProductionOrder, targetStage: string) => {
     if (isOrderLocked(order.status)) {
-      toast.warning("Ordem finalizada não pode ter o status alterado.");
-      return;
-    }
-    if (order.status === status) return;
-
-    const allowed = getValidTransitions(order.status);
-    if (!allowed.includes(status)) {
-      toast.warning(`Transição não permitida a partir de ${STATUS_LABEL[order.status] || order.status}.`);
+      toast.warning("Ordem finalizada não pode ser movimentada no Kanban.");
       return;
     }
 
-    if (status === "delivered") {
+    const currentStageKey = getEffectiveStage(order);
+    if (currentStageKey === targetStage) return;
+
+    if (targetStage === "finished") {
       setFinalizeModal({ open: true, order });
       return;
     }
 
-    update.mutate(
-      { id, status },
-      {
-        onSuccess: () => {
-          toast.success(`Ordem ${order.code || id} atualizada com sucesso.`);
-        },
-        onError: (err: any) => {
-          toast.error(err?.message || "Falha ao atualizar status da ordem.");
-        },
-      }
-    );
-  };
-
-  const requestChangeStatus = (order: ProductionOrder, status: ProductionStatus) => {
-    if (isOrderLocked(order.status)) return;
-    if (status === "paused") {
-      setPauseModal({ open: true, order, targetStatus: "paused", reason: "" });
+    if (targetStage === "paused") {
+      setPauseModal({ open: true, order, reason: "" });
       return;
     }
-    applyStatusChange(order.id, status);
+
+    updateStage.mutate({ id: order.id, stage: targetStage });
   };
 
   const confirmPause = () => {
-    const { order, reason, targetStatus } = pauseModal;
+    const { order, reason } = pauseModal;
     if (!order) return;
     if (!reason.trim()) {
       toast.error("Motivo da pausa é obrigatório.");
       return;
     }
-    const timestamp = new Date().toISOString();
-    const currentInternal = order.notes ?? "";
-    const append =
-      `\n\n==== PAUSA ====\nData: ${timestamp}\nMotivo: ${reason.trim()}\n`;
-    const notes = currentInternal.trim()
-      ? currentInternal + append
-      : append.trimStart();
-    update.mutate(
-      { id: order.id, status: targetStatus, notes },
+    updateStage.mutate(
+      { id: order.id, stage: "paused", reason: reason.trim() },
       {
         onSuccess: () => {
-          toast.success(`OS ${order.code || order.id?.slice(0, 8)} pausada com sucesso.`);
-          setPauseModal({ open: false, order: null, targetStatus: "paused", reason: "" });
+          setPauseModal({ open: false, order: null, reason: "" });
         },
-        onError: (err: any) => {
-          toast.error(err?.message || "Falha ao pausar a ordem.");
-        },
-      },
+      }
     );
   };
 
-  const confirmFinalizeOrder = () => {
-    const { order } = finalizeModal;
-    if (!order) return;
-    finalize.mutate(order.id, {
-      onSuccess: () => {
-        setFinalizeModal({ open: false, order: null });
-      },
-    });
-  };
-
-  const returnToBudget = async () => {
-    const { order } = pauseModal;
-    if (!order?.id) return;
-    if (!window.confirm(
-      "Retornar esta ordem para Orçamentos como Rascunho?\n\n• A ordem de produção será removida do Kanban.\n• O orçamento vinculado voltará a ser editável.\n• Uma nova assinatura/confirmação será necessária.",
-    )) return;
-    try {
-      window.dispatchEvent(
-        new CustomEvent("production:return-to-budget", {
-          detail: { productionOrderId: order.id },
-        }),
-      );
-      await remove.mutateAsync(order.id);
-      toast.success("Ordem removida da Produção · Orçamento retornado para Rascunho.");
-    } catch (e: any) {
-      toast.error(e?.message || "Falha ao retornar ao orçamento.");
-    } finally {
-      setPauseModal({ open: false, order: null, targetStatus: "paused", reason: "" });
-    }
-  };
-
-  const changeReqRef = useRef<
-    (order: ProductionOrder, status: ProductionStatus) => void
-  >(requestChangeStatus);
-  changeReqRef.current = requestChangeStatus;
-  useEffect(() => {
-    const handler = (ev: Event) => {
-      const ce = ev as CustomEvent<{ order: ProductionOrder; status: ProductionStatus }>;
-      const ord = ce.detail?.order;
-      const st = ce.detail?.status;
-      if (!ord || !st) return;
-      changeReqRef.current?.(ord, st);
-    };
-    window.addEventListener("production:order-change-status-requested", handler);
-    return () =>
-      window.removeEventListener("production:order-change-status-requested", handler);
-  }, []);
-
+  // DND Handlers
   const handleDragStart = (event: DragStartEvent) => {
     const activeId = String(event.active.id);
     const order = orders.find((o) => o && o.id === activeId);
@@ -334,57 +447,29 @@ export function ProductionBoard({ onOpen }: Props) {
     if (!over) return;
 
     const activeId = String(active.id);
-    const targetColumnKey = String(over.id);
+    const targetStageKey = String(over.id);
 
     const order = orders.find((o) => o && o.id === activeId);
     if (!order || isOrderLocked(order.status)) return;
 
-    let target: ProductionStatus | null = null;
-    if (targetColumnKey === "in_production") {
-      if (order.status === "paused") {
-        target = "in_production";
-      } else {
-        return;
-      }
-    } else if (targetColumnKey === "paused") {
-      if (order.status !== "paused") {
-        target = "paused";
-      }
-    } else if (targetColumnKey === "delivered") {
-      if (order.status !== "delivered") {
-        target = "delivered";
-      }
-    }
-
-    if (target) {
-      const allowed = getValidTransitions(order.status);
-      if (!allowed.includes(target)) {
-        toast.warning(`Transição direta não permitida para esta fase.`);
-        return;
-      }
-      requestChangeStatus(order, target);
-    }
+    handleMoveStage(order, targetStageKey);
   };
 
   if (isLoading) {
     return (
-      <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory lg:grid lg:grid-cols-3 lg:gap-6 lg:overflow-visible">
-        {BOARD_COLUMNS.map((col) => (
+      <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory">
+        {WORKSHOP_STAGES.slice(0, 5).map((col) => (
           <div
             key={col.key}
-            className="min-w-[290px] max-w-[340px] flex-1 shrink-0 snap-start rounded-xl bg-card border border-border/70 p-3 lg:min-w-0 lg:max-w-none min-h-[220px]"
+            className="min-w-[280px] max-w-[320px] shrink-0 rounded-xl bg-card border border-border/70 p-3 min-h-[300px]"
           >
             <div className="mb-3 flex items-center justify-between py-2">
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-2.5 w-2.5 rounded-full" />
-                <Skeleton className="h-4 w-28" />
-              </div>
+              <Skeleton className="h-4 w-28" />
               <Skeleton className="h-5 w-8 rounded-md" />
             </div>
             <div className="space-y-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-40 w-full rounded-lg" />
-              ))}
+              <Skeleton className="h-32 w-full rounded-lg" />
+              <Skeleton className="h-32 w-full rounded-lg" />
             </div>
           </div>
         ))}
@@ -393,22 +478,134 @@ export function ProductionBoard({ onOpen }: Props) {
   }
 
   return (
-    <>
+    <div className="space-y-4">
+      {/* Barra de Ferramentas / Filtros do Kanban */}
+      <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[200px] sm:w-64">
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por placa, OS, chassi..."
+              className="h-8.5 pl-8 text-xs bg-background"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+            <Button
+              size="sm"
+              variant={sectorFilter === "all" ? "default" : "outline"}
+              className="h-8 text-xs px-2.5"
+              onClick={() => setSectorFilter("all")}
+            >
+              Todos os Setores ({filteredOrders.length})
+            </Button>
+            {WORKSHOP_STAGES.filter((s) => !s.isTerminal).map((st) => {
+              const count = (groupedOrders.get(st.key) || []).length;
+              return (
+                <Button
+                  key={st.key}
+                  size="sm"
+                  variant={sectorFilter === st.key ? "default" : "outline"}
+                  className="h-8 text-xs px-2.5 gap-1 shrink-0"
+                  onClick={() => setSectorFilter(st.key)}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
+                  {st.shortLabel} ({count})
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-auto text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-blue-500" /> Em fluxo:{" "}
+            <strong className="text-foreground">
+              {filteredOrders.filter((o) => o.status === "in_production").length}
+            </strong>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-rose-500" /> Pausados:{" "}
+            <strong className="text-foreground">
+              {filteredOrders.filter((o) => o.status === "paused").length}
+            </strong>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" /> Finalizados:{" "}
+            <strong className="text-foreground">
+              {filteredOrders.filter((o) => o.status === "delivered").length}
+            </strong>
+          </span>
+        </div>
+      </div>
+
+      {/* Seção de Demanda Prevista (quando filtrado por setor) */}
+      {sectorFilter !== "all" && forecastedOrdersForSector.length > 0 && (
+        <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Eye className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-300">
+                Demanda Prevista para este Setor ({forecastedOrdersForSector.length} veículo{forecastedOrdersForSector.length > 1 ? "s" : ""} na fila anterior)
+              </h4>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Veículos com serviços aprovados para este setor que estão atualmente em fases preliminares
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {forecastedOrdersForSector.map((o) => {
+              const currentSt = STAGE_MAP.get(getEffectiveStage(o));
+              return (
+                <Card
+                  key={`forecast-${o.id}`}
+                  onClick={() => onOpen(o)}
+                  className="p-2.5 bg-card/80 border-blue-500/20 hover:border-blue-500/50 cursor-pointer text-xs space-y-1.5 transition-all shadow-2xs"
+                >
+                  <div className="flex items-center justify-between font-semibold">
+                    <span>OS {o.code}</span>
+                    <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-600 border-blue-500/30">
+                      Na Rota
+                    </Badge>
+                  </div>
+                  <div className="truncate text-muted-foreground">
+                    {[o.brand, o.model].filter(Boolean).join(" ") || "Veículo"} · {o.license_plate || o.licensePlate || "—"}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px] pt-1 border-t border-border/50">
+                    <span className="text-muted-foreground">Atualmente em:</span>
+                    <Badge variant="secondary" className="text-[10px] gap-1 px-1.5 py-0">
+                      <span className={`h-1.5 w-1.5 rounded-full ${currentSt?.dot ?? "bg-slate-400"}`} />
+                      {currentSt?.shortLabel ?? "Etapa"}
+                    </Badge>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Quadro Kanban de Etapas Operacionais */}
       <DndContext
         sensors={sensors}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory lg:grid lg:grid-cols-3 lg:gap-6 lg:overflow-visible">
-          {BOARD_COLUMNS.map((col) => {
-            const items = grouped.get(col.key) ?? [];
+        <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory">
+          {WORKSHOP_STAGES.filter(
+            (s) => sectorFilter === "all" || sectorFilter === s.key || s.isTerminal
+          ).map((stage) => {
+            const items = groupedOrders.get(stage.key) ?? [];
             return (
-              <DroppableColumn
-                key={col.key}
-                col={col}
+              <DroppableStageColumn
+                key={stage.key}
+                stage={stage}
                 items={items}
                 onOpen={onOpen}
-                onChangeStatus={requestChangeStatus}
+                onMoveStage={handleMoveStage}
               />
             );
           })}
@@ -416,11 +613,11 @@ export function ProductionBoard({ onOpen }: Props) {
 
         <DragOverlay dropAnimation={{ duration: 180, easing: "cubic-bezier(0.18, 0.67, 0.6, 1.22)" }}>
           {activeDragOrder ? (
-            <div className="w-[310px] transform rotate-1 scale-[1.02] shadow-2xl ring-2 ring-primary/60 rounded-xl cursor-grabbing pointer-events-none opacity-95">
-              <OrderCardContent
+            <div className="w-[300px] transform rotate-1 scale-[1.02] shadow-2xl ring-2 ring-primary/60 rounded-xl cursor-grabbing pointer-events-none opacity-95">
+              <StageOrderCardContent
                 order={activeDragOrder}
                 onOpen={() => {}}
-                onChangeStatus={() => {}}
+                onMoveStage={() => {}}
                 isOverlay
               />
             </div>
@@ -432,70 +629,54 @@ export function ProductionBoard({ onOpen }: Props) {
       <Dialog
         open={pauseModal.open}
         onOpenChange={(o) => {
-          if (!o) setPauseModal({ open: false, order: null, targetStatus: "paused", reason: "" });
+          if (!o) setPauseModal({ open: false, order: null, reason: "" });
         }}
       >
-        <DialogContent className="w-[95vw] max-w-lg sm:max-w-lg">
+        <DialogContent className="w-[95vw] max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Pause className="h-5 w-5 text-amber-600" /> Pausar Ordem de Produção
+              <Pause className="h-5 w-5 text-rose-600" /> Pausar Ordem de Produção
             </DialogTitle>
             <DialogDescription>
-              {pauseModal.order
-                ? `OS ${pauseModal.order.code || pauseModal.order.id?.slice(0, 8).toUpperCase()}`
-                : ""}{" "}
-              — informe o motivo da pausa para continuar.
+              {pauseModal.order ? `OS ${pauseModal.order.code}` : ""} — informe o motivo do impedimento operacional.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-1.5">
               <Label htmlFor="pause-reason">
-                Motivo da pausa <span className="text-destructive">*</span>
+                Motivo do impedimento <span className="text-destructive">*</span>
               </Label>
               <Textarea
                 id="pause-reason"
                 autoFocus
                 rows={4}
-                placeholder="Ex.: Aguardando peça de reposição, pendente validação do cliente, inspeção complementar…"
+                placeholder="Ex.: Aguardando chegada de peças de reposição da concessionária, pendente autorização complementar..."
                 value={pauseModal.reason}
                 onChange={(e) =>
                   setPauseModal((m) => ({ ...m, reason: e.target.value }))
                 }
               />
               <p className="text-[11px] text-muted-foreground">
-                O motivo será salvo nas observações internas da ordem.
+                O histórico do percurso será preservado e a OS poderá ser retomada no mesmo setor.
               </p>
             </div>
           </div>
-          <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between sm:gap-2">
+          <DialogFooter className="flex justify-end gap-2">
             <Button
-              type="button"
               variant="outline"
               size="sm"
-              onClick={returnToBudget}
-              className="text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+              onClick={() => setPauseModal({ open: false, order: null, reason: "" })}
             >
-              <Undo2 className="h-3.5 w-3.5 mr-1" /> Retornar a Orçamento (Rascunho)
+              Cancelar
             </Button>
-            <div className="flex gap-2 justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setPauseModal({ open: false, order: null, targetStatus: "paused", reason: "" })
-                }
-              >
-                Cancelar
-              </Button>
-              <Button
-                size="sm"
-                className="bg-amber-600 hover:bg-amber-700 text-white"
-                onClick={confirmPause}
-                disabled={!pauseModal.reason.trim() || update.isPending}
-              >
-                {update.isPending ? "Salvando…" : "Confirmar Pausa"}
-              </Button>
-            </div>
+            <Button
+              size="sm"
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+              onClick={confirmPause}
+              disabled={!pauseModal.reason.trim() || updateStage.isPending}
+            >
+              {updateStage.isPending ? "Salvando..." : "Confirmar Pausa"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -507,20 +688,20 @@ export function ProductionBoard({ onOpen }: Props) {
           if (!o && !finalize.isPending) setFinalizeModal({ open: false, order: null });
         }}
       >
-        <DialogContent className="w-[95vw] max-w-md sm:max-w-md">
+        <DialogContent className="w-[95vw] max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-              <CheckCircle2 className="h-5 w-5" /> Finalizar e Entregar Ordem
+              <CheckCircle2 className="h-5 w-5" /> Finalizar e Transferir para WEEKLOG
             </DialogTitle>
             <DialogDescription>
-              Esta ação encerra a produção operacional da ordem e gera o registro comercial oficial no WEEKLOG.
+              Esta ação valida todas as tarefas operacionais e gera o registro comercial auditável no WEEKLOG.
             </DialogDescription>
           </DialogHeader>
           {finalizeModal.order ? (
             <div className="rounded-lg border border-border/70 bg-muted/40 p-3 space-y-2 text-xs">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Código OS:</span>
-                <span className="font-semibold">{finalizeModal.order.code || finalizeModal.order.id}</span>
+                <span className="font-semibold">{finalizeModal.order.code}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Cliente:</span>
@@ -535,13 +716,13 @@ export function ProductionBoard({ onOpen }: Props) {
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                   {formatCanonicalCurrency(
                     finalizeModal.order.total ?? finalizeModal.order.total_amount ?? finalizeModal.order.recognized_total,
-                    finalizeModal.order.currency || finalizeModal.order.currency_code || finalizeModal.order.currencyCode || "EUR"
+                    finalizeModal.order.currency || finalizeModal.order.currency_code || "EUR"
                   )}
                 </span>
               </div>
             </div>
           ) : null}
-          <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2">
+          <DialogFooter className="flex justify-end gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -554,11 +735,11 @@ export function ProductionBoard({ onOpen }: Props) {
               size="sm"
               className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
               disabled={finalize.isPending}
-              onClick={confirmFinalizeOrder}
+              onClick={() => finalizeModal.order && handleFinalizeRequest(finalizeModal.order)}
             >
               {finalize.isPending ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Finalizando…
+                  <Loader2 className="h-4 w-4 animate-spin" /> Validando e Finalizando...
                 </>
               ) : (
                 <>
@@ -569,52 +750,136 @@ export function ProductionBoard({ onOpen }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+
+      {/* Modal de Bloqueio por Validação Estrita (INV-01 a INV-06) */}
+      <Dialog
+        open={blockedModal.open}
+        onOpenChange={(o) => {
+          if (!o) setBlockedModal({ open: false, order: null, pendingTasks: [], message: "" });
+        }}
+      >
+        <DialogContent className="w-[95vw] max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertOctagon className="h-5 w-5" /> Finalização Bloqueada — Tarefas Pendentes
+            </DialogTitle>
+            <DialogDescription>
+              {blockedModal.order ? `OS ${blockedModal.order.code}` : ""} — Não é possível enviar a ordem à WEEKLOG com pendências operacionais.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2 text-xs">
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-destructive">
+              <p className="font-semibold mb-1">
+                Regra Canônica de Integridade Operacional (INV-01 a INV-06):
+              </p>
+              <p className="leading-relaxed">
+                Todas as tarefas operacionais devem estar marcadas como concluídas e possuir a assinatura do técnico executor antes do envio à WEEKLOG. Baixas fictícias automáticas não são permitidas.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <span className="font-semibold text-foreground">
+                Pendências encontradas ({blockedModal.pendingTasks.length}):
+              </span>
+              <div className="max-h-56 overflow-y-auto space-y-1.5 rounded-lg border p-2 bg-muted/20">
+                {blockedModal.pendingTasks.map((t, idx) => (
+                  <div
+                    key={t.id || idx}
+                    className="flex items-center justify-between p-2 rounded-md bg-background border text-xs gap-2"
+                  >
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-medium truncate">
+                        {t.carPartCode || "Peça"} — {t.description || "Serviço"}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground uppercase">
+                        Categoria: {t.category || "Geral"}
+                      </span>
+                    </div>
+                    <div>
+                      {t.missingTechnician ? (
+                        <Badge variant="outline" className="text-amber-600 border-amber-500/30 bg-amber-500/10 text-[10px]">
+                          Sem Técnico Atribuído
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-destructive border-destructive/30 bg-destructive/10 text-[10px]">
+                          {t.status === "in_progress" ? "Em Andamento" : "Pendente"}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex justify-between gap-2 sm:justify-between">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBlockedModal({ open: false, order: null, pendingTasks: [], message: "" })}
+            >
+              Fechar
+            </Button>
+            {blockedModal.order && (
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  const ord = blockedModal.order;
+                  setBlockedModal({ open: false, order: null, pendingTasks: [], message: "" });
+                  if (ord) onOpen(ord);
+                }}
+              >
+                <Wrench className="h-3.5 w-3.5" /> Abrir Ficha Técnica da OS
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
-function DroppableColumn({
-  col,
+function DroppableStageColumn({
+  stage,
   items,
   onOpen,
-  onChangeStatus,
+  onMoveStage,
 }: {
-  col: BoardColumn;
+  stage: StageConfig;
   items: ProductionOrder[];
   onOpen: (o: ProductionOrder) => void;
-  onChangeStatus: (order: ProductionOrder, next: ProductionStatus) => void;
+  onMoveStage: (order: ProductionOrder, stageKey: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
-    id: col.key,
+    id: stage.key,
   });
-  const Icon = col.icon;
+  const Icon = stage.icon;
 
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-w-[290px] max-w-[340px] flex-1 shrink-0 snap-start flex-col rounded-xl border p-3 transition-all duration-200 lg:min-w-0 lg:max-w-none ${
+      className={`flex min-w-[290px] max-w-[340px] shrink-0 snap-start flex-col rounded-xl border p-3 transition-all duration-200 ${
         isOver
           ? "border-primary ring-2 ring-primary/50 bg-primary/5 shadow-md"
           : "border-border/70 bg-card/60 dark:bg-slate-900/40"
       }`}
     >
-      {/* Header com fundo 100% opaco para eliminar sobreposição de texto de cards */}
       <div className="sticky top-0 z-20 mb-3 flex items-start justify-between gap-2 rounded-lg bg-card border border-border/80 px-3 py-2.5 shadow-xs">
         <div className="flex min-w-0 items-center gap-2">
-          <span
-            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${col.accent}`}
-          >
+          <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${stage.accent}`}>
             <Icon className="h-4 w-4" />
           </span>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 shrink-0 rounded-full ${col.dot}`} />
+              <span className={`h-2 w-2 shrink-0 rounded-full ${stage.dot}`} />
               <h3 className="text-sm font-semibold leading-none tracking-tight">
-                {col.label}
+                {stage.label}
               </h3>
             </div>
             <p className="mt-1 truncate text-[10px] text-muted-foreground">
-              {col.description}
+              {stage.description}
             </p>
           </div>
         </div>
@@ -625,16 +890,16 @@ function DroppableColumn({
 
       <div className="space-y-3 overflow-y-auto max-h-[calc(100vh-270px)] pr-1 min-h-[160px]">
         {items.map((o) => (
-          <DraggableOrderCard
+          <DraggableStageOrderCard
             key={o.id}
             order={o}
             onOpen={onOpen}
-            onChangeStatus={(next) => onChangeStatus(o, next)}
+            onMoveStage={(target) => onMoveStage(o, target)}
           />
         ))}
         {items.length === 0 && (
           <div className="py-12 text-center text-xs text-muted-foreground/70 border-2 border-dashed border-border/40 rounded-lg">
-            Nenhuma ordem nesta fase
+            Nenhum veículo nesta etapa
           </div>
         )}
       </div>
@@ -642,14 +907,14 @@ function DroppableColumn({
   );
 }
 
-function DraggableOrderCard({
+function DraggableStageOrderCard({
   order,
   onOpen,
-  onChangeStatus,
+  onMoveStage,
 }: {
   order: ProductionOrder;
   onOpen: (o: ProductionOrder) => void;
-  onChangeStatus: (next: ProductionStatus) => void;
+  onMoveStage: (target: string) => void;
 }) {
   const locked = isOrderLocked(order.status);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -672,36 +937,34 @@ function DraggableOrderCard({
       {...attributes}
       {...listeners}
     >
-      <OrderCardContent
+      <StageOrderCardContent
         order={order}
         onOpen={onOpen}
-        onChangeStatus={onChangeStatus}
+        onMoveStage={onMoveStage}
         isDragging={isDragging}
       />
     </div>
   );
 }
 
-function OrderCardContent({
+function StageOrderCardContent({
   order,
   onOpen,
-  onChangeStatus,
+  onMoveStage,
   isDragging,
   isOverlay,
 }: {
   order: ProductionOrder;
   onOpen: (o: ProductionOrder) => void;
-  onChangeStatus: (next: ProductionStatus) => void;
+  onMoveStage: (target: string) => void;
   isDragging?: boolean;
   isOverlay?: boolean;
 }) {
-  const safePriority: (typeof PRIORITY_META)[ProductionPriority] =
-    PRIORITY_META[order.priority as ProductionPriority] ?? PRIORITY_META.normal;
-
-  const col = columnFor(order.status);
+  const safePriority = PRIORITY_META[order.priority as ProductionPriority] ?? PRIORITY_META.normal;
+  const currentStageKey = getEffectiveStage(order);
+  const currentStageMeta = STAGE_MAP.get(currentStageKey);
   const locked = isOrderLocked(order.status);
 
-  // Campos Canônicos
   const clientName = order.client_name || order.clientName || "—";
   const vehicle = [order.brand, order.model].filter(Boolean).join(" ") || "—";
   const licensePlate = order.license_plate || order.licensePlate || order.vin || "—";
@@ -711,25 +974,25 @@ function OrderCardContent({
   const displayNumber = budgetCode ? `Devis ${budgetCode}` : `OS ${order.code || "—"}`;
 
   const rawTotal = order.total ?? order.total_amount ?? order.recognized_total ?? null;
-  const currency = order.currency || order.currency_code || order.currencyCode || "EUR";
+  const currency = order.currency || order.currency_code || "EUR";
   const formattedTotal = formatCanonicalCurrency(rawTotal, currency);
 
   let tipoServico = "Serviço Operacional";
   if (Array.isArray(order.performed_services) && order.performed_services.length > 0) {
-    tipoServico = `${order.performed_services.length} serviço(s) registrado(s)`;
+    tipoServico = `${order.performed_services.length} serviço(s) na OS`;
   } else if (order.insurer) {
     tipoServico = order.insurer;
-  } else if (budgetCode || order.budgetId || order.budget_id) {
+  } else if (budgetCode) {
     tipoServico = "Orçamento Aprovado";
   }
 
   const dataISO = order.started_at || order.due_at || order.created_at;
-  const isOverdue =
-    !!order.due_at &&
-    new Date(order.due_at).getTime() < Date.now() &&
-    !locked;
+  const isOverdue = !!order.due_at && new Date(order.due_at).getTime() < Date.now() && !locked;
 
-  const validTransitions = getValidTransitions(order.status);
+  // Roteiro Recomendado
+  const route: string[] = order.recommendedRoute || (order as any).recommended_route || [];
+  const currentIdx = route.indexOf(currentStageKey);
+  const nextRecommendedStage = currentIdx > -1 && currentIdx + 1 < route.length ? route[currentIdx + 1] : null;
 
   return (
     <Card
@@ -744,6 +1007,7 @@ function OrderCardContent({
           : "cursor-grab active:cursor-grabbing hover:border-primary/50 hover:shadow-md bg-card"
       }`}
     >
+      {/* Cabeçalho do Card */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -760,22 +1024,64 @@ function OrderCardContent({
         </div>
         <div className="flex flex-col items-end gap-1.5">
           {order.priority && order.priority !== "normal" ? (
-            <Badge
-              variant="outline"
-              className={`text-[10px] px-1.5 py-0 ${safePriority.tone}`}
-            >
+            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${safePriority.tone}`}>
               {safePriority.label}
             </Badge>
           ) : null}
           <Badge
             variant="outline"
-            className={`text-[10px] px-1.5 py-0 ${col?.accent ?? "bg-muted text-muted-foreground"}`}
+            className={`text-[10px] px-1.5 py-0 ${currentStageMeta?.accent ?? "bg-muted text-muted-foreground"}`}
           >
-            {STATUS_LABEL[order.status] ?? order.status}
+            {currentStageMeta?.shortLabel ?? currentStageKey}
           </Badge>
         </div>
       </div>
 
+      {/* Rota Recomendada do Veículo */}
+      {route.length > 0 && (
+        <div className="rounded-md bg-muted/40 p-1.5 border border-border/40 text-[10px] space-y-1">
+          <div className="flex items-center justify-between text-muted-foreground font-medium">
+            <span>Roteiro do Veículo:</span>
+            {nextRecommendedStage && (
+              <span className="text-primary font-semibold">
+                Próximo: {STAGE_MAP.get(nextRecommendedStage)?.shortLabel || nextRecommendedStage}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 overflow-x-auto py-0.5 no-scrollbar">
+            {route.map((stKey, idx) => {
+              const st = STAGE_MAP.get(stKey);
+              const isCurrent = stKey === currentStageKey;
+              const isPast = currentIdx > -1 && idx < currentIdx;
+              return (
+                <React.Fragment key={stKey}>
+                  {idx > 0 && <span className="text-muted-foreground/40 text-[9px]">→</span>}
+                  <span
+                    className={`shrink-0 rounded px-1 py-0.2 text-[9px] font-medium ${
+                      isCurrent
+                        ? "bg-primary text-primary-foreground font-bold"
+                        : isPast
+                        ? "text-muted-foreground/70 line-through"
+                        : "text-muted-foreground bg-muted/80"
+                    }`}
+                  >
+                    {st?.shortLabel || stKey}
+                  </span>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Informações se Pausado */}
+      {order.status === "paused" && (order.pausedReason || (order as any).paused_reason) && (
+        <div className="rounded-md bg-rose-500/10 border border-rose-500/20 p-1.5 text-[10px] text-rose-700 dark:text-rose-400">
+          <strong>Impedimento:</strong> {order.pausedReason || (order as any).paused_reason}
+        </div>
+      )}
+
+      {/* Dados do Veículo e Cliente */}
       <div className="space-y-1.5 text-[11px] leading-snug text-foreground/90">
         <InfoLine icon={User} label="Cliente" value={clientName} />
         <InfoLine
@@ -793,28 +1099,21 @@ function OrderCardContent({
           label="Serviço"
           value={tipoServico}
         />
-        {operationalSite ? (
-          <InfoLine
-            icon={ClipboardList}
-            label="Site"
-            value={operationalSite}
-          />
-        ) : null}
+        {operationalSite && (
+          <InfoLine icon={ClipboardList} label="Site" value={operationalSite} />
+        )}
         <InfoLine
           icon={Coins}
-          label="Valor total"
+          label="Valor"
           value={formattedTotal}
           valueClassName={rawTotal != null ? "text-emerald-700 dark:text-emerald-400 font-semibold" : undefined}
         />
         <InfoLine
           icon={isOverdue ? AlertTriangle : CalendarDays}
-          label={isOverdue ? "Atrasado desde" : "Data"}
+          label={isOverdue ? "Atrasado" : "Data"}
           value={
             isOverdue && order.due_at
-              ? formatDistanceToNow(new Date(order.due_at), {
-                  addSuffix: true,
-                  locale: ptBR,
-                })
+              ? formatDistanceToNow(new Date(order.due_at), { addSuffix: true, locale: ptBR })
               : formatDate(dataISO)
           }
           valueClassName={isOverdue ? "font-medium text-destructive" : undefined}
@@ -822,64 +1121,65 @@ function OrderCardContent({
         />
       </div>
 
+      {/* Rodapé e Ações */}
       <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2">
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          <Clock3 className="h-3 w-3" />
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground truncate">
+          <Clock3 className="h-3 w-3 shrink-0" />
           <span className="truncate">
-            Atualizado{" "}
             {order.updated_at
-              ? formatDistanceToNow(new Date(order.updated_at), {
-                  addSuffix: true,
-                  locale: ptBR,
-                })
+              ? formatDistanceToNow(new Date(order.updated_at), { addSuffix: true, locale: ptBR })
               : "—"}
           </span>
         </div>
+
         <div
-          onClick={(e) => {
-            e.stopPropagation();
-          }}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-          }}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         >
-          {validTransitions.length > 0 ? (
+          {locked ? (
+            <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30 gap-1">
+              <Lock className="h-2.5 w-2.5" /> Bloqueado
+            </Badge>
+          ) : (
             <Popover>
               <PopoverTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={locked}
-                  className="h-7 gap-1 px-2 text-[11px]"
-                >
-                  Mover
+                <Button size="sm" variant="secondary" className="h-7 gap-1 px-2 text-[11px]">
+                  Mover Etapa
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-56 p-2 z-50">
                 <div className="space-y-1.5 text-xs">
                   <p className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Ação de Status
+                    Avançar no Fluxo
                   </p>
                   <div className="flex flex-col gap-1">
-                    {validTransitions.map((target) => (
+                    {/* Próxima etapa recomendada destacada */}
+                    {nextRecommendedStage && nextRecommendedStage !== currentStageKey && (
                       <Button
-                        key={target}
+                        size="sm"
+                        variant="default"
+                        className="justify-start h-8 px-2 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+                        onClick={() => onMoveStage(nextRecommendedStage)}
+                      >
+                        <ArrowRight className="h-3 w-3 mr-1" />
+                        Avançar: {STAGE_MAP.get(nextRecommendedStage)?.shortLabel}
+                      </Button>
+                    )}
+
+                    {/* Demais etapas */}
+                    {WORKSHOP_STAGES.filter(
+                      (s) => s.key !== currentStageKey && s.key !== nextRecommendedStage
+                    ).map((st) => (
+                      <Button
+                        key={st.key}
                         size="sm"
                         variant="ghost"
-                        className="justify-start h-8 px-2 text-xs"
-                        onClick={() => onChangeStatus(target)}
+                        className="justify-start h-7 px-2 text-xs"
+                        onClick={() => onMoveStage(st.key)}
                       >
                         <span className="flex items-center gap-2">
-                          <span
-                            className={`h-2 w-2 rounded-full ${
-                              columnFor(target)?.dot ?? "bg-slate-400"
-                            }`}
-                          />
-                          {target === "paused"
-                            ? "Pausar Ordem"
-                            : target === "in_production"
-                            ? "Retomar Produção"
-                            : "Finalizar Ordem"}
+                          <span className={`h-2 w-2 rounded-full ${st.dot}`} />
+                          {st.label}
                         </span>
                       </Button>
                     ))}
@@ -887,10 +1187,6 @@ function OrderCardContent({
                 </div>
               </PopoverContent>
             </Popover>
-          ) : (
-            <Badge variant="outline" className="text-[10px] text-muted-foreground">
-              Travado
-            </Badge>
           )}
         </div>
       </div>
@@ -913,15 +1209,11 @@ function InfoLine({
 }) {
   return (
     <div className="flex items-start gap-1.5">
-      <Icon
-        className={`mt-[2px] h-3 w-3 shrink-0 text-muted-foreground/70 ${iconClassName ?? ""}`}
-      />
+      <Icon className={`mt-[2px] h-3 w-3 shrink-0 text-muted-foreground/70 ${iconClassName ?? ""}`} />
       <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
-        {label}
+        {label}:
       </span>
-      <span
-        className={`truncate text-foreground/90 ${valueClassName ?? "font-medium"}`}
-      >
+      <span className={`truncate text-foreground/90 ${valueClassName ?? "font-medium"}`}>
         {value}
       </span>
     </div>

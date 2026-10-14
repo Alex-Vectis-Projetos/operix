@@ -8,6 +8,8 @@ import {
   updateProductionOrder,
   deleteProductionOrder,
   finalizeProductionOrder,
+  updateProductionOrderStage,
+  type UpdateProductionOrderStagePayload,
   type FinalizeProductionOrderResult,
 } from "@/lib/apiProductionOrders";
 
@@ -81,6 +83,16 @@ export interface ProductionOrder {
   createdAt?: string;
   updated_at: string;
   updatedAt?: string;
+  current_stage?: string | null;
+  currentStage?: string | null;
+  recommended_route?: string[] | null;
+  recommendedRoute?: string[] | null;
+  stage_history?: Array<{ from: string | null; to: string; movedAt: string; movedBy?: string; reason?: string | null }> | null;
+  stageHistory?: Array<{ from: string | null; to: string; movedAt: string; movedBy?: string; reason?: string | null }> | null;
+  paused_reason?: string | null;
+  pausedReason?: string | null;
+  paused_previous_stage?: string | null;
+  pausedPreviousStage?: string | null;
 }
 
 export const PRODUCTION_STATUSES: { value: ProductionStatus; label: string; color: string }[] = [
@@ -194,7 +206,19 @@ export function useProductionOrders(filters?: { technicianOnly?: boolean; status
     },
   });
 
-  return { ...query, create, update, remove, finalize };
+  const updateStage = useMutation({
+    mutationFn: ({ id, stage, reason }: { id: string; stage: string; reason?: string }) =>
+      updateProductionOrderStage(id, { stage, reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["production_orders"] });
+      qc.invalidateQueries({ queryKey: ["production_kpis"] });
+    },
+    onError: (e: any) => {
+      toast.error(e?.message || "Falha ao alterar etapa da ordem.");
+    },
+  });
+
+  return { ...query, create, update, remove, finalize, updateStage };
 }
 
 export { finalizeProductionOrder };

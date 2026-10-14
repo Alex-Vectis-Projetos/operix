@@ -89,3 +89,19 @@ export function requestBudgetCorrection(
   });
 }
 
+export interface UpdateProductionOrderStagePayload {
+  stage: string;
+  reason?: string;
+}
+
+export function updateProductionOrderStage(
+  id: string,
+  payload: UpdateProductionOrderStagePayload,
+): Promise<ProductionOrder> {
+  return apiRequest<ProductionOrder>(`/production-orders/${id}/stage`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    timeoutMs: 12000,
+  });
+}

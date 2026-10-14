@@ -345,6 +345,40 @@ export async function finalizeProductionOrder(
           );
         }
 
+        // Step 1.5b: Validate operational task completion & technician attribution (INV-01, INV-02)
+        const tasks = await tx.productionTask.findMany({
+          where: { productionOrderId: currentPo.id, workspaceId: ctx.activeWorkspaceId },
+        });
+
+        if (tasks.length > 0) {
+          const unresolved = tasks.filter((t) => t.status !== "completed" && t.status !== "cancelled" && t.status !== "blocked");
+          const missingTech = tasks.filter((t) => t.status === "completed" && !t.primaryTechnicianId);
+
+          if (unresolved.length > 0 || missingTech.length > 0) {
+            const pendingTasks = [
+              ...unresolved.map((t) => ({
+                id: t.id,
+                category: t.serviceCategory,
+                itemDescription: t.description,
+                status: t.status,
+                reason: "Intervenção pendente de conclusão",
+              })),
+              ...missingTech.map((t) => ({
+                id: t.id,
+                category: t.serviceCategory,
+                itemDescription: t.description,
+                status: t.status,
+                reason: "Técnico executor não atribuído",
+              })),
+            ];
+
+            throw new UnprocessableEntityError(
+              "UNRESOLVED_PRODUCTION_TASKS: Não é possível finalizar a OS: existem intervenções em aberto ou sem técnico responsável.",
+              { pendingTasks }
+            );
+          }
+        }
+
         // Step 1.6: Validate domain preconditions on fresh locked object
         if (!currentPo.clientId) {
           throw new UnprocessableEntityError("CLIENT_REQUIRED: Ordem de produção sem cliente canônico.");
@@ -536,6 +570,7 @@ export async function finalizeProductionOrder(
           where: { id: currentPo.id },
           data: {
             status: "delivered",
+            currentStage: "finished",
             deliveredAt: serverDeliveredAt,
           },
         });

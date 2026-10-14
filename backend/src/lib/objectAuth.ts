@@ -35,9 +35,11 @@ export class ConflictError extends Error {
 
 export class UnprocessableEntityError extends Error {
   readonly statusCode = 422;
-  constructor(message = "Entidade improcessável.") {
+  readonly details?: any;
+  constructor(message = "Entidade improcessável.", details?: any) {
     super(message);
     this.name = "UnprocessableEntityError";
+    this.details = details;
   }
 }
 
