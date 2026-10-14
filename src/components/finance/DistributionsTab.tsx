@@ -93,22 +93,23 @@ export function DistributionsTab({ canMutate = true }: DistributionsTabProps) {
   const [cancelError, setCancelError] = useState<string | null>(null);
 
   const filteredDistributions = useMemo(() => {
-    return distributions.filter((d) => {
+    return (Array.isArray(distributions) ? distributions : []).filter((d) => {
+      if (!d) return false;
       const matchStatus = selectedStatus === "all" || d.status === selectedStatus;
       const term = searchTerm.toLowerCase().trim();
       const pId =
-        d.participant.kind === "person"
-          ? d.participant.personId
-          : d.participant.kind === "workspace"
-          ? d.participant.workspaceId
-          : d.participant.clientId;
+        d.participant?.kind === "person"
+          ? (d.participant.personId || "")
+          : d.participant?.kind === "workspace"
+          ? (d.participant.workspaceId || "")
+          : (d.participant?.clientId || "");
 
       const matchSearch =
         !term ||
-        d.paymentListId.toLowerCase().includes(term) ||
+        (d.paymentListId || "").toLowerCase().includes(term) ||
         pId.toLowerCase().includes(term) ||
-        d.resolvedAmount.includes(term) ||
-        d.currencyCode.toLowerCase().includes(term);
+        (d.resolvedAmount || "").includes(term) ||
+        (d.currencyCode || "").toLowerCase().includes(term);
       return matchStatus && matchSearch;
     });
   }, [distributions, selectedStatus, searchTerm]);
@@ -212,15 +213,16 @@ export function DistributionsTab({ canMutate = true }: DistributionsTabProps) {
     }
   };
 
-  const getParticipantLabel = (p: DistributionParticipant) => {
+  const getParticipantLabel = (p?: DistributionParticipant | null) => {
+    if (!p) return "Desconhecido";
     if (p.kind === "workspace") return workspaceName || "Empresa / Workspace";
     if (p.kind === "person") {
       const person = people.find((item) => item.id === p.personId);
-      return person ? person.full_name : `Pessoa (${p.personId.slice(0, 8)}...)`;
+      return person ? person.full_name : `Pessoa (${(p.personId || "").slice(0, 8)}...)`;
     }
     if (p.kind === "client") {
       const client = clients.find((item) => item.id === p.clientId);
-      return client ? client.name : `Cliente (${p.clientId.slice(0, 8)}...)`;
+      return client ? client.name : `Cliente (${(p.clientId || "").slice(0, 8)}...)`;
     }
     return "Desconhecido";
   };
@@ -344,29 +346,29 @@ export function DistributionsTab({ canMutate = true }: DistributionsTabProps) {
                   >
                     <TableCell className="font-mono whitespace-nowrap text-muted-foreground">
                       <span className="font-semibold text-foreground">
-                        {dist.paymentListId.slice(0, 8)}...
+                        {(dist.paymentListId || "").slice(0, 8)}...
                       </span>
                       {dist.paymentListItemId && (
-                        <div className="text-[10px] text-muted-foreground">Item: {dist.paymentListItemId.slice(0, 6)}</div>
+                        <div className="text-[10px] text-muted-foreground">Item: {(dist.paymentListItemId || "").slice(0, 6)}</div>
                       )}
                     </TableCell>
                     <TableCell className="font-medium whitespace-nowrap">
                       <div className="flex items-center gap-1.5">
-                        {dist.participant.kind === "workspace" && <Building className="h-3.5 w-3.5 text-blue-500" />}
-                        {dist.participant.kind === "person" && <User className="h-3.5 w-3.5 text-emerald-500" />}
-                        {dist.participant.kind === "client" && <Users className="h-3.5 w-3.5 text-indigo-500" />}
+                        {dist.participant?.kind === "workspace" && <Building className="h-3.5 w-3.5 text-blue-500" />}
+                        {dist.participant?.kind === "person" && <User className="h-3.5 w-3.5 text-emerald-500" />}
+                        {dist.participant?.kind === "client" && <Users className="h-3.5 w-3.5 text-indigo-500" />}
                         <span>{getParticipantLabel(dist.participant)}</span>
                       </div>
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
                       <Badge variant="outline" className="text-[11px] font-normal">
-                        {dist.allocation.mode === "fixed" ? "Valor Fixo" : "Percentual"}
+                        {dist.allocation?.mode === "fixed" ? "Valor Fixo" : "Percentual"}
                       </Badge>
                     </TableCell>
                     <TableCell className="font-mono text-xs whitespace-nowrap">
-                      {dist.allocation.mode === "percentage"
+                      {dist.allocation?.mode === "percentage"
                         ? `${dist.allocation.percentage}%`
-                        : formatFinanceMoney(dist.allocation.amount, dist.currencyCode)}
+                        : formatFinanceMoney(dist.allocation?.amount, dist.currencyCode)}
                     </TableCell>
                     <TableCell
                       className={`text-right font-mono font-medium whitespace-nowrap ${

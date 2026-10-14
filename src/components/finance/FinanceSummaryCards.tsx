@@ -53,7 +53,7 @@ export function FinanceSummaryCards() {
   return (
     <div className="space-y-8" data-testid="finance-summary-container">
       {currencies.map((curr) => {
-        const isNegativeAvailable = curr.available.startsWith("-");
+        const isNegativeAvailable = (curr?.available || "").startsWith("-");
 
         return (
           <div key={curr.currencyCode} className="space-y-3" data-testid={`summary-currency-${curr.currencyCode}`}>

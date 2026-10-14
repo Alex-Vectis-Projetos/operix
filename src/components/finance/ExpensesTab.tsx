@@ -98,15 +98,16 @@ export function ExpensesTab({ canMutate = true }: ExpensesTabProps) {
   const [reverseError, setReverseError] = useState<string | null>(null);
 
   const filteredExpenses = useMemo(() => {
-    return expenses.filter((e) => {
+    return (Array.isArray(expenses) ? expenses : []).filter((e) => {
+      if (!e) return false;
       const matchCategory = selectedCategory === "all" || e.category === selectedCategory;
       const term = searchTerm.toLowerCase().trim();
       const matchSearch =
         !term ||
-        e.description?.toLowerCase().includes(term) ||
-        e.category.toLowerCase().includes(term) ||
-        e.amount.includes(term) ||
-        e.currencyCode.toLowerCase().includes(term);
+        (e.description || "").toLowerCase().includes(term) ||
+        (e.category || "").toLowerCase().includes(term) ||
+        String(e.amount || "").includes(term) ||
+        (e.currencyCode || "").toLowerCase().includes(term);
       return matchCategory && matchSearch;
     });
   }, [expenses, selectedCategory, searchTerm]);

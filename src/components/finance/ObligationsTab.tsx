@@ -119,11 +119,11 @@ export function ObligationsTab({ canMutate = true }: ObligationsTabProps) {
       if (participant.kind === "workspace") return workspaceName || "Empresa / Workspace";
       if (participant.kind === "person") {
         const p = people.find((item) => item.id === participant.personId);
-        return p ? p.full_name : `Pessoa (${participant.personId.slice(0, 8)}...)`;
+        return p ? p.full_name : `Pessoa (${(participant.personId || "").slice(0, 8)}...)`;
       }
       if (participant.kind === "client") {
         const c = clients.find((item) => item.id === participant.clientId);
-        return c ? c.name : `Cliente (${participant.clientId.slice(0, 8)}...)`;
+        return c ? c.name : `Cliente (${(participant.clientId || "").slice(0, 8)}...)`;
       }
       return "Desconhecido";
     },
@@ -131,7 +131,8 @@ export function ObligationsTab({ canMutate = true }: ObligationsTabProps) {
   );
 
   const filteredObligations = useMemo(() => {
-    return obligations.filter((o) => {
+    return (Array.isArray(obligations) ? obligations : []).filter((o) => {
+      if (!o) return false;
       const matchStatus = selectedStatus === "all" || o.status === selectedStatus;
       const term = searchTerm.toLowerCase().trim();
       const p = getParticipant(o);
@@ -139,11 +140,11 @@ export function ObligationsTab({ canMutate = true }: ObligationsTabProps) {
 
       const matchSearch =
         !term ||
-        o.id.toLowerCase().includes(term) ||
-        o.distributionId.toLowerCase().includes(term) ||
+        (o.id || "").toLowerCase().includes(term) ||
+        (o.distributionId || "").toLowerCase().includes(term) ||
         pLabel.includes(term) ||
-        o.amount.includes(term) ||
-        o.currencyCode.toLowerCase().includes(term);
+        String(o.amount || "").includes(term) ||
+        (o.currencyCode || "").toLowerCase().includes(term);
       return matchStatus && matchSearch;
     });
   }, [obligations, selectedStatus, searchTerm, getParticipant, getParticipantLabel]);
@@ -356,7 +357,7 @@ export function ObligationsTab({ canMutate = true }: ObligationsTabProps) {
                   >
                     <TableCell className="font-mono whitespace-nowrap text-muted-foreground">
                       <span className="font-semibold text-foreground">
-                        {ob.distributionId.slice(0, 8)}...
+                        {(ob.distributionId || "").slice(0, 8)}...
                       </span>
                     </TableCell>
                     <TableCell className="font-medium whitespace-nowrap">
