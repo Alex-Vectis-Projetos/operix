@@ -64,26 +64,59 @@ export const CAR_PARTS: { code: string; label: string; views: VehicleViewType[] 
 ];
 
 export const DAMAGE_TYPES: { code: string; label: string }[] = [
-  { code: "hail", label: "Granizo / Mossa (PDR)" },
+  { code: "hail", label: "Granizo (PDR)" },
   { code: "dent_small", label: "Amassado Leve (< 3cm)" },
   { code: "dent_medium", label: "Amassado Médio (3cm - 8cm)" },
   { code: "dent_large", label: "Amassado Severo (> 8cm)" },
-  { code: "crease", label: "Vinco / Linha de Estamparia" },
-  { code: "scratch", label: "Risco / Arranhão Profundo" },
-  { code: "paint_damage", label: "Pintura Danificada / Lascada" },
-  { code: "crack", label: "Trinca / Quebra de Peça" },
+  { code: "crease", label: "Vinco" },
+  { code: "scratch", label: "Risco / Arranhão" },
+  { code: "paint_damage", label: "Dano de Pintura" },
+  { code: "crack", label: "Trinca / Quebra" },
 ];
 
-const BODY_TYPES: { code: VehicleBodyType; label: string; icon: string }[] = [
-  { code: "sedan", label: "Sedã (4 Portas)", icon: "🚗" },
-  { code: "hatchback", label: "Hatchback", icon: "🚙" },
-  { code: "suv", label: "SUV / Crossover", icon: "🚙" },
-  { code: "pickup", label: "Picape", icon: "🛻" },
+const BODY_TYPES: { code: VehicleBodyType; label: string }[] = [
+  { code: "sedan", label: "Sedan" },
+  { code: "hatchback", label: "Hatchback" },
+  { code: "suv", label: "SUV" },
+  { code: "pickup", label: "Picape" },
 ];
 
-// Mapeamento pericial de regiões por coordenadas percentuais
+// Dimensões nativas exatas dos cortes (sem resíduos ou sobreposições)
+const BLUEPRINT_DIMENSIONS: Record<VehicleBodyType, Record<VehicleViewType, { width: number; height: number }>> = {
+  sedan: {
+    front: { width: 345, height: 258 },
+    rear: { width: 350, height: 258 },
+    top: { width: 355, height: 850 },
+    left: { width: 840, height: 306 },
+    right: { width: 845, height: 252 },
+  },
+  hatchback: {
+    front: { width: 215, height: 170 },
+    rear: { width: 215, height: 168 },
+    top: { width: 224, height: 430 },
+    left: { width: 430, height: 168 },
+    right: { width: 430, height: 170 },
+  },
+  suv: {
+    front: { width: 175, height: 145 },
+    rear: { width: 175, height: 145 },
+    top: { width: 153, height: 360 },
+    left: { width: 361, height: 162 },
+    right: { width: 361, height: 162 },
+  },
+  pickup: {
+    front: { width: 295, height: 265 },
+    rear: { width: 290, height: 265 },
+    top: { width: 300, height: 770 },
+    left: { width: 770, height: 295 },
+    right: { width: 770, height: 295 },
+  },
+};
+
+// Mapeamento pericial de regiões por coordenadas percentuais (todas as vistas com topo alinhado)
 function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft = false): string {
   if (view === "top") {
+    // Orientação uniforme: Capô no topo (y < 35%), Teto no meio, Porta-malas na base
     if (y < 35) return x < 25 ? "front_left_fender" : x > 75 ? "front_right_fender" : "hood";
     if (y < 46) return "windshield";
     if (y < 74) return x < 20 ? "front_left_door" : x > 80 ? "front_right_door" : "roof";
@@ -113,9 +146,6 @@ function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft =
   }
 
   if (view === "left" || view === "right") {
-    // Para laterais:
-    // facingLeft: dianteira à esquerda (x < 30 = frente)
-    // facingRight: dianteira à direita (x > 70 = frente)
     const isFrontSide = facingLeft ? x < 30 : x > 70;
     const isRearSide = facingLeft ? x > 70 : x < 30;
     const isMidFront = facingLeft ? x >= 30 && x < 52 : x >= 48 && x < 70;
@@ -145,7 +175,6 @@ export function VehicleBlueprint5Views({
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [isCadTheme, setIsCadTheme] = useState<boolean>(true); // CAD Dark vs Ficha Clara
   const [hoveredPart, setHoveredPart] = useState<string | null>(null);
-  const [hoverCoords, setHoverCoords] = useState<{ x: number; y: number } | null>(null);
 
   // Modal de confirmação para troca de carroceria com histórico preservado
   const [pendingBodyType, setPendingBodyType] = useState<VehicleBodyType | null>(null);
@@ -169,19 +198,38 @@ export function VehicleBlueprint5Views({
     setShowBodyTypeConfirm(false);
   };
 
-  const handleSvgClick = (view: VehicleViewType, e: React.MouseEvent<SVGSVGElement>, facingLeft = false) => {
+  // Clique de alta precisão com matriz inversa SVG (independente de aspect ratio da tela)
+  const handleSvgClick = (
+    view: VehicleViewType,
+    e: React.MouseEvent<SVGSVGElement>,
+    viewW: number,
+    viewH: number,
+    facingLeft = false
+  ) => {
     if (readOnly || !onChange) return;
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = Math.round(((e.clientX - rect.left) / rect.width) * 100);
-    const y = Math.round(((e.clientY - rect.top) / rect.height) * 100);
+    const svg = e.currentTarget;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return;
 
-    const detectedCode = detectCarPart(view, x, y, facingLeft);
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const svgP = pt.matrixTransform(ctm.inverse());
+
+    // Bounding clamp para garantir que permaneça na estampa da peça
+    const clampedX = Math.max(0, Math.min(viewW, svgP.x));
+    const clampedY = Math.max(0, Math.min(viewH, svgP.y));
+
+    const coordX = Math.round((clampedX / viewW) * 100);
+    const coordY = Math.round((clampedY / viewH) * 100);
+
+    const detectedCode = detectCarPart(view, coordX, coordY, facingLeft);
 
     const newPoint: DamagePointData = {
       view,
-      coordX: x,
-      coordY: y,
+      coordX,
+      coordY,
       carPartCode: detectedCode,
       damageType: "hail",
       dentCount: 1,
@@ -195,20 +243,36 @@ export function VehicleBlueprint5Views({
     setSelectedPointIndex(nextPoints.length - 1);
   };
 
-  const handleSvgMouseMove = (view: VehicleViewType, e: React.MouseEvent<SVGSVGElement>, facingLeft = false) => {
+  const handleSvgMouseMove = (
+    view: VehicleViewType,
+    e: React.MouseEvent<SVGSVGElement>,
+    viewW: number,
+    viewH: number,
+    facingLeft = false
+  ) => {
     if (readOnly) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = Math.round(((e.clientX - rect.left) / rect.width) * 100);
-    const y = Math.round(((e.clientY - rect.top) / rect.height) * 100);
-    const partCode = detectCarPart(view, x, y, facingLeft);
+    const svg = e.currentTarget;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return;
+
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const svgP = pt.matrixTransform(ctm.inverse());
+
+    const clampedX = Math.max(0, Math.min(viewW, svgP.x));
+    const clampedY = Math.max(0, Math.min(viewH, svgP.y));
+
+    const coordX = Math.round((clampedX / viewW) * 100);
+    const coordY = Math.round((clampedY / viewH) * 100);
+
+    const partCode = detectCarPart(view, coordX, coordY, facingLeft);
     const partObj = CAR_PARTS.find((p) => p.code === partCode);
     setHoveredPart(partObj ? partObj.label : null);
-    setHoverCoords({ x, y });
   };
 
   const handleSvgMouseLeave = () => {
     setHoveredPart(null);
-    setHoverCoords(null);
   };
 
   const updateSelectedPoint = (patch: Partial<DamagePointData>) => {
@@ -227,86 +291,27 @@ export function VehicleBlueprint5Views({
 
   const selectedPoint = selectedPointIndex !== null ? damagePoints[selectedPointIndex] : null;
 
-  // Obter caminhos de imagem para a carroceria ativa
   const getAssetPath = (viewName: string) => {
     const themePrefix = isCadTheme ? "cad" : "light";
     return `/blueprints/${bodyType}/${themePrefix}_${viewName}.png`;
   };
 
-  // Renderizador de marcadores sobre uma vista
-  const renderMarkersOnView = (view: VehicleViewType) => {
-    return damagePoints.map((point, index) => {
-      if (point.view !== view) return null;
-      const isSelected = selectedPointIndex === index;
-
-      return (
-        <g
-          key={point.id || index}
-          className="cursor-pointer transition-transform hover:scale-125"
-          onClick={(e) => {
-            e.stopPropagation();
-            setSelectedPointIndex(index);
-          }}
-        >
-          {/* Anel de seleção e pulso se selecionado */}
-          {isSelected && (
-            <circle
-              cx={`${point.coordX}%`}
-              cy={`${point.coordY}%`}
-              r="14"
-              className={cn(
-                "animate-ping stroke-2 opacity-75 fill-none",
-                point.contracted ? "stroke-cyan-400" : "stroke-amber-400"
-              )}
-            />
-          )}
-
-          {/* Sombra de contorno */}
-          <circle
-            cx={`${point.coordX}%`}
-            cy={`${point.coordY}%`}
-            r="10"
-            className="fill-black/60 stroke-black/80 stroke-1"
-          />
-
-          {/* Marcador colorido */}
-          <circle
-            cx={`${point.coordX}%`}
-            cy={`${point.coordY}%`}
-            r="8"
-            className={cn(
-              "stroke-2 transition-colors",
-              point.contracted
-                ? "fill-blue-600 stroke-cyan-300 drop-shadow-[0_0_8px_rgba(56,189,248,0.8)]"
-                : "fill-amber-600 stroke-amber-300 drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]"
-            )}
-          />
-
-          {/* Número do dano */}
-          <text
-            x={`${point.coordX}%`}
-            y={`${point.coordY}%`}
-            dy="3.5"
-            textAnchor="middle"
-            className="fill-white font-bold text-[10px] select-none pointer-events-none"
-          >
-            {index + 1}
-          </text>
-        </g>
-      );
-    });
-  };
-
-  // Renderiza uma vista técnica com camadas 1, 2 e 3
+  // Renderiza uma vista técnica com dimensões fixas no viewBox, eliminando distorções de escala
   const renderTechnicalViewBox = (
     view: VehicleViewType,
     title: string,
     viewName: string,
-    aspectClass: string,
+    containerHeightClass: string,
     facingLeft = false
   ) => {
     const isFocus = activeView === view;
-    const viewPoints = damagePoints.filter((p) => p.view === view);
+    const viewDims = BLUEPRINT_DIMENSIONS[bodyType]?.[view] || { width: 300, height: 200 };
+    const viewPoints = damagePoints
+      .map((p, idx) => ({ ...p, originalIndex: idx }))
+      .filter((p) => p.view === view);
+
+    // Raio proporcional compacto para precisão pericial (sem círculos gigantes)
+    const baseRadius = Math.max(7, Math.min(viewDims.width, viewDims.height) * 0.032);
 
     return (
       <div
@@ -321,7 +326,7 @@ export function VehicleBlueprint5Views({
         {/* Cabeçalho da Vista */}
         <div
           className={cn(
-            "flex items-center justify-between px-3 py-1.5 text-xs font-semibold border-b",
+            "flex items-center justify-between px-3 py-1.5 text-xs font-semibold border-b select-none",
             isCadTheme ? "bg-slate-900/80 border-slate-800 text-cyan-300" : "bg-slate-100 border-slate-200 text-slate-800"
           )}
         >
@@ -344,37 +349,89 @@ export function VehicleBlueprint5Views({
           </Button>
         </div>
 
-        {/* Canvas da Vista (Camada 1: Imagem CAD + Camada 2: Interatividade + Camada 3: Marcadores) */}
+        {/* Canvas da Vista */}
         <div
           className={cn(
-            "relative w-full flex items-center justify-center p-3 select-none",
-            aspectClass,
+            "relative w-full flex items-center justify-center p-2 select-none",
+            containerHeightClass,
             isCadTheme
               ? "bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]"
               : "bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px]"
           )}
         >
-          {/* Camada 1: Ilustração Técnica Vetorial Exata (Asset do Veículo) */}
-          <img
-            src={getAssetPath(viewName)}
-            alt={title}
-            className="absolute inset-2 w-[calc(100%-16px)] h-[calc(100%-16px)] object-contain pointer-events-none transition-all duration-300"
-            style={{
-              filter: isCadTheme ? "drop-shadow(0 0 1px rgba(56,189,248,0.4))" : undefined,
-            }}
-          />
-
-          {/* Camada 2 & 3: SVG Interativo de Clique e Marcadores */}
           <svg
-            className="absolute inset-2 w-[calc(100%-16px)] h-[calc(100%-16px)] cursor-crosshair"
-            viewBox="0 0 100 100"
-            preserveAspectRatio="none"
-            onClick={(e) => handleSvgClick(view, e, facingLeft)}
-            onMouseMove={(e) => handleSvgMouseMove(view, e, facingLeft)}
+            viewBox={`0 0 ${viewDims.width} ${viewDims.height}`}
+            className="w-full h-full cursor-crosshair select-none"
+            onClick={(e) => handleSvgClick(view, e, viewDims.width, viewDims.height, facingLeft)}
+            onMouseMove={(e) => handleSvgMouseMove(view, e, viewDims.width, viewDims.height, facingLeft)}
             onMouseLeave={handleSvgMouseLeave}
           >
-            {/* Camada 3: Marcadores Periciais */}
-            {renderMarkersOnView(view)}
+            {/* Camada 1: Imagem Oficial CAD com traços periciais */}
+            <image
+              href={getAssetPath(viewName)}
+              x="0"
+              y="0"
+              width={viewDims.width}
+              height={viewDims.height}
+              preserveAspectRatio="xMidYMid meet"
+              style={{
+                filter: isCadTheme ? "drop-shadow(0 0 1px rgba(56,189,248,0.35))" : undefined,
+              }}
+            />
+
+            {/* Camada 3: Marcadores Periciais Compactos e Perfeitamente Circulares */}
+            {viewPoints.map((pt) => {
+              const isSelected = selectedPointIndex === pt.originalIndex;
+              const markerX = (pt.coordX / 100) * viewDims.width;
+              const markerY = (pt.coordY / 100) * viewDims.height;
+              const r = baseRadius;
+
+              return (
+                <g
+                  key={pt.id || pt.originalIndex}
+                  transform={`translate(${markerX}, ${markerY})`}
+                  className="cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPointIndex(pt.originalIndex);
+                  }}
+                >
+                  {/* Anel indicador se selecionado */}
+                  {isSelected && (
+                    <circle
+                      r={r * 1.5}
+                      fill="none"
+                      stroke={pt.contracted ? "#38bdf8" : "#fbbf24"}
+                      strokeWidth="2"
+                      strokeDasharray="3 2"
+                    />
+                  )}
+
+                  {/* Sombra de contraste */}
+                  <circle r={r + 1} fill="rgba(0,0,0,0.7)" />
+
+                  {/* Ponto colorido */}
+                  <circle
+                    r={r}
+                    fill={pt.contracted ? "#2563eb" : "#d97706"}
+                    stroke={pt.contracted ? "#67e8f9" : "#fde68a"}
+                    strokeWidth="1.5"
+                  />
+
+                  {/* Número identificador */}
+                  <text
+                    textAnchor="middle"
+                    dy={r * 0.38}
+                    fontSize={r * 1.05}
+                    fontWeight="bold"
+                    fill="#ffffff"
+                    pointerEvents="none"
+                  >
+                    {pt.originalIndex + 1}
+                  </text>
+                </g>
+              );
+            })}
           </svg>
         </div>
       </div>
@@ -410,14 +467,12 @@ export function VehicleBlueprint5Views({
                 size="sm"
                 variant={bodyType === bt.code ? "default" : "ghost"}
                 className={cn(
-                  "h-7 px-2 text-xs font-medium gap-1",
+                  "h-7 px-2.5 text-xs font-medium",
                   bodyType === bt.code && "bg-cyan-600 text-white shadow-sm"
                 )}
                 onClick={() => handleSelectBodyType(bt.code)}
-                title={`Carroceria ${bt.label}`}
               >
-                <span>{bt.icon}</span>
-                <span className="hidden sm:inline">{bt.label.split(" ")[0]}</span>
+                {bt.label}
               </Button>
             ))}
           </div>
@@ -458,15 +513,11 @@ export function VehicleBlueprint5Views({
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs border">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-1.5">
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white shadow">
-              ●
-            </span>
+            <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-600 border border-cyan-300 text-[9px] font-bold text-white shadow" />
             <span className="font-medium text-foreground">Serviço Contratado (Orçado / Executar)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-amber-600 text-[10px] font-bold text-white shadow">
-              ▲
-            </span>
+            <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-600 border border-amber-300 text-[9px] font-bold text-white shadow" />
             <span className="font-medium text-foreground">Dano Pré-existente (Checklist Entrada / Isenção)</span>
           </div>
         </div>
@@ -486,23 +537,23 @@ export function VehicleBlueprint5Views({
 
       {/* ÁREA GRÁFICA DO BLUEPRINT: MODO PRANCHA GERAL OU MODO VISTA FOCAL */}
       {activeView === "all" ? (
-        /* PRANCHA COMPLETA 5 VISTAS (FOLHA TÉCNICA AUTOMOTIVA) */
+        /* PRANCHA COMPLETA 5 VISTAS */
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
           {/* Coluna Esquerda: Frente e Traseira */}
           <div className="md:col-span-4 flex flex-col gap-3">
-            {renderTechnicalViewBox("front", "1. Vista Frontal", "front", "h-48 md:h-56", false)}
-            {renderTechnicalViewBox("rear", "2. Vista Traseira", "rear", "h-48 md:h-56", false)}
+            {renderTechnicalViewBox("front", "1. Vista Frontal", "front", "h-52 md:h-56", false)}
+            {renderTechnicalViewBox("rear", "2. Vista Traseira", "rear", "h-52 md:h-56", false)}
           </div>
 
-          {/* Coluna Central: Vista Superior (Teto, Capô e Porta-Malas) */}
+          {/* Coluna Central: Vista Superior Verticalizada */}
           <div className="md:col-span-4">
             {renderTechnicalViewBox("top", "3. Vista Superior (Capô, Teto, Tampa)", "top", "h-96 md:h-[464px]", false)}
           </div>
 
           {/* Coluna Direita: Laterais Esquerda e Direita */}
           <div className="md:col-span-4 flex flex-col gap-3">
-            {renderTechnicalViewBox("left", "4. Lateral Esquerda (Motorista)", "left", "h-48 md:h-56", true)}
-            {renderTechnicalViewBox("right", "5. Lateral Direita (Passageiro)", "right", "h-48 md:h-56", false)}
+            {renderTechnicalViewBox("left", "4. Lateral Esquerda (Motorista)", "left", "h-52 md:h-56", true)}
+            {renderTechnicalViewBox("right", "5. Lateral Direita (Passageiro)", "right", "h-52 md:h-56", false)}
           </div>
         </div>
       ) : (
@@ -521,14 +572,14 @@ export function VehicleBlueprint5Views({
         </div>
       )}
 
-      {/* PAINEL DE INSPEÇÃO: DETALHES DO PONTO SELECIONADO OU LISTA PERICIAL */}
+      {/* PAINEL DE INSPEÇÃO: DETALHES DO PONTO SELECIONADO */}
       {selectedPoint && !readOnly ? (
         <div className="rounded-xl border border-cyan-800/80 bg-slate-900/60 p-4 shadow-md backdrop-blur">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
             <div className="flex items-center gap-2">
               <span
                 className={cn(
-                  "flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white shadow",
+                  "flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold text-white shadow",
                   selectedPoint.contracted ? "bg-blue-600" : "bg-amber-600"
                 )}
               >
@@ -616,8 +667,8 @@ export function VehicleBlueprint5Views({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="contracted">🛠️ Serviço Contratado (Orçado)</SelectItem>
-                  <SelectItem value="pre_existing">⚠️ Dano Pré-existente (Checklist Entrada)</SelectItem>
+                  <SelectItem value="contracted">Serviço Contratado (Orçado)</SelectItem>
+                  <SelectItem value="pre_existing">Dano Pré-existente (Checklist Entrada)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -683,7 +734,7 @@ export function VehicleBlueprint5Views({
                   <div className="flex items-center gap-2 min-w-0">
                     <span
                       className={cn(
-                        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white",
+                        "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white",
                         pt.contracted ? "bg-blue-600" : "bg-amber-600"
                       )}
                     >
