@@ -79,16 +79,6 @@ function RouteContentBoundary({ children }: { children: ReactNode }) {
   return (
     <ErrorBoundary
       resetKey={`${location.pathname}${location.search}`}
-      fallback={(
-        <div className="min-h-[40vh] flex flex-col items-center justify-center gap-3 px-6 text-center">
-          <h2 className="text-lg font-semibold text-foreground">
-            {t("error.pageTitle", "Esta página encontrou um erro")}
-          </h2>
-          <p className="text-sm text-muted-foreground max-w-md">
-            {t("error.pageBody", "O menu e a navegação continuam disponíveis. Pode mudar de página ou tentar novamente.")}
-          </p>
-        </div>
-      )}
     >
       {children}
     </ErrorBoundary>

@@ -63,13 +63,14 @@ export function TechnicianStatementTab({ canMutate = true }: TechnicianStatement
   const [settleAmountInput, setSettleAmountInput] = useState("");
   const [settleFeedback, setSettleFeedback] = useState<string | null>(null);
 
-  const filteredTechnicians = technicians.filter((t) => {
+  const filteredTechnicians = (Array.isArray(technicians) ? technicians : []).filter((t) => {
+    if (!t) return false;
     const term = searchTerm.toLowerCase().trim();
     if (!term) return true;
     return (
-      t.name.toLowerCase().includes(term) ||
+      (t.name || "").toLowerCase().includes(term) ||
       (t.email && t.email.toLowerCase().includes(term)) ||
-      t.availableBalance.includes(term)
+      (t.availableBalance || "").includes(term)
     );
   });
 
