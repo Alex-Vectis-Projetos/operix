@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getPaymentList } from "@/lib/apiPaymentLists";
 import { format, parseISO } from "date-fns";
 import {
   Search, Plus, Filter, FileText, FileSpreadsheet,
@@ -370,6 +372,10 @@ export default function InvoicesScreen() {
   // selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  // search params & commercial handoff
+  const [searchParams, setSearchParams] = useSearchParams();
+  const listIdFromUrl = searchParams.get("listId");
+
   // dialogs
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -421,6 +427,88 @@ export default function InvoicesScreen() {
       }));
     },
   });
+
+  // Handoff comercial: quando listId vem na URL, pré-carrega a Lista de Pagamento e abre a emissão
+  useEffect(() => {
+    if (!listIdFromUrl) return;
+
+    let active = true;
+    (async () => {
+      try {
+        const pList = await getPaymentList(listIdFromUrl);
+        if (!active) return;
+
+        setEditing(null);
+        setFormListIds([pList.id]);
+        setFormLists([{
+          id: pList.id,
+          list_name: pList.listNumber,
+          technician_name: pList.items[0]?.technicianName || "—",
+          assigned_user_id: null,
+          client_name: pList.clientName,
+          city: null,
+          year: new Date().getFullYear(),
+          week: 0,
+          total: Number(pList.recognizedTotal || pList.sourceDocumentTotal || 0),
+          po_count: pList.itemCount || pList.items.length || 1,
+          payment_order_ids: [],
+          user_ids: [],
+        }]);
+
+        const totalNum = Number(pList.recognizedTotal || pList.sourceDocumentTotal || 0);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const dueDateStr = computeDueDate(todayStr, "net_30", "");
+
+        const matchedClient = (clientsQ.data ?? []).find(
+          (c) => c.id === pList.clientId || (pList.clientName && c.name.toLowerCase() === pList.clientName.toLowerCase())
+        );
+
+        setForm({
+          invoice_number: `FAT-${pList.listNumber.replace(/[^A-Za-z0-9_-]/g, "")}`,
+          type: "outgoing",
+          client_id: matchedClient?.id ?? pList.clientId ?? null,
+          issue_date: todayStr,
+          due_date: dueDateStr,
+          payment_term: "net_30",
+          items: pList.items && pList.items.length > 0
+            ? pList.items.map((it) => ({
+                id: crypto.randomUUID(),
+                designation: `${it.carName || it.licensePlate || "Veículo"} - ${Array.isArray(it.servicesSnapshot) ? it.servicesSnapshot.map((s: any) => typeof s === "object" && s !== null ? s.description || s.name || "Serviço" : "Serviço").join(", ") : "Serviços"}`,
+                quantity: 1,
+                unit: "un",
+                unit_price: Number(it.totalAmount || 0),
+                tax_rate: 0,
+              }))
+            : [{
+                id: crypto.randomUUID(),
+                designation: `Serviços da Lista de Pagamento ${pList.listNumber}`,
+                quantity: 1,
+                unit: "un",
+                unit_price: totalNum,
+                tax_rate: 0,
+              }],
+          notes: `Faturamento referente à Lista de Pagamento ${pList.listNumber} (${pList.clientName}).`,
+          bank_iban: "",
+          bank_bic: "",
+          bank_name: "",
+          legal_text: DEFAULT_LEGAL,
+          options: defaultOptions(),
+        });
+
+        setFormOpen(true);
+
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete("listId");
+        setSearchParams(nextParams, { replace: true });
+      } catch (err: any) {
+        toast.error("Não foi possível carregar a Lista de Pagamento selecionada.");
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [listIdFromUrl, clientsQ.data]);
 
   const supplierMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -1019,23 +1107,42 @@ export default function InvoicesScreen() {
                         if (names.size === 0) {
                           legacyPoMeta.forEach((m) => m.list_name && names.add(m.list_name));
                         }
+                        const singlePaymentListNumber = r.metadata?.paymentListNumber || r.metadata?.payment_list_number;
+                        if (singlePaymentListNumber) names.add(singlePaymentListNumber);
+                        const singlePaymentListId = r.metadata?.paymentListId || r.metadata?.payment_list_id;
+
                         const codes = Array.from(names);
 
                         if (codes.length === 0) {
                           return <span className="text-[10px] text-muted-foreground italic">—</span>;
                         }
                         if (codes.length === 1) {
-                          return (
-                            <Badge variant="outline" className="text-[10px] font-mono font-semibold text-primary">
+                          const badgeContent = (
+                            <Badge variant="outline" className="text-[10px] font-mono font-semibold text-primary hover:bg-primary/20 transition-colors">
                               {codes[0]}
                             </Badge>
+                          );
+                          return singlePaymentListId ? (
+                            <Link to={`/payment-orders?list=${singlePaymentListId}`} onClick={(e) => e.stopPropagation()}>
+                              {badgeContent}
+                            </Link>
+                          ) : (
+                            badgeContent
                           );
                         }
                         return (
                           <div className="flex flex-wrap gap-1 items-center">
-                            <Badge variant="outline" className="text-[10px] font-mono font-semibold text-primary">
-                              {codes[0]}
-                            </Badge>
+                            {singlePaymentListId ? (
+                              <Link to={`/payment-orders?list=${singlePaymentListId}`} onClick={(e) => e.stopPropagation()}>
+                                <Badge variant="outline" className="text-[10px] font-mono font-semibold text-primary hover:bg-primary/20 transition-colors">
+                                  {codes[0]}
+                                </Badge>
+                              </Link>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] font-mono font-semibold text-primary">
+                                {codes[0]}
+                              </Badge>
+                            )}
                             <span className="text-[10px] text-muted-foreground">+{codes.length - 1}</span>
                           </div>
                         );
@@ -2029,6 +2136,27 @@ function DetailContent({
           <Row k="Tipo"           v={TYPE_META[invoice.type].label} />
           <Row k="Fornecedor"     v={supplierName ?? "—"} />
           <Row k="Cliente"        v={invoice.customer_name ?? "—"} />
+          {(() => {
+            const listId = invoice.metadata?.paymentListId || invoice.metadata?.payment_list_id;
+            const listNum = invoice.metadata?.paymentListNumber || invoice.metadata?.payment_list_number;
+            if (!listId && !listNum) return null;
+            return (
+              <div className="flex items-center justify-between py-1 border-b border-border/30">
+                <span className="text-muted-foreground">Lista vinculada</span>
+                {listId ? (
+                  <Link
+                    to={`/payment-orders?list=${listId}`}
+                    className="inline-flex items-center gap-1 font-mono text-primary font-semibold hover:underline"
+                  >
+                    <FileText className="h-3 w-3" />
+                    {listNum || listId}
+                  </Link>
+                ) : (
+                  <span className="font-mono text-primary">{listNum}</span>
+                )}
+              </div>
+            );
+          })()}
           <Row k="Data emissão"   v={fmtDate(invoice.issue_date)} />
           <Row k="Vencimento"     v={fmtDate(invoice.due_date)} />
           <Row k="Criada em"      v={fmtDate(invoice.created_at)} />
