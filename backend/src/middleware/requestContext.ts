@@ -198,10 +198,23 @@ export async function resolveRequestContext(
         select: { id: true, name: true, workspaceId: true },
       }),
       prisma.person.findFirst({
-        where: { systemAccessUserId: req.auth.userId, deletedAt: null },
-        select: { id: true, type: true },
+        where: {
+          deletedAt: null,
+          OR: [
+            { systemAccessUserId: req.auth.userId },
+            ...(req.auth.email ? [{ email: { equals: req.auth.email, mode: "insensitive" as const } }] : []),
+          ],
+        },
+        select: { id: true, type: true, systemAccessUserId: true },
       }),
     ]);
+
+    if (person && !person.systemAccessUserId) {
+      prisma.person.updateMany({
+        where: { id: person.id, systemAccessUserId: null },
+        data: { systemAccessUserId: req.auth.userId },
+      }).catch(() => {});
+    }
 
     if (!appUser) {
       return res.status(401).json({ message: "Registro de usuário da aplicação não localizado." });

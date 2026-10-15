@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Users,
   Search,
@@ -56,6 +56,12 @@ export function TechnicianStatementTab({ canMutate = true }: TechnicianStatement
 
   // Statement modal query
   const { data: statement, isLoading: loadingStatement } = useTechnicianStatement(selectedPersonId);
+
+  useEffect(() => {
+    if (!canMutate && technicians.length === 1 && !selectedPersonId) {
+      setSelectedPersonId(technicians[0].personId);
+    }
+  }, [canMutate, technicians, selectedPersonId]);
 
   // Settle mutation
   const settleMutation = useSettleTechnicianBalance();

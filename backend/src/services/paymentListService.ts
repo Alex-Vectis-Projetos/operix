@@ -57,7 +57,15 @@ async function allocateNumber(tx: Prisma.TransactionClient, workspaceId: string)
 }
 
 async function scopedList(ctx: RequestContext, id: string) {
-  const record = await prisma.paymentList.findFirst({ where: { id, workspaceId: ws(ctx) }, include: { items: true, claims: true } });
+  const isTechnician = ctx.membershipRole === "technician" && ctx.scope === "workspace";
+  const record = await prisma.paymentList.findFirst({
+    where: {
+      id,
+      workspaceId: ws(ctx),
+      ...(isTechnician ? { items: { some: { technicianUserId: ctx.actorUserId } } } : {}),
+    },
+    include: { items: true, claims: true },
+  });
   if (!record) throw new NotFoundError("LIST_NOT_FOUND");
   return record;
 }
@@ -397,8 +405,25 @@ export async function commitReviewedImport(ctx: RequestContext, importId: string
 
 export async function getPaymentList(ctx: RequestContext, id: string) { return sanitize(ctx, await scopedList(ctx, id)); }
 export async function listPaymentLists(ctx: RequestContext) {
-  const records = await prisma.paymentList.findMany({ where: { workspaceId: ws(ctx) }, include: { items: true }, orderBy: { createdAt: "desc" } });
-  return records.map((record) => sanitize(ctx, record));
+  const isTechnician = ctx.membershipRole === "technician" && ctx.scope === "workspace";
+  const records = await prisma.paymentList.findMany({
+    where: {
+      workspaceId: ws(ctx),
+      ...(isTechnician ? { items: { some: { technicianUserId: ctx.actorUserId } } } : {}),
+    },
+    include: { items: true },
+    orderBy: { createdAt: "desc" },
+  });
+  return records.map((record) => {
+    const s = sanitize(ctx, record);
+    if (isTechnician) {
+      return {
+        ...s,
+        itemCount: s.items.length,
+      };
+    }
+    return s;
+  });
 }
 
 export async function transitionPaymentList(

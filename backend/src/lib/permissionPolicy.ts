@@ -164,8 +164,9 @@ const ROLE_RULES: Record<Exclude<PermissionRole, "owner">, Rule[]> = {
   ],
   technician: [
     { module: "dashboard", actions: ["view", "view_dashboard"], scope: "own" },
-    { module: "service_orders", actions: ["view", "edit", "scan_document", "upload_document"], scope: "own" },
+    { module: "service_orders", actions: ["view", "create", "edit", "scan_document", "upload_document"], scope: "own" },
     { module: "payment_orders", actions: ["view"], scope: "own" },
+    { module: "financial", actions: ["view"], scope: "own" },
     { module: "fleet", actions: ["view"], scope: "own" },
     { module: "documents", actions: ["view", "upload"], scope: "own" },
     { module: "subscriptions", actions: ["view"], scope: "own" },
