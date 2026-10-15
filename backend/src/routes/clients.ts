@@ -6,6 +6,7 @@ import { resolveRequestContext } from "../middleware/requestContext.js";
 import {
   ALLOWED_CLIENT_CAPABILITIES,
   assertClientCapability,
+  getAuthorizedClientIdsForUser,
   ForbiddenError,
   NotFoundError,
   UnprocessableEntityError,
@@ -57,10 +58,17 @@ clientsRouter.get("/", async (req: Request, res: Response, next: NextFunction) =
       return res.status(403).json({ message: "Workspace ativo não definido." });
     }
 
+    const isClient = req.ctx?.membershipRole === "client";
+    let authorizedClientIds: string[] | null = null;
+    if (isClient) {
+      authorizedClientIds = await getAuthorizedClientIdsForUser(req.ctx!);
+    }
+
     const clients = await prisma.client.findMany({
       where: {
         workspaceId,
         deletedAt: null,
+        ...(isClient ? { id: { in: authorizedClientIds ?? [] } } : {}),
       },
       orderBy: { name: "asc" },
     });
@@ -85,6 +93,13 @@ clientsRouter.get("/:id", async (req: Request, res: Response, next: NextFunction
     }
 
     const id = typeof req.params.id === "string" ? req.params.id : String(req.params.id);
+
+    if (req.ctx?.membershipRole === "client") {
+      const authorizedClientIds = await getAuthorizedClientIdsForUser(req.ctx!);
+      if (!authorizedClientIds?.includes(id)) {
+        return res.status(404).json({ message: "Cliente não encontrado." });
+      }
+    }
 
     const client = await prisma.client.findFirst({
       where: {
@@ -113,6 +128,10 @@ clientsRouter.post("/", async (req: Request, res: Response, next: NextFunction) 
     const workspaceId = req.ctx?.activeWorkspaceId;
     if (!workspaceId) {
       return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    if (req.ctx?.membershipRole === "client") {
+      throw new ForbiddenError("Clientes não possuem autoridade para cadastrar novas empresas clientes no workspace.");
     }
 
     const input = createClientSchema.parse(req.body);

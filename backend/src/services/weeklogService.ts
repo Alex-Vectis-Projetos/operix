@@ -13,6 +13,7 @@ import {
   assertObjectAccess,
   validateTechnicianAssignment,
   assertClientCapability,
+  getAuthorizedClientIdsForUser,
 } from "../lib/objectAuth.js";
 import { operationalWeekOf } from "../lib/weekUtils.js";
 import { createAutoDraftPaymentListInTransaction } from "./paymentListService.js";
@@ -762,14 +763,22 @@ export async function listWeeklogs(
 
   const isTechnicianScope =
     ctx.membershipRole === "technician" && ctx.scope === "workspace";
+  const isClientScope = ctx.membershipRole === "client";
+  let authorizedClientIds: string[] | null = null;
+  if (isClientScope) {
+    authorizedClientIds = await getAuthorizedClientIdsForUser(ctx);
+  }
 
   const where: Prisma.WeeklogWhereInput = {
     workspaceId: ctx.activeWorkspaceId,
   };
 
-  if (filters.clientId) {
+  if (isClientScope) {
+    where.clientId = { in: authorizedClientIds ?? [] };
+  } else if (filters.clientId) {
     where.clientId = filters.clientId;
   }
+
   if (filters.status) {
     if (filters.status !== "all") {
       where.status = filters.status;
@@ -837,7 +846,7 @@ export async function listWeeklogs(
 }
 
 /**
- * Retorna um lote de WEEKLOG por ID com validação estrita de tenant e técnico.
+ * Retorna um lote de WEEKLOG por ID com validação estrita de tenant, técnico e cliente.
  */
 export async function getWeeklogById(ctx: RequestContext, id: string) {
   if (!ctx.activeWorkspaceId) {
@@ -858,6 +867,13 @@ export async function getWeeklogById(ctx: RequestContext, id: string) {
 
   if (!weeklog || weeklog.workspaceId !== ctx.activeWorkspaceId) {
     throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+  }
+
+  if (ctx.membershipRole === "client") {
+    const authorizedClientIds = await getAuthorizedClientIdsForUser(ctx);
+    if (!authorizedClientIds?.includes(weeklog.clientId)) {
+      throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+    }
   }
 
   const client = await prisma.client.findUnique({
@@ -903,6 +919,13 @@ export async function getWeeklogEntries(ctx: RequestContext, weeklogId: string) 
 
   if (!weeklog || weeklog.workspaceId !== ctx.activeWorkspaceId) {
     throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+  }
+
+  if (ctx.membershipRole === "client") {
+    const authorizedClientIds = await getAuthorizedClientIdsForUser(ctx);
+    if (!authorizedClientIds?.includes(weeklog.clientId)) {
+      throw new NotFoundError("Lote de WEEKLOG não encontrado.");
+    }
   }
 
   const isTechnicianScope =

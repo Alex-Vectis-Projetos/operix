@@ -1,7 +1,7 @@
 import { Prisma, type PaymentListStatus } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
-import { ConflictError, ForbiddenError, NotFoundError, UnprocessableEntityError } from "../lib/objectAuth.js";
+import { ConflictError, ForbiddenError, NotFoundError, UnprocessableEntityError, getAuthorizedClientIdsForUser } from "../lib/objectAuth.js";
 import type { RequestContext } from "../middleware/requestContext.js";
 import { projectPaymentListItemInTransaction } from "./downstreamPaymentOrderAdapter.js";
 import { mapBillingInvoice } from "../routes/billingOperations.js";
@@ -58,11 +58,18 @@ async function allocateNumber(tx: Prisma.TransactionClient, workspaceId: string)
 
 async function scopedList(ctx: RequestContext, id: string) {
   const isTechnician = ctx.membershipRole === "technician" && ctx.scope === "workspace";
+  const isClient = ctx.membershipRole === "client";
+  let authorizedClientIds: string[] | null = null;
+  if (isClient) {
+    authorizedClientIds = await getAuthorizedClientIdsForUser(ctx);
+  }
+
   const record = await prisma.paymentList.findFirst({
     where: {
       id,
       workspaceId: ws(ctx),
       ...(isTechnician ? { items: { some: { technicianUserId: ctx.actorUserId } } } : {}),
+      ...(isClient ? { clientId: { in: authorizedClientIds ?? [] } } : {}),
     },
     include: { items: true, claims: true },
   });
@@ -72,10 +79,20 @@ async function scopedList(ctx: RequestContext, id: string) {
 
 function sanitize(ctx: RequestContext, list: any) {
   const formatted = presentList(list);
-  if (ctx.membershipRole !== "technician") return formatted;
-  const items = formatted.items.filter((item: { technicianUserId?: string | null }) => item.technicianUserId === ctx.actorUserId);
-  const { sourceDocumentTotal: _source, recognizedTotal: _recognized, claims: _claims, ...safe } = formatted;
-  return { ...safe, items };
+  if (ctx.membershipRole === "technician") {
+    const items = formatted.items.filter((item: { technicianUserId?: string | null }) => item.technicianUserId === ctx.actorUserId);
+    const { sourceDocumentTotal: _source, recognizedTotal: _recognized, claims: _claims, ...safe } = formatted;
+    return { ...safe, items };
+  }
+  if (ctx.membershipRole === "client") {
+    // Clientes conferem itens e serviços, mas dados de roteamento interno / técnico são ocultados
+    const items = formatted.items.map((item: any) => {
+      const { technicianUserId: _tId, ...clientSafeItem } = item;
+      return clientSafeItem;
+    });
+    return { ...formatted, items };
+  }
+  return formatted;
 }
 
 export async function absorbProvisionalClaimsInTransaction(
@@ -406,10 +423,17 @@ export async function commitReviewedImport(ctx: RequestContext, importId: string
 export async function getPaymentList(ctx: RequestContext, id: string) { return sanitize(ctx, await scopedList(ctx, id)); }
 export async function listPaymentLists(ctx: RequestContext) {
   const isTechnician = ctx.membershipRole === "technician" && ctx.scope === "workspace";
+  const isClient = ctx.membershipRole === "client";
+  let authorizedClientIds: string[] | null = null;
+  if (isClient) {
+    authorizedClientIds = await getAuthorizedClientIdsForUser(ctx);
+  }
+
   const records = await prisma.paymentList.findMany({
     where: {
       workspaceId: ws(ctx),
       ...(isTechnician ? { items: { some: { technicianUserId: ctx.actorUserId } } } : {}),
+      ...(isClient ? { clientId: { in: authorizedClientIds ?? [] } } : {}),
     },
     include: { items: true },
     orderBy: { createdAt: "desc" },

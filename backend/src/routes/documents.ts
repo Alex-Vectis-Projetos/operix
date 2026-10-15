@@ -1,9 +1,13 @@
 import { Router, type Response } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
+import { resolveRequestContext } from "../middleware/requestContext.js";
 import { notifyDocumentUpdated, getWorkspaceManagerUserIds } from "../services/notificationService.js";
 
 export const documentsRouter = Router();
+
+documentsRouter.use(requireAuth);
+documentsRouter.use(resolveRequestContext);
 
 function mapDoc(doc: any) {
   return {
@@ -29,12 +33,18 @@ function mapDoc(doc: any) {
 }
 
 // GET /documents?entity_type=&module=&parent_id= (or parent_id=null)
-documentsRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+documentsRouter.get("/", async (req: AuthenticatedRequest, res: Response) => {
+  const workspaceId = req.ctx?.activeWorkspaceId;
+  if (!workspaceId) {
+    return res.status(403).json({ message: "Workspace ativo não definido." });
+  }
+
   const { entity_type, module: mod, parent_id } = req.query as Record<string, string | undefined>;
   if (!entity_type) return res.status(400).json({ message: "entity_type é obrigatório." });
 
   const docs = await prisma.document.findMany({
     where: {
+      workspaceId,
       entityType: entity_type,
       ...(mod ? { module: mod } : {}),
       parentId: parent_id === undefined || parent_id === "null" ? null : parent_id,
@@ -45,12 +55,17 @@ documentsRouter.get("/", requireAuth, async (req: AuthenticatedRequest, res: Res
 });
 
 // GET /documents/folders?entity_type=
-documentsRouter.get("/folders", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+documentsRouter.get("/folders", async (req: AuthenticatedRequest, res: Response) => {
+  const workspaceId = req.ctx?.activeWorkspaceId;
+  if (!workspaceId) {
+    return res.status(403).json({ message: "Workspace ativo não definido." });
+  }
+
   const { entity_type } = req.query as Record<string, string | undefined>;
   if (!entity_type) return res.status(400).json({ message: "entity_type é obrigatório." });
 
   const folders = await prisma.document.findMany({
-    where: { entityType: entity_type, type: "folder" },
+    where: { workspaceId, entityType: entity_type, type: "folder" },
     select: { id: true, name: true, parentId: true },
     orderBy: { name: "asc" },
   });
@@ -79,8 +94,8 @@ documentsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res: Re
       zoom: b.zoom ?? 1,
       validated: b.validated ?? false,
       visualState: b.visual_state ?? null,
-      uploadedBy: b.uploaded_by ?? null,
-      workspaceId: b.workspace_id ?? null,
+      uploadedBy: req.ctx?.actorUserId ?? req.auth?.userId ?? null,
+      workspaceId: req.ctx?.activeWorkspaceId ?? null,
       ...(b.created_at ? { createdAt: new Date(b.created_at) } : {}),
     },
   });

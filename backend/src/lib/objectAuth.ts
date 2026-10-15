@@ -315,3 +315,29 @@ export async function assertClientCapability(
   };
 }
 
+/**
+ * Retorna os clientIds autorizados para o usuário no workspace ativo,
+ * ou null se o usuário não for membro com role 'client' (ex: admin/owner/manager).
+ */
+export async function getAuthorizedClientIdsForUser(
+  ctx: RequestContext,
+  tx?: any
+): Promise<string[] | null> {
+  if (ctx.membershipRole !== "client") {
+    return null;
+  }
+  if (!ctx.activeWorkspaceId || !ctx.actorUserId) {
+    return [];
+  }
+  const db = tx ?? prisma;
+  const grants = await db.clientAccessGrant.findMany({
+    where: {
+      workspaceId: ctx.activeWorkspaceId,
+      userId: ctx.actorUserId,
+      status: "active",
+      revokedAt: null,
+    },
+    select: { clientId: true },
+  });
+  return Array.from(new Set(grants.map((g: { clientId: string }) => g.clientId)));
+}

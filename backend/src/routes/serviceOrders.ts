@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { resolveRequestContext, type RequestContext } from "../middleware/requestContext.js";
-import { ForbiddenError } from "../lib/objectAuth.js";
+import { ForbiddenError, getAuthorizedClientIdsForUser } from "../lib/objectAuth.js";
 
 export const serviceOrdersRouter = Router();
 
@@ -113,9 +113,13 @@ serviceOrdersRouter.get("/", async (req: Request, res: Response, next: NextFunct
       deletedAt: null,
     };
 
-    // Technician own-scope enforcement (OWASP API1 / BOLA)
-    // Canonical ownership via WeeklogEntry takes precedence when link exists; falls back to legacy fields.
-    if (isTechScope(ctx)) {
+    // Client boundary enforcement (OWASP API1 / BOLA)
+    if (ctx.membershipRole === "client") {
+      const authorizedClientIds = await getAuthorizedClientIdsForUser(ctx);
+      where.clientId = { in: authorizedClientIds ?? [] };
+    } else if (isTechScope(ctx)) {
+      // Technician own-scope enforcement (OWASP API1 / BOLA)
+      // Canonical ownership via WeeklogEntry takes precedence when link exists; falls back to legacy fields.
       where.OR = [
         { assignedUserId: ctx.actorUserId },
         { userId: ctx.actorUserId },
@@ -131,7 +135,7 @@ serviceOrdersRouter.get("/", async (req: Request, res: Response, next: NextFunct
       where.assignedUserId = assigned_user_id;
     }
 
-    if (client_id) where.clientId = client_id;
+    if (ctx.membershipRole !== "client" && client_id) where.clientId = client_id;
     if (platform) where.platform = platform;
     if (week) where.week = week;
 
@@ -239,6 +243,23 @@ serviceOrdersRouter.get("/clients", async (req: Request, res: Response, next: Ne
       return res.status(403).json({ message: "Workspace ativo não definido." });
     }
 
+    if (ctx.membershipRole === "client") {
+      const authorizedClientIds = await getAuthorizedClientIdsForUser(ctx);
+      if (!authorizedClientIds || authorizedClientIds.length === 0) {
+        return res.json([]);
+      }
+      const clients = await prisma.client.findMany({
+        where: {
+          id: { in: authorizedClientIds },
+          workspaceId: ctx.activeWorkspaceId,
+          deletedAt: null,
+        },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      });
+      return res.json(clients);
+    }
+
     if (isTechScope(ctx)) {
       const ownOrders = await prisma.serviceOrder.findMany({
         where: {
@@ -337,6 +358,12 @@ serviceOrdersRouter.patch("/:id", async (req: Request, res: Response, next: Next
       return res.status(404).json({ message: "Ordem de serviço não encontrada." });
     }
 
+    if (ctx.membershipRole === "client") {
+      throw new ForbiddenError(
+        "Clientes não possuem autoridade para alterar ordens de serviço diretamente. Validações devem ser realizadas através do fluxo de WEEKLOG."
+      );
+    }
+
     if (
       isTechScope(ctx) &&
       order.assignedUserId !== ctx.actorUserId &&
@@ -405,6 +432,10 @@ serviceOrdersRouter.delete("/:id", async (req: Request, res: Response, next: Nex
 
     if (!order || order.workspaceId !== ctx.activeWorkspaceId || order.deletedAt !== null) {
       return res.status(404).json({ message: "Ordem de serviço não encontrada." });
+    }
+
+    if (ctx.membershipRole === "client") {
+      throw new ForbiddenError("Clientes não possuem autoridade para excluir ordens de serviço.");
     }
 
     if (
