@@ -85,11 +85,11 @@ const sendInvoiceSchema = z.object({
 const clientKindSchema = z.enum(["professional", "particular"]);
 
 const clientContactSchema = z.object({
-  first_name: z.string().max(120).optional().default(""),
-  last_name: z.string().max(120).optional().default(""),
-  role: z.string().max(120).optional().default(""),
-  email: z.string().max(160).optional().default(""),
-  phone: z.string().max(40).optional().default(""),
+  first_name: z.string().max(120).nullish().transform((v) => v ?? ""),
+  last_name: z.string().max(120).nullish().transform((v) => v ?? ""),
+  role: z.string().max(120).nullish().transform((v) => v ?? ""),
+  email: z.string().max(160).nullish().transform((v) => v ?? ""),
+  phone: z.string().max(40).nullish().transform((v) => v ?? ""),
 });
 
 const operationalClientSchema = z.object({
@@ -126,7 +126,9 @@ function requireAdmin(req: AuthenticatedRequest, res: Response) {
   const isInternalManager =
     ctx?.platformRole === "platform_admin" ||
     ctx?.membershipRole === "owner" ||
-    ctx?.membershipRole === "admin";
+    ctx?.membershipRole === "admin" ||
+    req.auth?.role === "admin" ||
+    req.auth?.role === "owner";
 
   if (!isInternalManager) {
     res.status(403).json({ message: "Forbidden." });
@@ -631,23 +633,26 @@ operationalBillingRouter.post("/admin/ops/clients", async (req: AuthenticatedReq
 operationalBillingRouter.patch("/admin/ops/clients/:clientId", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const paramsSchema = z.object({ clientId: z.string().uuid() });
+    const paramsSchema = z.object({ clientId: z.string().min(1) });
     const { clientId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const input = operationalClientSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
     const workspaceId = await resolveOperationalWorkspaceId(req, input.workspace_id);
 
     const client = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const existing = await tx.billingClient.findFirst({
-        where: { id: clientId, workspaceId },
+        where: {
+          id: clientId,
+          ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+        },
       });
       if (!existing) {
         throw new NotFoundError("Client not found.");
       }
 
       const updated = await tx.billingClient.update({
-        where: { id: clientId },
+        where: { id: existing.id },
         data: {
-          workspaceId,
+          workspaceId: workspaceId ?? existing.workspaceId,
           kind: input.kind,
           name: input.name.trim(),
           siren: input.kind === "professional" ? normalizeNullableString(input.siren) : null,
@@ -683,28 +688,32 @@ operationalBillingRouter.patch("/admin/ops/clients/:clientId", async (req: Authe
       });
 
       // Sincroniza atualização para Client canônico
-      await tx.client.upsert({
-        where: { id: updated.id },
-        create: {
-          id: updated.id,
-          workspaceId: updated.workspaceId,
-          visibilityScope: "workspace",
-          name: updated.name,
-          contactEmail: updated.email,
-          contactPhone: updated.phone,
-          address: [updated.address, updated.postalCode, updated.city, updated.country].filter(Boolean).join(", ") || null,
-          displayCode: updated.customerDisplayId,
-          notes: updated.notes,
-          createdBy: req.auth?.userId ?? null,
-        },
-        update: {
-          name: updated.name,
-          contactEmail: updated.email,
-          contactPhone: updated.phone,
-          address: [updated.address, updated.postalCode, updated.city, updated.country].filter(Boolean).join(", ") || null,
-          notes: updated.notes,
-        },
-      });
+      try {
+        await tx.client.upsert({
+          where: { id: updated.id },
+          create: {
+            id: updated.id,
+            workspaceId: updated.workspaceId,
+            visibilityScope: "workspace",
+            name: updated.name,
+            contactEmail: updated.email,
+            contactPhone: updated.phone,
+            address: [updated.address, updated.postalCode, updated.city, updated.country].filter(Boolean).join(", ") || null,
+            displayCode: updated.customerDisplayId,
+            notes: updated.notes,
+            createdBy: req.auth?.userId ?? null,
+          },
+          update: {
+            name: updated.name,
+            contactEmail: updated.email,
+            contactPhone: updated.phone,
+            address: [updated.address, updated.postalCode, updated.city, updated.country].filter(Boolean).join(", ") || null,
+            notes: updated.notes,
+          },
+        });
+      } catch (syncErr) {
+        console.warn("[PATCH /admin/ops/clients/:clientId] Warn syncing to canonical client:", syncErr);
+      }
 
       return updated;
     });
@@ -720,13 +729,16 @@ operationalBillingRouter.patch("/admin/ops/clients/:clientId", async (req: Authe
 operationalBillingRouter.delete("/admin/ops/clients/:clientId", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const paramsSchema = z.object({ clientId: z.string().uuid() });
+    const paramsSchema = z.object({ clientId: z.string().min(1) });
     const { clientId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const workspaceId = await resolveOperationalWorkspaceId(req);
 
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const existing = await tx.billingClient.findFirst({
-        where: { id: clientId, workspaceId },
+        where: {
+          id: clientId,
+          ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+        },
         select: {
           id: true,
           workspaceId: true,
@@ -750,7 +762,7 @@ operationalBillingRouter.delete("/admin/ops/clients/:clientId", async (req: Auth
       });
 
       await tx.billingClient.delete({
-        where: { id: clientId },
+        where: { id: existing.id },
       });
     });
 
@@ -763,12 +775,15 @@ operationalBillingRouter.delete("/admin/ops/clients/:clientId", async (req: Auth
 operationalBillingRouter.get("/admin/ops/clients/:clientId", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const paramsSchema = z.object({ clientId: z.string().uuid() });
+    const paramsSchema = z.object({ clientId: z.string().min(1) });
     const { clientId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const workspaceId = await resolveOperationalWorkspaceId(req);
 
     const client = await prisma.billingClient.findFirst({
-      where: { id: clientId, workspaceId },
+      where: {
+        id: clientId,
+        ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+      },
     });
 
     if (!client) {
@@ -783,13 +798,16 @@ operationalBillingRouter.get("/admin/ops/clients/:clientId", async (req: Authent
       prisma.billingInvoice.findMany({
         where: {
           billingClientId: clientId,
-          workspaceId,
+          ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
           deletedAt: null,
         },
         orderBy: [{ issueDate: "desc" }, { createdAt: "desc" }],
       }),
       prisma.billingAttachment.findMany({
-        where: { billingClientId: clientId, workspaceId },
+        where: {
+          billingClientId: clientId,
+          ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+        },
         orderBy: { createdAt: "desc" },
       }),
     ]);
@@ -827,13 +845,16 @@ operationalBillingRouter.get("/admin/ops/clients/:clientId", async (req: Authent
 operationalBillingRouter.post("/admin/ops/clients/:clientId/attachments", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const paramsSchema = z.object({ clientId: z.string().uuid() });
+    const paramsSchema = z.object({ clientId: z.string().min(1) });
     const { clientId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const input = clientAttachmentSchema.parse((req as AuthenticatedRequest & { body: unknown }).body);
     const workspaceId = await resolveOperationalWorkspaceId(req);
 
     const client = await prisma.billingClient.findFirst({
-      where: { id: clientId, workspaceId },
+      where: {
+        id: clientId,
+        ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+      },
       select: {
         id: true,
         workspaceId: true,
@@ -884,8 +905,8 @@ operationalBillingRouter.delete("/admin/ops/clients/:clientId/attachments/:attac
   try {
     if (!requireAdmin(req, res)) return;
     const paramsSchema = z.object({
-      clientId: z.string().uuid(),
-      attachmentId: z.string().uuid(),
+      clientId: z.string().min(1),
+      attachmentId: z.string().min(1),
     });
     const { clientId, attachmentId } = paramsSchema.parse((req as AuthenticatedRequest & { params: unknown }).params);
     const workspaceId = await resolveOperationalWorkspaceId(req);
@@ -895,7 +916,7 @@ operationalBillingRouter.delete("/admin/ops/clients/:clientId/attachments/:attac
         where: {
           id: attachmentId,
           billingClientId: clientId,
-          workspaceId,
+          ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
         },
         select: {
           id: true,
@@ -922,7 +943,7 @@ operationalBillingRouter.delete("/admin/ops/clients/:clientId/attachments/:attac
       });
 
       await tx.billingAttachment.delete({
-        where: { id: attachmentId },
+        where: { id: existing.id },
       });
     });
 

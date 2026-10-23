@@ -34,7 +34,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/api";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import {
   lookupCompany, detectQueryType, mergeCompanyIntoForm, AUTO_APPLY_THRESHOLD,
   TIER_LABEL, LOOKUP_STATUS_LABEL,
@@ -251,11 +251,21 @@ export default function ClientsScreen() {
 
   const save = async () => {
     if (!form.name.trim()) {
-      toast({ title: "Nome é obrigatório", variant: "destructive" });
+      toast.error("Nome do cliente é obrigatório");
       return;
     }
     setSaving(true);
     try {
+      // Filtra contatos totalmente em branco
+      const cleanContacts = (form.contacts ?? []).filter(
+        (c) =>
+          (c.first_name || "").trim() ||
+          (c.last_name || "").trim() ||
+          (c.email || "").trim() ||
+          (c.phone || "").trim() ||
+          (c.role || "").trim()
+      );
+
       const payload: any = {
         kind: form.kind,
         name: form.name.trim(),
@@ -272,10 +282,11 @@ export default function ClientsScreen() {
         country: form.country || null,
         iban: form.iban || null,
         bic: form.bic || null,
-        contacts: form.contacts ?? [],
+        contacts: cleanContacts,
         notes: form.notes || null,
         is_active: form.is_active,
       };
+
       if (editing) {
         const res = await apiRequest<{ client?: Client; id?: string }>(`/billing/admin/ops/clients/${editing.id}`, {
           method: "PATCH",
@@ -283,7 +294,7 @@ export default function ClientsScreen() {
           body: JSON.stringify(payload),
         });
         if (!res) throw new Error("Servidor não confirmou atualização do cliente.");
-        toast({ title: "Cliente atualizado" });
+        toast.success("Cliente atualizado com sucesso!");
       } else {
         const res = await apiRequest<{ client?: Client; id?: string }>("/billing/admin/ops/clients", {
           method: "POST",
@@ -293,15 +304,19 @@ export default function ClientsScreen() {
         if (!res || (!res.client && !res.id)) {
           throw new Error("Servidor não confirmou persistência do cliente.");
         }
-        toast({ title: "Cliente criado" });
+        toast.success("Cliente criado com sucesso!");
       }
+
       setCreating(false);
+      setEditing(null);
+      setForm(emptyForm);
+
       await qc.invalidateQueries({ queryKey: ["ops-billing-clients"] });
       if (editing?.id) {
         await qc.invalidateQueries({ queryKey: ["ops-billing-client-detail", editing.id] });
       }
     } catch (e: any) {
-      toast({ title: "Erro ao guardar", description: e.message, variant: "destructive" });
+      toast.error(`Erro ao guardar cliente: ${e?.message || "Tente novamente"}`);
     } finally {
       setSaving(false);
     }
@@ -313,7 +328,7 @@ export default function ClientsScreen() {
       await apiRequest(`/billing/admin/ops/clients/${toDelete.id}`, {
         method: "DELETE",
       });
-      toast({ title: "Cliente removido" });
+      toast.success("Cliente removido com sucesso!");
       setToDelete(null);
       qc.invalidateQueries({ queryKey: ["ops-billing-clients"] });
       qc.removeQueries({ queryKey: ["ops-billing-client-detail", toDelete.id] });
@@ -321,7 +336,7 @@ export default function ClientsScreen() {
         setDetail(null);
       }
     } catch (e: any) {
-      toast({ title: "Erro ao remover", description: e.message, variant: "destructive" });
+      toast.error(`Erro ao remover cliente: ${e?.message || "Tente novamente"}`);
     }
   };
 
@@ -691,10 +706,7 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
                 size="sm"
                 onClick={() => {
                   onApply(result);
-                  toast({
-                    title: "Dados aplicados",
-                    description: `Informações de ${result.company_name} foram aplicadas ao formulário.`,
-                  });
+                  toast.success(`Informações de ${result.company_name} foram aplicadas ao formulário.`);
                 }}
                 className="bg-amber-500 hover:bg-amber-400 text-black font-semibold h-8 px-4 text-xs gap-1.5 shadow-sm"
               >
@@ -1149,10 +1161,10 @@ function ClientDetail({
           data_url: dataUrl,
         }),
       });
-      toast({ title: "Anexo adicionado" });
+      toast.success("Anexo adicionado com sucesso!");
       qc.invalidateQueries({ queryKey: ["ops-billing-client-detail", id] });
     } catch (e: any) {
-      toast({ title: "Erro ao anexar", description: e.message, variant: "destructive" });
+      toast.error(`Erro ao anexar documento: ${e?.message || "Tente novamente"}`);
     }
   };
 
@@ -1161,10 +1173,10 @@ function ClientDetail({
       await apiRequest(`/billing/admin/ops/clients/${id}/attachments/${a.id}`, {
         method: "DELETE",
       });
-      toast({ title: "Anexo removido" });
+      toast.success("Anexo removido com sucesso!");
       qc.invalidateQueries({ queryKey: ["ops-billing-client-detail", id] });
     } catch (e: any) {
-      toast({ title: "Erro", description: e.message, variant: "destructive" });
+      toast.error(`Erro ao remover anexo: ${e?.message || "Tente novamente"}`);
     }
   };
 
