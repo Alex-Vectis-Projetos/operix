@@ -115,10 +115,9 @@ peopleRouter.get("/", async (req: AuthenticatedRequest, res: Response, next: Nex
 
     const withPending = await Promise.all(
       people.map(async (p) => {
-        const pendingCount =
-          p.type === "technician" || p.type === "provider_operational"
-            ? await computeDocumentsPendingCount(p.id, p.location?.addressCountry ?? null)
-            : 0;
+        const pendingCount = TYPES_REQUIRING_LOCATION.includes(p.type as PersonType)
+          ? await computeDocumentsPendingCount(p.id, p.location?.addressCountry ?? null)
+          : 0;
         return mapPerson(p, { documents_pending_count: pendingCount });
       })
     );
@@ -144,7 +143,7 @@ peopleRouter.get("/:id", async (req: AuthenticatedRequest, res: Response, next: 
 
     let documentsSummary: unknown[] = [];
     let countryNotConfigured = false;
-    if (person.type === "technician" || person.type === "provider_operational") {
+    if (TYPES_REQUIRING_LOCATION.includes(person.type as PersonType)) {
       const country = person.location?.addressCountry ?? null;
       if (country) {
         const [requirements, documents] = await Promise.all([
@@ -175,7 +174,7 @@ peopleRouter.post("/", async (req: AuthenticatedRequest, res: Response, next: Ne
     }
     const body = req.body ?? {};
     if (!isPersonType(body.type)) {
-      return res.status(400).json({ message: "type inválido. Use: administrative, technician, provider_operational ou provider_administrative." });
+      return res.status(400).json({ message: "Tipo de pessoa inválido." });
     }
     const type = body.type as PersonType;
 

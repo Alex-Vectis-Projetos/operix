@@ -1,6 +1,13 @@
 export const PERSON_TYPES = [
-  "administrative",
   "technician",
+  "dismantler",
+  "painter",
+  "polisher",
+  "appraiser",
+  "driver",
+  "operations_manager",
+  "sales",
+  "administrative",
   "provider_operational",
   "provider_administrative",
 ] as const;
@@ -11,8 +18,16 @@ export function isPersonType(value: unknown): value is PersonType {
   return typeof value === "string" && (PERSON_TYPES as readonly string[]).includes(value);
 }
 
-/** Tipos que exigem vínculo obrigatório a um Local (FR-008, FR-013). */
-export const TYPES_REQUIRING_LOCATION: PersonType[] = ["technician", "provider_operational"];
+/** Tipos operacionais de pátio que exigem vínculo obrigatório a um Local e compliance documental. */
+export const TYPES_REQUIRING_LOCATION: PersonType[] = [
+  "technician",
+  "dismantler",
+  "painter",
+  "polisher",
+  "appraiser",
+  "driver",
+  "provider_operational",
+];
 
 export interface IdentityDocumentInput {
   document_type?: unknown;
@@ -37,7 +52,7 @@ interface ValidationInput {
 }
 
 /**
- * Valida campos obrigatórios de uma Pessoa conforme seu tipo (FR-004 a FR-014).
+ * Valida campos obrigatórios de uma Pessoa conforme seu tipo.
  * Retorna lista de labels de campos faltantes (vazia se válido).
  */
 export function findMissingPersonFields(input: ValidationInput): string[] {
@@ -48,25 +63,19 @@ export function findMissingPersonFields(input: ValidationInput): string[] {
 
   if (!has(input.full_name)) missing.push("Nome completo");
 
-  switch (input.type) {
-    case "administrative":
-      if (!hasAtLeastOneIdentityDocument()) missing.push("Documento de identidade");
-      if (!has(input.email)) missing.push("E-mail");
-      break;
-    case "technician":
-      if (!hasAtLeastOneIdentityDocument()) missing.push("Documento de identidade");
-      if (!has(input.email)) missing.push("E-mail");
-      if (!has(input.location_id)) missing.push("Local vinculado");
-      break;
-    case "provider_operational":
-      if (!hasAtLeastOneIdentityDocument()) missing.push("Documento de identidade");
-      if (!has(input.email)) missing.push("E-mail");
-      if (!has(input.location_id)) missing.push("Local vinculado");
-      break;
-    case "provider_administrative":
-      if (!has(input.tax_id)) missing.push("Número de identificação fiscal");
-      if (!has(input.address)) missing.push("Endereço");
-      break;
+  if (TYPES_REQUIRING_LOCATION.includes(input.type)) {
+    // Papéis operacionais de campo/pátio
+    if (!hasAtLeastOneIdentityDocument()) missing.push("Documento de identidade");
+    if (!has(input.email)) missing.push("E-mail");
+    if (!has(input.location_id)) missing.push("Local vinculado");
+  } else if (input.type === "provider_administrative") {
+    // Prestador PJ externo de apoio
+    if (!has(input.tax_id)) missing.push("Número de identificação fiscal");
+    if (!has(input.address)) missing.push("Endereço");
+  } else {
+    // Administrativo, Comercial, Gestão Operacional em nível corporativo
+    if (!hasAtLeastOneIdentityDocument()) missing.push("Documento de identidade");
+    if (!has(input.email)) missing.push("E-mail");
   }
 
   return missing;

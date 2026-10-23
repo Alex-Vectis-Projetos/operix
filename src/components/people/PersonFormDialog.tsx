@@ -17,8 +17,15 @@ import type { Person, PersonIdentityDocument, PersonInput, PersonType } from "@/
 import { PersonDocumentsPanel } from "@/components/people/PersonDocumentsPanel";
 
 const TYPE_OPTIONS: { value: PersonType; label: string }[] = [
+  { value: "technician", label: "Técnico DSP / Martelinho de Ouro" },
+  { value: "dismantler", label: "Montador / Desmontador" },
+  { value: "painter", label: "Pintor / Funileiro" },
+  { value: "polisher", label: "Polidor / Acabador" },
+  { value: "appraiser", label: "Perito / Avaliador / Orçamentista" },
+  { value: "driver", label: "Motorista / Logística" },
+  { value: "operations_manager", label: "Gestor Operacional / Coordenador" },
+  { value: "sales", label: "Comercial / Vendas" },
   { value: "administrative", label: "Administrativo" },
-  { value: "technician", label: "Técnico" },
   { value: "provider_operational", label: "Prestador de Serviços — Operacional" },
   { value: "provider_administrative", label: "Prestador de Serviços — Administrativo" },
 ];
@@ -104,9 +111,17 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
     setForm((f) => ({ ...f, id_documents: (f.id_documents ?? []).filter((_, i) => i !== index) }));
   }
 
-  const requiresLocation = form.type === "technician" || form.type === "provider_operational";
+  const requiresLocation = [
+    "technician",
+    "dismantler",
+    "painter",
+    "polisher",
+    "appraiser",
+    "driver",
+    "provider_operational",
+  ].includes(form.type);
   const isProviderAdmin = form.type === "provider_administrative";
-  const isAdministrative = form.type === "administrative";
+  const isCorporate = ["administrative", "operations_manager", "sales"].includes(form.type);
 
   function validate(): boolean {
     const missing: string[] = [];
@@ -273,14 +288,14 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
               </>
             )}
 
-            {form.type === "technician" && (
+            {!isProviderAdmin && (
               <div className="space-y-1.5">
                 <Label>Data de nascimento</Label>
                 <Input type="date" value={form.birth_date ?? ""} onChange={(e) => set("birth_date")(e.target.value)} />
               </div>
             )}
 
-            {isAdministrative && (
+            {isCorporate && (
               <>
                 <div className="space-y-1.5">
                   <Label>Cargo / Função</Label>
@@ -304,7 +319,7 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
               </>
             )}
 
-            {(form.type === "technician" || form.type === "provider_operational") && (
+            {requiresLocation && (
               <>
                 <div className="space-y-1.5">
                   <Label>Função / Especialidade</Label>

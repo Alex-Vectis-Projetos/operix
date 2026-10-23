@@ -2,7 +2,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 
-export type PersonType = "administrative" | "technician" | "provider_operational" | "provider_administrative";
+export type PersonType =
+  | "technician"
+  | "dismantler"
+  | "painter"
+  | "polisher"
+  | "appraiser"
+  | "driver"
+  | "operations_manager"
+  | "sales"
+  | "administrative"
+  | "provider_operational"
+  | "provider_administrative";
 export type PersonStatus = "active" | "inactive";
 export type PersonDocumentStatus = "valid" | "expired" | "pending";
 

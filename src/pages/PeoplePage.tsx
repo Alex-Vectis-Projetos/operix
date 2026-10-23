@@ -14,8 +14,15 @@ import { usePeople, type Person, type PersonInput, type PersonType, type PersonS
 import { PersonFormDialog } from "@/components/people/PersonFormDialog";
 
 const TYPE_LABELS: Record<PersonType, string> = {
+  technician: "Técnico DSP",
+  dismantler: "Montador",
+  painter: "Pintor",
+  polisher: "Polidor",
+  appraiser: "Perito / Avaliador",
+  driver: "Motorista",
+  operations_manager: "Gestor Operacional",
+  sales: "Comercial",
   administrative: "Administrativo",
-  technician: "Técnico",
   provider_operational: "Prestador — Operacional",
   provider_administrative: "Prestador — Administrativo",
 };
@@ -111,12 +118,22 @@ export default function PeoplePage() {
                     <TableCell>{person.location_name ?? "—"}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{person.email ?? person.tax_id ?? "—"}</TableCell>
                     <TableCell>
-                      {(person.type === "technician" || person.type === "provider_operational") && (person.documents_pending_count ?? 0) > 0 ? (
-                        <Badge variant="secondary" className="gap-1">
-                          <AlertTriangle className="h-3 w-3" /> {person.documents_pending_count} pendente(s)
-                        </Badge>
-                      ) : person.type === "technician" || person.type === "provider_operational" ? (
-                        <Badge className="bg-green-600 hover:bg-green-600">Em dia</Badge>
+                      {[
+                        "technician",
+                        "dismantler",
+                        "painter",
+                        "polisher",
+                        "appraiser",
+                        "driver",
+                        "provider_operational",
+                      ].includes(person.type) ? (
+                        (person.documents_pending_count ?? 0) > 0 ? (
+                          <Badge variant="secondary" className="gap-1">
+                            <AlertTriangle className="h-3 w-3" /> {person.documents_pending_count} pendente(s)
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-green-600 hover:bg-green-600">Em dia</Badge>
+                        )
                       ) : (
                         "—"
                       )}
