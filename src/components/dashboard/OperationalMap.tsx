@@ -726,7 +726,8 @@ export function OperationalMap() {
           platform: o.platform || o.client_name || "Operação",
           plate: o.license_plate || o.licensePlate || "",
           car_name: o.car_name || "Veículo",
-          technician: o.technician_name || "",
+          technician: o.technician_name || o.technician || "",
+          technician_id: o.technician_id || o.technicianId || "",
           status: o.status || "open",
         },
       });
@@ -740,6 +741,7 @@ export function OperationalMap() {
       geometry: { type: "Point", coordinates: [c.payload.lng, c.payload.lat] },
       properties: {
         id: c.id,
+        user_id: c.user_id || c.payload?.user_id || "",
         name: c.payload.name || c.payload.city || "Base Operacional",
         city: c.payload.city ?? "Check-in",
         address: c.payload.address || "",
@@ -824,6 +826,22 @@ export function OperationalMap() {
   }, [hailReports]);
 
   /**
+   * Calculates geodesic great-circle distance between two [lng, lat] coordinates in kilometers.
+   */
+  function geoDistanceKm(coord1: [number, number], coord2: [number, number]): number {
+    const R = 6371;
+    const dLat = ((coord2[1] - coord1[1]) * Math.PI) / 180;
+    const dLng = ((coord2[0] - coord1[0]) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((coord1[1] * Math.PI) / 180) *
+        Math.cos((coord2[1] * Math.PI) / 180) *
+        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  /**
    * Generates curved geodesic / quadratic Bézier arc coordinates
    * between two geo-coordinates to create glowing flight/dispatch paths.
    */
@@ -839,7 +857,7 @@ export function OperationalMap() {
     const dy = lat2 - lat1;
     const dist = Math.hypot(dx, dy);
 
-    if (dist < 0.001) return [start, end];
+    if (dist < 0.0001) return [start, end];
 
     const midLng = (lng1 + lng2) / 2;
     const midLat = (lat1 + lat2) / 2;
@@ -847,7 +865,8 @@ export function OperationalMap() {
     const nx = -dy / dist;
     const ny = dx / dist;
 
-    const arcHeight = Math.min(dist * 0.18, 3.2);
+    // Curvatura proporcional controlada para evitar distorções espúrias
+    const arcHeight = Math.min(dist * 0.15, 1.2);
 
     const ctrlLng = midLng + nx * arcHeight;
     const ctrlLat = midLat + ny * arcHeight;
@@ -865,94 +884,205 @@ export function OperationalMap() {
 
   /* -------- Network curved geodesic arcs (Mission Control Topology) -- */
   const networkGeo = useMemo(() => {
+    // Se a camada de arcos / rede estiver desligada, oculta imediatamente
+    if (!layers.network) {
+      return { type: "FeatureCollection", features: [] };
+    }
+
     const features: any[] = [];
-    const teamPoints: [number, number][] = (teamsGeo.features as any[]).map((f) => f.geometry.coordinates);
-    const orderPoints = (ordersGeo.features as any[]).map((f) => ({
+    const teamNodes = (teamsGeo.features as any[]).map((f) => ({
       coords: f.geometry.coordinates as [number, number],
       id: f.properties?.id,
-      status: String(f.properties?.status || "").toLowerCase(),
-    }));
-    const hailPoints = (hailGeo.features as any[]).map((f) => ({
-      coords: f.geometry.coordinates as [number, number],
-      id: f.properties?.id,
-      severity: f.properties?.severity,
+      user_id: String(f.properties?.user_id || "").toLowerCase(),
+      name: String(f.properties?.name || "").toLowerCase(),
     }));
 
-    // 1. Base / Hub ➔ Orders (dispatch & coverage flight paths)
-    orderPoints.forEach((ord, idx) => {
-      if (teamPoints.length === 0) return;
-      let nearestBase = teamPoints[0];
-      let minDist = Infinity;
-      teamPoints.forEach((b) => {
-        const d = Math.hypot(b[0] - ord.coords[0], b[1] - ord.coords[1]);
-        if (d < minDist) { minDist = d; nearestBase = b; }
-      });
+    const showOrders = layers.orders || layers.operations;
+    const orderNodes = showOrders
+      ? (ordersGeo.features as any[])
+          .filter((f) => {
+            if (!layers.orders && layers.operations) {
+              const s = String(f.properties?.status || "").toLowerCase();
+              return (
+                s.includes("progress") ||
+                s.includes("andamento") ||
+                s.includes("open") ||
+                s.includes("executando")
+              );
+            }
+            return true;
+          })
+          .map((f) => ({
+            coords: f.geometry.coordinates as [number, number],
+            id: f.properties?.id,
+            technician: String(f.properties?.technician || "").toLowerCase(),
+            technician_id: String(f.properties?.technician_id || "").toLowerCase(),
+            status: String(f.properties?.status || "").toLowerCase(),
+          }))
+      : [];
 
-      // Regional link limit ~800km
-      if (minDist <= 10) {
-        const isOp =
-          ord.status.includes("progress") ||
-          ord.status.includes("andamento") ||
-          ord.status.includes("executando");
-        const arc = createCurvedArc(nearestBase, ord.coords, 20);
-        features.push({
-          type: "Feature",
-          geometry: { type: "LineString", coordinates: arc },
-          properties: {
-            id: `arc-order-${idx}`,
-            color: isOp ? "#10b981" : "#38bdf8",
-            width: isOp ? 2.2 : 1.5,
-            opacity: isOp ? 0.85 : 0.65,
-            type: isOp ? "operation" : "service",
-          },
+    const showStorms = layers.hail || layers.storms;
+    const hailNodes = showStorms
+      ? (hailGeo.features as any[]).map((f) => ({
+          coords: f.geometry.coordinates as [number, number],
+          id: f.properties?.id,
+          severity: f.properties?.severity,
+          radius_km: Number(f.properties?.radius_km || 25),
+        }))
+      : [];
+
+    // 1. Conexões de Ordens de Serviço
+    if (showOrders && orderNodes.length > 0) {
+      if (layers.teams && teamNodes.length > 0) {
+        // Se Equipes está ATIVA: Conecta Equipe ➔ Ordem
+        orderNodes.forEach((ord, idx) => {
+          let matchedBase: typeof teamNodes[0] | null = null;
+          let isDirectAssignment = false;
+
+          // Regra A (Vínculo Real de Domínio): Técnico atribuído à ordem
+          if (ord.technician_id || ord.technician) {
+            matchedBase =
+              teamNodes.find(
+                (t) =>
+                  (ord.technician_id && t.user_id && t.user_id === ord.technician_id) ||
+                  (ord.technician && t.name && (t.name.includes(ord.technician) || ord.technician.includes(t.name)))
+              ) ?? null;
+
+            if (matchedBase) {
+              const dKm = geoDistanceKm(matchedBase.coords, ord.coords);
+              if (dKm <= 350) {
+                isDirectAssignment = true;
+              } else {
+                matchedBase = null;
+              }
+            }
+          }
+
+          // Regra B (Fallback Proximidade Útil): Se não tem técnico atribuído, conecta à Base mais próxima até 80 km
+          if (!matchedBase) {
+            let minDistKm = Infinity;
+            teamNodes.forEach((b) => {
+              const dKm = geoDistanceKm(b.coords, ord.coords);
+              if (dKm < minDistKm) {
+                minDistKm = dKm;
+                matchedBase = b;
+              }
+            });
+            // Restrição estrita acordada: raio útil de até 80 km
+            if (minDistKm > 80) {
+              matchedBase = null;
+            }
+          }
+
+          if (matchedBase) {
+            const isOp =
+              ord.status.includes("progress") ||
+              ord.status.includes("andamento") ||
+              ord.status.includes("executando");
+            const arc = createCurvedArc(matchedBase.coords, ord.coords, 20);
+            features.push({
+              type: "Feature",
+              geometry: { type: "LineString", coordinates: arc },
+              properties: {
+                id: `arc-order-${idx}`,
+                color: isDirectAssignment
+                  ? isOp ? "#10b981" : "#38bdf8"
+                  : isOp ? "#059669" : "#0284c7",
+                width: isOp ? 2.2 : 1.5,
+                opacity: isOp ? 0.85 : 0.65,
+                type: isOp ? "operation" : "service",
+              },
+            });
+          }
+        });
+      } else if (!layers.teams && showStorms && hailNodes.length > 0) {
+        // Regra acordada: Se Equipes desativada e Granizo ativo, conecta Ordens às Tempestades que causaram o dano
+        orderNodes.forEach((ord, idx) => {
+          let nearestHail: typeof hailNodes[0] | null = null;
+          let minDistKm = Infinity;
+
+          hailNodes.forEach((h) => {
+            const dKm = geoDistanceKm(h.coords, ord.coords);
+            if (dKm < minDistKm) {
+              minDistKm = dKm;
+              nearestHail = h;
+            }
+          });
+
+          if (nearestHail) {
+            const maxImpactRadius = Math.min(80, Math.max(50, nearestHail.radius_km + 20));
+            if (minDistKm <= maxImpactRadius) {
+              const arc = createCurvedArc(nearestHail.coords, ord.coords, 20);
+              const isSelected = selectedHailId && nearestHail.id === selectedHailId;
+              features.push({
+                type: "Feature",
+                geometry: { type: "LineString", coordinates: arc },
+                properties: {
+                  id: `arc-storm-impact-${idx}`,
+                  color: "#c084fc",
+                  width: isSelected ? 2.6 : 1.6,
+                  opacity: isSelected ? 0.95 : 0.7,
+                  type: "storm_impact",
+                },
+              });
+            }
+          }
         });
       }
-    });
+    }
 
-    // 2. Base / Hub ➔ Storm Threat Vectors (tactical interception arcs)
-    hailPoints.forEach((hail, hIdx) => {
-      if (teamPoints.length === 0) return;
-      let nearestBase = teamPoints[0];
-      let minDist = Infinity;
-      teamPoints.forEach((b) => {
-        const d = Math.hypot(b[0] - hail.coords[0], b[1] - hail.coords[1]);
-        if (d < minDist) { minDist = d; nearestBase = b; }
-      });
+    // 2. Vetores de Interceptação de Granizo/Tempestades (Equipe ➔ Tempestade)
+    if (layers.teams && teamNodes.length > 0 && showStorms && hailNodes.length > 0) {
+      hailNodes.forEach((hail, hIdx) => {
+        let nearestBase: typeof teamNodes[0] | null = null;
+        let minDistKm = Infinity;
 
-      if (minDist <= 12) {
-        const arc = createCurvedArc(nearestBase, hail.coords, 24);
-        const color =
-          hail.severity === "extreme" ? "#ec4899" :
-          hail.severity === "severe" ? "#f97316" : "#eab308";
-        features.push({
-          type: "Feature",
-          geometry: { type: "LineString", coordinates: arc },
-          properties: {
-            id: `arc-hail-${hIdx}`,
-            color,
-            width: 2,
-            opacity: 0.75,
-            type: "threat_vector",
-          },
+        teamNodes.forEach((b) => {
+          const dKm = geoDistanceKm(b.coords, hail.coords);
+          if (dKm < minDistKm) {
+            minDistKm = dKm;
+            nearestBase = b;
+          }
         });
-      }
-    });
 
-    // 3. Inter-Base Command Backbone (mesh between branches)
-    if (teamPoints.length > 1) {
-      for (let i = 0; i < teamPoints.length - 1; i++) {
-        for (let j = i + 1; j < teamPoints.length; j++) {
-          const d = Math.hypot(teamPoints[i][0] - teamPoints[j][0], teamPoints[i][1] - teamPoints[j][1]);
-          if (d <= 8) {
-            const arc = createCurvedArc(teamPoints[i], teamPoints[j], 24);
+        // Limite tático de resposta para tempestades: até 150 km
+        if (nearestBase && minDistKm <= 150) {
+          const isSelected = selectedHailId && hail.id === selectedHailId;
+          const arc = createCurvedArc(nearestBase.coords, hail.coords, 24);
+          const color =
+            hail.severity === "extreme" ? "#ec4899" :
+            hail.severity === "severe" ? "#f97316" : "#eab308";
+          features.push({
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: arc },
+            properties: {
+              id: `arc-hail-${hIdx}`,
+              color,
+              width: isSelected ? 3.0 : 2.0,
+              opacity: isSelected ? 0.95 : 0.75,
+              type: "threat_vector",
+            },
+          });
+        }
+      });
+    }
+
+    // 3. Backbone entre Equipes (Apenas se Equipes estiver ativa)
+    if (layers.teams && teamNodes.length > 1) {
+      for (let i = 0; i < teamNodes.length - 1; i++) {
+        for (let j = i + 1; j < teamNodes.length; j++) {
+          const dKm = geoDistanceKm(teamNodes[i].coords, teamNodes[j].coords);
+          // Malha entre bases operacionais próximas (até 120 km)
+          if (dKm <= 120) {
+            const arc = createCurvedArc(teamNodes[i].coords, teamNodes[j].coords, 24);
             features.push({
               type: "Feature",
               geometry: { type: "LineString", coordinates: arc },
               properties: {
                 id: `arc-backbone-${i}-${j}`,
                 color: "#06b6d4",
-                width: 1.8,
-                opacity: 0.55,
+                width: 1.6,
+                opacity: 0.5,
                 type: "backbone",
               },
             });
@@ -962,7 +1092,18 @@ export function OperationalMap() {
     }
 
     return { type: "FeatureCollection", features };
-  }, [teamsGeo, ordersGeo, hailGeo]);
+  }, [
+    teamsGeo,
+    ordersGeo,
+    hailGeo,
+    layers.orders,
+    layers.operations,
+    layers.teams,
+    layers.hail,
+    layers.storms,
+    layers.network,
+    selectedHailId,
+  ]);
 
   /* -------- Init map ------------------------------------------------ */
   useEffect(() => {
@@ -1715,6 +1856,8 @@ export function OperationalMap() {
     ["hail-reports-glow", "hail-reports-core"].forEach((id) => setVis(id, layers.hail));
     // PDR Intel layers
     ["pdr-heatmap", "pdr-points"].forEach((id) => setVis(id, layers.pdr));
+    // Network telemetry arcs
+    ["network-lines-glow", "network-lines-core"].forEach((id) => setVis(id, layers.network));
   }, [layers, mapReady]);
 
   /* -------- RainViewer radar layer (animated frame playback) ------- */
