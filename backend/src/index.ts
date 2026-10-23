@@ -39,6 +39,7 @@ import { paymentListsRouter } from "./routes/paymentLists.js";
 import { externalOperationalImportsRouter } from "./routes/externalOperationalImports.js";
 import { agentRouter } from "./routes/agent.js";
 import { serviceCatalogRouter } from "./routes/serviceCatalog.js";
+import { companyLookupRouter } from "./routes/companyLookup.js";
 import { runWeatherIngest } from "./services/weatherIngest.js";
 import { runStartupCatchup, startPeriodicCloseRunner } from "./lib/weekCloseRunner.js";
 
@@ -97,6 +98,7 @@ app.use("/api/external-operational-imports", externalOperationalImportsRouter);
 app.use("/api/country-document-requirements", countryDocumentRequirementsRouter);
 app.use("/api/agent", agentRouter);
 app.use("/api/service-catalog", serviceCatalogRouter);
+app.use("/api/company-lookup", companyLookupRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof ZodError) {

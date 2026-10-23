@@ -1,6 +1,4 @@
-// Service layer for global business registry lookups (multi-provider).
-// All network calls go through the `company-lookup` Edge Function.
-import { supabase } from "@/integrations/supabase/client";
+import { apiRequest } from "@/lib/api";
 
 export type ConfidenceLevel = "validated" | "partially_enriched" | "fully_enriched" | "unverified";
 
@@ -137,11 +135,11 @@ export function formatVat(v: string): string { return v.replace(/\s/g, "").toUpp
 // ── Main API ───────────────────────────────────────────────────────────────
 
 export async function lookupCompany(query: string, countryHint: string = "FR"): Promise<LookupResponse> {
-  const { data, error } = await supabase.functions.invoke("company-lookup", {
-    body: { query, country_hint: countryHint },
+  return await apiRequest<LookupResponse>("/company-lookup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, country_hint: countryHint }),
   });
-  if (error) throw error;
-  return data as LookupResponse;
 }
 
 export function debounce<T extends (...args: any[]) => any>(fn: T, ms = 400) {

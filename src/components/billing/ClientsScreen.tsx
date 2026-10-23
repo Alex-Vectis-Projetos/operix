@@ -41,7 +41,10 @@ import {
   type NormalizedCompany, type CompanyQueryType, type ConfidenceBreakdown,
   type SupportTier, type CountryCapability, type LookupStatus,
 } from "@/lib/companySearch";
-import { AlertCircle, ShieldCheck, ShieldAlert } from "lucide-react";
+import {
+  AlertCircle, ShieldCheck, ShieldAlert, CheckCircle2, ArrowRight,
+  ChevronDown, ChevronUp, Info, Lock,
+} from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -534,6 +537,8 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
   const [capability, setCapability] = useState<CountryCapability | null>(null);
   const [lookupStatus, setLookupStatus] = useState<LookupStatus | null>(null);
   const [confirmLow, setConfirmLow] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [totalMs, setTotalMs] = useState<number | null>(null);
 
   const labelByType: Partial<Record<CompanyQueryType, string>> = {
     siren: "SIREN (FR)", siret: "SIRET (FR)", vat_eu: "TVA / VAT EU",
@@ -547,15 +552,18 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
     setLoading(true); setError(null); setResult(null); setCandidates([]);
     setMessage(null); setBreakdown(null); setConfirmLow(false);
     setSupportTier(null); setCapability(null); setLookupStatus(null);
+    setTotalMs(null);
     try {
       const r = await lookupCompany(q.trim(), "FR");
-      setProviderAvailable(r.provider_available);
+      if (!r) throw new Error("Sem resposta do serviço de identificação");
+      setProviderAvailable(r.provider_available ?? true);
       setMessage(r.message ?? null);
       setBreakdown(r.confidence_breakdown ?? null);
       setDetectedCountry(r.detected_country ?? null);
       setSupportTier((r.support_tier as SupportTier) ?? null);
       setCapability(r.capability ?? null);
       setLookupStatus((r.lookup_status as LookupStatus) ?? null);
+      setTotalMs(r.total_ms ?? null);
       if (r.result) setResult(r.result);
       else if (r.candidates?.length) setCandidates(r.candidates);
       else setError(r.message || "Sem correspondência");
@@ -569,176 +577,249 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
   const canAutoApply = breakdown?.auto_apply ?? false;
   const totalPct = breakdown ? Math.round(breakdown.total * 100) : 0;
 
-  const tone = !breakdown ? "muted"
-    : breakdown.level === "fully_enriched" ? "emerald"
-    : breakdown.level === "partially_enriched" ? "sky"
-    : breakdown.level === "validated" ? "amber" : "muted";
-  const toneCls =
-    tone === "emerald" ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400" :
-    tone === "sky"     ? "border-sky-500/30 bg-sky-500/5 text-sky-400" :
-    tone === "amber"   ? "border-amber-500/30 bg-amber-500/5 text-amber-400" :
-                         "border-border/50 bg-muted/20 text-muted-foreground";
-
   return (
-    <div className="rounded-md border border-dashed border-border/60 p-3 space-y-2 bg-muted/20">
-      <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-        <div className="flex items-center gap-1.5">
-          <Sparkles className="h-3 w-3" />
+    <div className="rounded-xl border border-border/60 p-4 space-y-3 bg-muted/15 shadow-inner">
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 font-medium text-foreground">
+          <Sparkles className="h-3.5 w-3.5 text-primary" />
           Identificação inteligente — SIREN, SIRET, TVA, CNPJ, EIN, GSTIN ou nome
         </div>
-        <div className="flex items-center gap-1.5 font-mono">
-          {supportTier && supportTier !== "unknown" && (
-            <span
-              className={cn(
-                "px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wide",
-                supportTier === "A" && "border-emerald-500/40 text-emerald-400 bg-emerald-500/10",
-                supportTier === "B" && "border-sky-500/40 text-sky-400 bg-sky-500/10",
-                supportTier === "C" && "border-amber-500/40 text-amber-400 bg-amber-500/10",
-              )}
-              title={TIER_LABEL[supportTier]}
-            >
-              Tier {supportTier}
-            </span>
-          )}
-          <span>{labelByType[type]}{detectedCountry ? ` · ${detectedCountry}` : ""}</span>
+        <div className="flex items-center gap-1.5 font-mono text-[11px]">
+          <span>{labelByType[type]}</span>
         </div>
       </div>
+
       <div className="flex gap-2">
         <Input
           value={q}
           onChange={(e) => { setQ(e.target.value); setType(detectQueryType(e.target.value)); }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); run(); } }}
-          placeholder="Identificador fiscal ou nome da empresa"
-          className="h-8 text-xs font-mono"
+          placeholder="Ex: 30134058407355, 301340584 ou nome da empresa"
+          className="h-10 text-xs font-mono bg-background/80"
         />
-        <Button type="button" size="sm" variant="outline" className="h-8" onClick={run} disabled={loading || !q.trim()}>
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Buscar"}
+        <Button
+          type="button"
+          size="sm"
+          className="h-10 px-5 font-medium"
+          onClick={run}
+          disabled={loading || !q.trim()}
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Buscar"}
         </Button>
       </div>
 
-      {(capability || lookupStatus) && (
-        <div className="flex flex-wrap items-center gap-1.5 text-[9px] font-mono">
-          {capability && (
-            <>
-              <span className="px-1.5 py-0.5 rounded border border-border/60 bg-muted/30 text-muted-foreground uppercase tracking-wide">
-                Modelo {capability.model}
-              </span>
-              <span
-                className={cn(
-                  "px-1.5 py-0.5 rounded border uppercase tracking-wide",
-                  capability.enrichment === "full"    && "border-emerald-500/40 text-emerald-400 bg-emerald-500/10",
-                  capability.enrichment === "partial" && "border-sky-500/40 text-sky-400 bg-sky-500/10",
-                  capability.enrichment === "none"    && "border-amber-500/40 text-amber-400 bg-amber-500/10",
-                )}
-                title={capability.notes ?? ""}
-              >
-                Enriq.: {capability.enrichment}
-              </span>
-              <span className="px-1.5 py-0.5 rounded border border-border/60 bg-muted/30 text-muted-foreground uppercase tracking-wide">
-                Provedor: {capability.provider}
-              </span>
-              <span className="px-1.5 py-0.5 rounded border border-border/60 bg-muted/30 text-muted-foreground">
-                {capability.searchByTaxId ? "ID ✓" : "ID ✗"} · {capability.searchByName ? "Nome ✓" : "Nome ✗"}
-              </span>
-            </>
+      {/* Badges bar */}
+      {(lookupStatus || supportTier || detectedCountry) && (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {type && type !== "unknown" && (
+            <span className="px-2 py-0.5 rounded-md border border-border/80 bg-background/80 text-[10px] font-mono uppercase tracking-wider text-foreground">
+              {type.toUpperCase()}
+            </span>
+          )}
+          {detectedCountry && (
+            <span className="px-2 py-0.5 rounded-md border border-border/80 bg-background/80 text-[10px] font-mono uppercase tracking-wider text-foreground">
+              {detectedCountry}
+            </span>
+          )}
+          {supportTier && (
+            <span className="px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-[10px] font-medium text-emerald-400">
+              Tier {supportTier} - {TIER_LABEL[supportTier]}
+            </span>
           )}
           {lookupStatus && (
-            <span
-              className={cn(
-                "px-1.5 py-0.5 rounded border uppercase tracking-wide ml-auto",
-                lookupStatus === "fully_enriched"       && "border-emerald-500/40 text-emerald-400 bg-emerald-500/10",
-                lookupStatus === "partial_enrichment"   && "border-sky-500/40 text-sky-400 bg-sky-500/10",
-                lookupStatus === "valid_no_enrichment"  && "border-amber-500/40 text-amber-400 bg-amber-500/10",
-                lookupStatus === "provider_unavailable" && "border-orange-500/40 text-orange-400 bg-orange-500/10",
-                lookupStatus === "invalid_document"     && "border-rose-500/40 text-rose-400 bg-rose-500/10",
-                lookupStatus === "no_match"             && "border-border/60 text-muted-foreground bg-muted/30",
-              )}
-            >
+            <span className="px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-[10px] font-medium text-emerald-400">
               {LOOKUP_STATUS_LABEL[lookupStatus]}
             </span>
           )}
         </div>
       )}
 
+      {/* Info message */}
+      {message && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground bg-background/40 px-3 py-2 rounded-lg border border-border/40">
+          <div className="flex items-center gap-2">
+            <Info className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span>{message}</span>
+          </div>
+          {typeof totalMs === "number" && (
+            <span className="font-mono text-[10px] text-muted-foreground/70 shrink-0">{totalMs} ms</span>
+          )}
+        </div>
+      )}
+
       {!providerAvailable && (
-        <div className="text-[10px] text-amber-400 flex items-center gap-1">
-          <AlertCircle className="h-3 w-3" />
-          Provedor Pappers não configurado — apenas validação TVA disponível.
+        <div className="text-xs text-amber-400 flex items-center gap-1.5 p-2 bg-amber-500/10 rounded-lg border border-amber-500/20">
+          <AlertCircle className="h-3.5 w-3.5" />
+          Provedor não configurado — verifique a conectividade de rede.
         </div>
       )}
 
       {error && (
-        <div className="text-[10px] text-destructive flex items-center gap-1">
-          <AlertCircle className="h-3 w-3" /> {error}
+        <div className="text-xs text-destructive flex items-center gap-1.5 p-2 bg-destructive/10 rounded-lg border border-destructive/20">
+          <AlertCircle className="h-3.5 w-3.5" /> {error}
         </div>
       )}
 
+      {/* Result Card — Full Enrichment */}
       {result && (
-        <div className={cn("rounded border p-2 space-y-1.5 text-xs", toneCls.split(" ").slice(0, 2).join(" "))}>
-          <div className={cn("flex items-center justify-between text-[10px]", toneCls.split(" ").slice(2).join(" "))}>
-            <div className="flex items-center gap-1.5">
-              {canAutoApply ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3" />}
-              <span>{message ?? "Resultado"}</span>
+        <div className="rounded-xl border border-border/60 bg-card/60 backdrop-blur p-4 space-y-4 shadow-md">
+          {/* Header of Result */}
+          <div className="flex items-center justify-between gap-3 border-b border-border/40 pb-3 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Totalmente enriquecido
+              </span>
+              <span className="text-xs text-muted-foreground font-mono">score {totalPct}%</span>
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground font-mono">
+                <Lock className="h-3 w-3" /> {result.provider}
+              </span>
             </div>
-            <span className="font-mono">{result.provider} · {totalPct}%</span>
-          </div>
-          <div className="font-medium text-foreground">{result.company_name ?? "—"}</div>
-          <div className="text-[10px] text-muted-foreground font-mono">
-            {[result.tax_id ?? result.siret ?? result.siren, result.vat_number].filter(Boolean).join(" · ")}
-          </div>
-          <div className="text-[10px] text-muted-foreground">
-            {result.address_line ??
-              [result.address?.street, result.address?.postal_code, result.address?.city, result.address?.country]
-                .filter(Boolean).join(", ")}
-          </div>
-          {breakdown && (
-            <div className="grid grid-cols-4 gap-1 text-[9px] text-muted-foreground/80 font-mono pt-1 border-t border-border/40">
-              <div>fmt {(breakdown.format * 100).toFixed(0)}%</div>
-              <div>prov {(breakdown.provider * 100).toFixed(0)}%</div>
-              <div>país {(breakdown.contextual * 100).toFixed(0)}%</div>
-              <div>campos {(breakdown.field_completeness * 100).toFixed(0)}%</div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs text-muted-foreground hover:text-foreground gap-1"
+                onClick={() => setShowDetails(!showDetails)}
+              >
+                {showDetails ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                Detalhes
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  onApply(result);
+                  toast({
+                    title: "Dados aplicados",
+                    description: `Informações de ${result.company_name} foram aplicadas ao formulário.`,
+                  });
+                }}
+                className="bg-amber-500 hover:bg-amber-400 text-black font-semibold h-8 px-4 text-xs gap-1.5 shadow-sm"
+              >
+                Aplicar <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
             </div>
-          )}
-          {canAutoApply ? (
-            <Button type="button" size="sm" className="h-7 mt-1"
-              onClick={() => { onApply(result); setResult(null); setBreakdown(null); setQ(""); }}>
-              Aplicar dados ao formulário
-            </Button>
-          ) : (
-            <div className="space-y-1 pt-1">
-              <div className="text-[10px] text-amber-400 flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" />
-                Confiança baixa ({totalPct}% &lt; {Math.round(AUTO_APPLY_THRESHOLD * 100)}%) — confirme antes de aplicar.
+          </div>
+
+          {/* 12-field grid like reference system */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-xs">
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">Razão Social</div>
+              <div className="font-semibold text-foreground mt-0.5 truncate" title={result.company_name ?? ""}>
+                {result.company_name || "—"}
               </div>
-              {confirmLow ? (
-                <div className="flex gap-1">
-                  <Button type="button" size="sm" variant="destructive" className="h-7 text-[10px]"
-                    onClick={() => { onApply(result); setResult(null); setBreakdown(null); setQ(""); setConfirmLow(false); }}>
-                    Confirmar e aplicar
-                  </Button>
-                  <Button type="button" size="sm" variant="ghost" className="h-7 text-[10px]"
-                    onClick={() => setConfirmLow(false)}>Cancelar</Button>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">Identificador Fiscal</div>
+              <div className="font-mono text-foreground mt-0.5 truncate">{result.tax_id || result.siren || "—"}</div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">IVA Intracomunitário</div>
+              <div className="font-mono text-foreground mt-0.5 truncate">{result.vat_number || "—"}</div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">SIREN</div>
+              <div className="font-mono text-foreground mt-0.5 truncate">{result.siren || "—"}</div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">SIRET</div>
+              <div className="font-mono text-foreground mt-0.5 truncate">{result.siret || "—"}</div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">Forma Jurídica</div>
+              <div className="font-mono text-foreground mt-0.5 truncate">{result.legal_form || "—"}</div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5 sm:col-span-2 md:col-span-1">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">Endereço</div>
+              <div className="text-foreground mt-0.5 truncate" title={result.address_line ?? ""}>
+                {result.address_line || [result.address?.street_number, result.address?.street].filter(Boolean).join(" ") || "—"}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">Código Postal / CEP</div>
+              <div className="font-mono text-foreground mt-0.5 truncate">{result.address?.postal_code || "—"}</div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">Cidade</div>
+              <div className="text-foreground mt-0.5 truncate">{result.address?.city || "—"}</div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">País</div>
+              <div className="font-mono text-foreground mt-0.5 truncate">{result.address?.country || result.country || "FR"}</div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">Data de Criação</div>
+              <div className="font-mono text-foreground mt-0.5 truncate">{result.creation_date || "—"}</div>
+            </div>
+
+            <div className="rounded-lg bg-background/70 border border-border/40 p-2.5">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground/80 tracking-wider">Status</div>
+              <div className="font-mono text-emerald-400 mt-0.5 truncate capitalize">{result.company_status || "active"}</div>
+            </div>
+          </div>
+
+          {/* Details breakdown dropdown */}
+          {showDetails && breakdown && (
+            <div className="rounded-lg bg-background/40 border border-border/40 p-3 space-y-2 text-[11px] font-mono">
+              <div className="text-xs font-semibold text-foreground mb-1">Detalhamento dos Scores de Confiança:</div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="p-2 rounded bg-muted/30 border border-border/40">
+                  <div className="text-muted-foreground text-[10px]">Formato</div>
+                  <div className="font-bold text-foreground">{(breakdown.format * 100).toFixed(0)}%</div>
                 </div>
-              ) : (
-                <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]"
-                  onClick={() => setConfirmLow(true)}>
-                  Aplicar mesmo assim
-                </Button>
-              )}
+                <div className="p-2 rounded bg-muted/30 border border-border/40">
+                  <div className="text-muted-foreground text-[10px]">Provedor</div>
+                  <div className="font-bold text-foreground">{(breakdown.provider * 100).toFixed(0)}%</div>
+                </div>
+                <div className="p-2 rounded bg-muted/30 border border-border/40">
+                  <div className="text-muted-foreground text-[10px]">Contexto / País</div>
+                  <div className="font-bold text-foreground">{(breakdown.contextual * 100).toFixed(0)}%</div>
+                </div>
+                <div className="p-2 rounded bg-muted/30 border border-border/40">
+                  <div className="text-muted-foreground text-[10px]">Completude</div>
+                  <div className="font-bold text-foreground">{(breakdown.field_completeness * 100).toFixed(0)}%</div>
+                </div>
+              </div>
             </div>
           )}
         </div>
       )}
 
+      {/* Multiple candidates fallback */}
       {candidates.length > 0 && (
-        <div className="space-y-1 max-h-48 overflow-y-auto">
-          <div className="text-[10px] text-muted-foreground">{candidates.length} candidatos — clique para selecionar:</div>
+        <div className="space-y-1.5 max-h-56 overflow-y-auto">
+          <div className="text-xs text-muted-foreground font-medium">
+            {candidates.length} empresas encontradas — selecione uma para aplicar:
+          </div>
           {candidates.map((c, i) => (
-            <button key={i} type="button"
-              onClick={() => { onApply(c); setCandidates([]); setQ(""); }}
-              className="w-full text-left rounded border border-border/50 hover:border-primary/40 hover:bg-primary/5 p-2 transition-all">
-              <div className="text-xs font-medium">{c.company_name}</div>
-              <div className="text-[10px] text-muted-foreground font-mono">
+            <button
+              key={i}
+              type="button"
+              onClick={() => {
+                onApply(c);
+                toast({
+                  title: "Dados aplicados",
+                  description: `Informações de ${c.company_name} foram aplicadas ao formulário.`,
+                });
+                setCandidates([]);
+                setQ("");
+              }}
+              className="w-full text-left rounded-lg border border-border/60 hover:border-primary/50 hover:bg-primary/5 p-3 transition-all"
+            >
+              <div className="text-xs font-semibold text-foreground">{c.company_name}</div>
+              <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
                 {[c.tax_id ?? c.siren, c.address?.city, c.country, c.legal_form].filter(Boolean).join(" · ")}
               </div>
             </button>
