@@ -16,14 +16,14 @@ export function getAIConfigsSafe(): AIConfig[] {
     configs.push({
       apiKey: env.GEMINI_API_KEY,
       endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-      defaultModel: "gemini-2.0-flash",
+      defaultModel: env.GEMINI_MODEL,
     });
   }
   if (env.OPENAI_API_KEY) {
     configs.push({
       apiKey: env.OPENAI_API_KEY,
       endpoint: "https://api.openai.com/v1/chat/completions",
-      defaultModel: "gpt-4o-mini",
+      defaultModel: env.OPENAI_MODEL,
     });
   }
   return configs;
@@ -101,9 +101,9 @@ export async function fetchAICompletion(payload: Record<string, unknown>): Promi
     // Always read the body so we can inspect or re-wrap it
     const body = await res.json().catch(() => null);
 
-    // Fall back on auth/rate-limit errors
-    if ((res.status === 429 || res.status === 401 || res.status === 403) && !isLast) {
-      console.warn(`[ai] Provider ${config.endpoint} returned ${res.status}, trying fallback...`);
+    // Fall back on any non-OK HTTP status (404, 429, 401, 500, etc.)
+    if (!res.ok && !isLast) {
+      console.warn(`[ai] Provider ${config.endpoint} (${config.defaultModel}) returned ${res.status}, trying fallback...`);
       lastBody = body;
       lastStatus = res.status;
       continue;
