@@ -641,3 +641,86 @@ Return amount as a plain number. Dates as YYYY-MM-DD. Currency as ISO code.`,
     return res.status(500).json({ error: msg });
   }
 });
+
+extractRouter.post("/identity-document", async (req: Request, res: Response) => {
+  try {
+    const { fileBase64, mimeType, fileName } = req.body;
+    if (!fileBase64) return res.status(400).json({ error: "Nenhum arquivo fornecido." });
+    if (!mimeType) return res.status(400).json({ error: "MimeType ausente." });
+
+    const aiRes = await fetchAICompletion({
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert OCR and identity document extraction assistant for an international automotive operations management platform.
+Your job: extract personal identity information from photos, scans, or PDFs of identity documents (RG, CNH, Passaporte, CNI francês, Cartão de Cidadão português, DNI/NIE espanhol, Carta d'Identità italiana, Driver License, etc.).
+
+RULES:
+- Extract full name cleanly (no titles like Sr., Mr., etc.).
+- Identify document type accurately (e.g., "RG", "CNH", "Passaporte", "CNI", "Cartão de Cidadão", "DNI", "NIE", "Driver License").
+- Clean up document number (remove extraneous whitespace/letters if separated, keep standard format).
+- Normalize birth_date to ISO format: YYYY-MM-DD.
+- Normalize expiration_date to ISO format: YYYY-MM-DD if visible.
+- If a national tax identifier is present (CPF in Brazil, NIF in Portugal/Spain, etc.), extract into tax_id.
+- If nationality or issuing country is present, return standard 2-letter ISO code or country name.
+- Do NOT hallucinate. If a field is not legible or not present, return null.`,
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Extract identity information from this document. File: "${fileName ?? "document"}".
+Extract: full_name, document_type, document_number, birth_date, tax_id, nationality, expiration_date. Assess confidence.`,
+            },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${fileBase64}` } },
+          ],
+        },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "extract_identity_document",
+            description: "Extract structured identity document information.",
+            parameters: {
+              type: "object",
+              properties: {
+                full_name: { type: "string", description: "Full name as written on the document" },
+                document_type: {
+                  type: "string",
+                  description: "Standard document type name: RG, CNH, Passaporte, CNI, Cartão de Cidadão, DNI, NIE, Driver License, ID Card",
+                },
+                document_number: { type: "string", description: "Identity document registration number" },
+                birth_date: { type: "string", description: "Date of birth in YYYY-MM-DD format" },
+                tax_id: { type: "string", description: "Fiscal identification / Tax ID if visible (CPF, NIF, NIE, SSN)" },
+                nationality: { type: "string", description: "Nationality or country of issue" },
+                expiration_date: { type: "string", description: "Expiration date in YYYY-MM-DD format if present" },
+                confidence: { type: "string", enum: ["high", "medium", "low"] },
+              },
+              required: ["confidence"],
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "extract_identity_document" } },
+    });
+
+    if (!aiRes.ok) {
+      const errText = await aiRes.text();
+      if (aiRes.status === 429) return res.status(429).json({ error: "Limite de requisições excedido. Tente novamente em instantes." });
+      if (aiRes.status === 402) return res.status(402).json({ error: "Créditos de IA esgotados." });
+      return res.status(500).json({ error: `Erro na extração IA: ${aiRes.status} — ${errText}` });
+    }
+
+    const data = await aiRes.json();
+    const extracted = parseToolCall(data);
+    return res.json(extracted);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[extract/identity-document]", msg);
+    return res.status(500).json({ error: msg });
+  }
+});
+

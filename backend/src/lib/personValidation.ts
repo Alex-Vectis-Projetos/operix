@@ -64,10 +64,9 @@ export function findMissingPersonFields(input: ValidationInput): string[] {
   if (!has(input.full_name)) missing.push("Nome completo");
 
   if (TYPES_REQUIRING_LOCATION.includes(input.type)) {
-    // Papéis operacionais de campo/pátio
+    // Papéis operacionais de campo/pátio (local vinculado é opcional)
     if (!hasAtLeastOneIdentityDocument()) missing.push("Documento de identidade");
     if (!has(input.email)) missing.push("E-mail");
-    if (!has(input.location_id)) missing.push("Local vinculado");
   } else if (input.type === "provider_administrative") {
     // Prestador PJ externo de apoio
     if (!has(input.tax_id)) missing.push("Número de identificação fiscal");

@@ -7,7 +7,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2, UploadCloud, Sparkles } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { fileToBase64, pdfFirstPageToImageBase64 } from "@/lib/pdfUtils";
 import { toast } from "@/hooks/use-toast";
@@ -63,6 +63,7 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
   const [errors, setErrors] = useState<string[]>([]);
   const [savedPerson, setSavedPerson] = useState<Person | null>(null);
   const [extracting, setExtracting] = useState(false);
+  const [extractingIdDoc, setExtractingIdDoc] = useState(false);
 
   const { locations } = useLocations({ status: "active" });
   const { data: assignableUsers } = useAssignableUsers();
@@ -133,7 +134,6 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
       const hasValidDocument = identityDocuments.some((d) => d.document_type.trim() && d.document_number.trim());
       if (!hasValidDocument) missing.push("Documento de identidade");
       if (!form.email?.trim()) missing.push("E-mail");
-      if (requiresLocation && !form.location_id) missing.push("Local vinculado");
     }
     setErrors(missing);
     return missing.length === 0;
@@ -185,6 +185,81 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
       toast({ title: "Erro ao extrair Nota Fiscal", description: String((err as any)?.message ?? err), variant: "destructive" });
     } finally {
       setExtracting(false);
+    }
+  }
+
+  async function handleExtractIdentityDocument(file: File) {
+    setExtractingIdDoc(true);
+    try {
+      let base64: string;
+      let mimeType: string;
+      if (file.type === "application/pdf") {
+        const r = await pdfFirstPageToImageBase64(file, { maxWidth: 1600 });
+        base64 = r.base64;
+        mimeType = r.mimeType;
+      } else {
+        base64 = await fileToBase64(file);
+        mimeType = file.type || "image/jpeg";
+      }
+      const data = await apiRequest<{
+        full_name?: string;
+        document_type?: string;
+        document_number?: string;
+        birth_date?: string;
+        tax_id?: string;
+      }>("/extract/identity-document", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileBase64: base64, mimeType, fileName: file.name }),
+        timeoutMs: 25000,
+      });
+
+      if (!data) {
+        throw new Error("Não foi possível identificar informações legíveis no documento.");
+      }
+
+      setForm((f) => {
+        const updated = { ...f };
+        if (data.full_name) {
+          updated.full_name = data.full_name;
+        }
+        if (data.birth_date) {
+          updated.birth_date = data.birth_date.slice(0, 10);
+        }
+        if (data.tax_id && !f.tax_id) {
+          updated.tax_id = data.tax_id;
+        }
+
+        if (data.document_number) {
+          const docType = data.document_type || "Documento";
+          const docNum = data.document_number;
+          const currentDocs = [...(f.id_documents ?? [])];
+          if (currentDocs.length === 1 && !currentDocs[0].document_type && !currentDocs[0].document_number) {
+            currentDocs[0] = { document_type: docType, document_number: docNum };
+          } else {
+            const alreadyExists = currentDocs.some((d) => d.document_number === docNum);
+            if (!alreadyExists) {
+              currentDocs.push({ document_type: docType, document_number: docNum });
+            }
+          }
+          updated.id_documents = currentDocs;
+        }
+
+        return updated;
+      });
+
+      toast({
+        title: "Documento lido com sucesso!",
+        description: `Dados de ${data.full_name ?? "identificação"} extraídos e preenchidos no formulário.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Erro ao ler documento",
+        description: String((err as any)?.message ?? err),
+        variant: "destructive",
+      });
+    } finally {
+      setExtractingIdDoc(false);
     }
   }
 
@@ -242,25 +317,67 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
             {!isProviderAdmin && (
               <>
                 <div className="col-span-2 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Documentos de identidade *</Label>
-                    <Button type="button" size="sm" variant="outline" onClick={addIdentityDocument}>
-                      <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar documento
-                    </Button>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <Label>Documentos de identidade *</Label>
+                      <p className="text-xs text-muted-foreground">Adicione manualmente ou faça o upload para leitura inteligente.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="gap-1.5"
+                        disabled={extractingIdDoc}
+                        onClick={() => document.getElementById("person-id-doc-upload")?.click()}
+                      >
+                        {extractingIdDoc ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Lendo documento...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-3.5 w-3.5 text-primary" /> Ler Documento (OCR)
+                          </>
+                        )}
+                      </Button>
+                      <input
+                        id="person-id-doc-upload"
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        disabled={extractingIdDoc}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void handleExtractIdentityDocument(file);
+                          e.target.value = "";
+                        }}
+                      />
+                      <Button type="button" size="sm" variant="outline" onClick={addIdentityDocument}>
+                        <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
+                      </Button>
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground">Uma pessoa pode ter mais de um (ex.: CNI e Passaporte).</p>
+
+                  {extractingIdDoc && (
+                    <div className="rounded-md border border-primary/30 bg-primary/5 p-2.5 text-xs text-primary flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                      <span>A inteligência artificial está analisando o documento para preencher nome, tipo, número e data de nascimento...</span>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     {identityDocuments.map((doc, index) => (
                       <div key={index} className="flex items-center gap-2">
                         <Input
                           className="flex-1"
-                          placeholder="Tipo (CNI, Passaporte...)"
+                          placeholder="Tipo (CNI, Passaporte, RG, CNH...)"
                           value={doc.document_type}
                           onChange={(e) => updateIdentityDocument(index, { document_type: e.target.value })}
                         />
                         <Input
                           className="flex-1"
-                          placeholder="Número"
+                          placeholder="Número do documento"
                           value={doc.document_number}
                           onChange={(e) => updateIdentityDocument(index, { document_number: e.target.value })}
                         />
@@ -326,10 +443,14 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
                   <Input value={form.role ?? ""} onChange={(e) => set("role")(e.target.value)} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Local vinculado *</Label>
-                  <Select value={form.location_id ?? ""} onValueChange={(v) => set("location_id")(v)}>
-                    <SelectTrigger><SelectValue placeholder="Selecione um Local ativo" /></SelectTrigger>
+                  <Label>Local vinculado</Label>
+                  <Select
+                    value={form.location_id || "none"}
+                    onValueChange={(v) => set("location_id")(v === "none" ? "" : v)}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Selecione um Local ativo (opcional)" /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="none">Nenhum / Sem local vinculado</SelectItem>
                       {activeLocations.map((l) => (
                         <SelectItem key={l.id} value={l.id}>{l.name} — {l.address_country}</SelectItem>
                       ))}
