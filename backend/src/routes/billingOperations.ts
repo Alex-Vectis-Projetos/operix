@@ -193,18 +193,43 @@ async function getNextCustomerDisplayNum(
   workspaceId: string | null | undefined,
 ): Promise<{ num: number; formatted: string }> {
   const wsSafe = workspaceId ?? null;
-  const existing = await tx.billingClient.aggregate({
-    where: {
-      workspaceId: wsSafe,
-      customerDisplayNum: { not: null },
-    },
-    _max: { customerDisplayNum: true },
-  });
-  const nextNum = (existing._max.customerDisplayNum ?? 0) + 1;
-  if (nextNum > 99999) {
-    throw new Error("Limite máximo de clientes por workspace atingido (C-99999).");
+  // Busca o maior número no workspace e também globalmente para respeitar a constraint @unique de customerDisplayId
+  const [existingWs, existingGlobal] = await Promise.all([
+    tx.billingClient.aggregate({
+      where: {
+        workspaceId: wsSafe,
+        customerDisplayNum: { not: null },
+      },
+      _max: { customerDisplayNum: true },
+    }),
+    tx.billingClient.aggregate({
+      where: {
+        customerDisplayNum: { not: null },
+      },
+      _max: { customerDisplayNum: true },
+    }),
+  ]);
+
+  let nextNum = Math.max(
+    (existingWs._max.customerDisplayNum ?? 0) + 1,
+    (existingGlobal._max.customerDisplayNum ?? 0) + 1,
+    1,
+  );
+
+  // Procura de forma defensiva um código C-XXXXX que não colida com nenhum cliente existente
+  while (nextNum <= 99999) {
+    const formatted = formatCustomerDisplayId(nextNum);
+    const taken = await tx.billingClient.findFirst({
+      where: { customerDisplayId: formatted },
+      select: { id: true },
+    });
+    if (!taken) {
+      return { num: nextNum, formatted };
+    }
+    nextNum++;
   }
-  return { num: nextNum, formatted: formatCustomerDisplayId(nextNum) };
+
+  throw new Error("Limite máximo de clientes atingido (C-99999).");
 }
 
 async function lazyAssignDisplayIdsToExistingClients(workspaceId: string | null | undefined) {
@@ -595,29 +620,33 @@ operationalBillingRouter.post("/admin/ops/clients", async (req: AuthenticatedReq
       });
 
       // Sincroniza Client canônico compartilhado para orçamentos e operações
-      await tx.client.upsert({
-        where: { id: created.id },
-        create: {
-          id: created.id,
-          workspaceId,
-          visibilityScope: "workspace",
-          name: created.name,
-          contactEmail: created.email,
-          contactPhone: created.phone,
-          address: [created.address, created.postalCode, created.city, created.country].filter(Boolean).join(", ") || null,
-          displayCode: created.customerDisplayId,
-          notes: created.notes,
-          createdBy: req.auth?.userId ?? null,
-        },
-        update: {
-          name: created.name,
-          contactEmail: created.email,
-          contactPhone: created.phone,
-          address: [created.address, created.postalCode, created.city, created.country].filter(Boolean).join(", ") || null,
-          displayCode: created.customerDisplayId,
-          notes: created.notes,
-        },
-      });
+      try {
+        await tx.client.upsert({
+          where: { id: created.id },
+          create: {
+            id: created.id,
+            workspaceId,
+            visibilityScope: "workspace",
+            name: created.name,
+            contactEmail: created.email,
+            contactPhone: created.phone,
+            address: [created.address, created.postalCode, created.city, created.country].filter(Boolean).join(", ") || null,
+            displayCode: created.customerDisplayId,
+            notes: created.notes,
+            createdBy: req.auth?.userId ?? null,
+          },
+          update: {
+            name: created.name,
+            contactEmail: created.email,
+            contactPhone: created.phone,
+            address: [created.address, created.postalCode, created.city, created.country].filter(Boolean).join(", ") || null,
+            displayCode: created.customerDisplayId,
+            notes: created.notes,
+          },
+        });
+      } catch (syncErr) {
+        console.warn("[POST /admin/ops/clients] Warn syncing to canonical client:", syncErr);
+      }
 
       return created;
     });

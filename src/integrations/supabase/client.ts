@@ -6,18 +6,9 @@ const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, ""
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 function isDevOriginBlockedByCors(): boolean {
-  if (import.meta.env.DEV) return true;
-  const apiBase =
-    (
-      (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
-        ?.VITE_API_URL || ""
-    ).replace(/\/$/, "") || "";
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
-  return (
-    /\/\/72\.62\.27\.129:1010\b/.test(origin) ||
-    /72\.62\.27\.129:4010\/api/.test(apiBase)
-  );
+  // A arquitetura canônica Operix agora é Express + PostgreSQL + MinIO.
+  // O Supabase legado está 100% desativado para requisições de rede.
+  return true;
 }
 
 // ----------------------------------------------------------------------------

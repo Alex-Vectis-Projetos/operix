@@ -86,11 +86,7 @@ import { installAuthBreaker } from "./lib/authBreaker";
   const VITE_SUPABASE_URL = (env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
   const origin = window.location.origin;
 
-  const blocked =
-    !VITE_SUPABASE_URL ||
-    import.meta.env.DEV ||
-    /\/\/72\.62\.27\.129:1010\b/.test(origin) ||
-    /72\.62\.27\.129:4010\/api/.test(VITE_API_URL);
+  const blocked = true;
   if (!blocked) return;
 
   let supabaseHost = "";
