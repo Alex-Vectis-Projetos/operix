@@ -27,6 +27,9 @@ const errorSuggestions: Record<string, string> = {
   "permission denied": "Não tem permissão para esta ação. Verifique as suas credenciais.",
   "duplicate key": "Este registo já existe. Verifique os dados e tente novamente.",
   "violates foreign key": "Este registo está associado a outros dados e não pode ser modificado desta forma.",
+  "insertbefore": "Tradução automática ou extensão do navegador interferiu no carregamento. Recarregue a página.",
+  "not a child": "Tradução automática ou extensão do navegador interferiu no carregamento. Recarregue a página.",
+  "removechild": "Tradução automática ou extensão do navegador interferiu no carregamento. Recarregue a página.",
 };
 
 function getSuggestion(error: Error | null): string {
@@ -41,6 +44,7 @@ function getSuggestion(error: Error | null): string {
 function getCategory(error: Error | null): string {
   if (!error) return "Erro Desconhecido";
   const msg = (error.message || "").toLowerCase();
+  if (msg.includes("insertbefore") || msg.includes("not a child") || msg.includes("removechild")) return "Interferência de Tradução / Extensão";
   if (msg.includes("fetch") || msg.includes("network")) return "Erro de Rede";
   if (msg.includes("jwt") || msg.includes("auth") || msg.includes("session")) return "Erro de Autenticação";
   if (msg.includes("pgrst") || msg.includes("database") || msg.includes("duplicate") || msg.includes("violates")) return "Erro de Base de Dados";

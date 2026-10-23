@@ -5,6 +5,51 @@ import "./index.css";
 import { installAuthBreaker } from "./lib/authBreaker";
 
 // -----------------------------------------------------------------------------
+// DOM Mutation Protection Polyfill
+// Prevents Google Translate and browser extensions from causing fatal React
+// reconciliation crashes (e.g. "Failed to execute 'insertBefore' on 'Node':
+// The node before which the new node is to be inserted is not a child of this node").
+// -----------------------------------------------------------------------------
+(function installDOMProtection() {
+  if (typeof window === "undefined" || typeof Node === "undefined") return;
+  const gw = globalThis as any;
+  if (gw.__OPERIX_DOM_PROTECTION_INSTALLED__) return;
+  gw.__OPERIX_DOM_PROTECTION_INSTALLED__ = true;
+
+  const originalInsertBefore = Node.prototype.insertBefore;
+  Node.prototype.insertBefore = function <T extends Node>(newNode: T, referenceNode: Node | null): T {
+    if (referenceNode && referenceNode.parentNode !== this) {
+      if (typeof console !== "undefined" && typeof console.warn === "function") {
+        console.warn("[DOM Protection] Caught insertBefore reference mismatch. Appending instead.", {
+          newNode,
+          referenceNode,
+          parent: this,
+        });
+      }
+      return this.appendChild(newNode) as T;
+    }
+    return originalInsertBefore.call(this, newNode, referenceNode) as T;
+  };
+
+  const originalRemoveChild = Node.prototype.removeChild;
+  Node.prototype.removeChild = function <T extends Node>(child: T): T {
+    if (child && child.parentNode !== this) {
+      if (typeof console !== "undefined" && typeof console.warn === "function") {
+        console.warn("[DOM Protection] Caught removeChild parent mismatch. Safely removing via child actual parent.", {
+          child,
+          parent: this,
+        });
+      }
+      if (child.parentNode) {
+        return child.parentNode.removeChild(child) as T;
+      }
+      return child;
+    }
+    return originalRemoveChild.call(this, child) as T;
+  };
+})();
+
+// -----------------------------------------------------------------------------
 // EARLIEST-POSSIBLE Supabase fetch blocker (dev containers only)
 //
 // Installed BEFORE the Supabase client / Auth circuit breaker / ANY lazy
