@@ -190,7 +190,7 @@ export default function ClientsScreen() {
   const [toDelete, setToDelete] = useState<Client | null>(null);
   const [detail, setDetail] = useState<Client | null>(null);
 
-  const { data: listData, isLoading } = useQuery({
+  const { data: listData, isLoading, refetch } = useQuery({
     queryKey: ["ops-billing-clients"],
     queryFn: async () => {
       const data = await apiRequest<ClientListResponse>("/billing/admin/ops/clients?active_only=false");
@@ -199,6 +199,9 @@ export default function ClientsScreen() {
         balances: data.balances ?? {},
       };
     },
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
   const clientsRaw = listData?.clients;
   const balancesRaw = listData?.balances;
@@ -287,6 +290,8 @@ export default function ClientsScreen() {
         is_active: form.is_active,
       };
 
+      let savedClient: Client | null = null;
+
       if (editing) {
         const res = await apiRequest<{ client?: Client; id?: string }>(`/billing/admin/ops/clients/${editing.id}`, {
           method: "PATCH",
@@ -294,6 +299,7 @@ export default function ClientsScreen() {
           body: JSON.stringify(payload),
         });
         if (!res) throw new Error("Servidor não confirmou atualização do cliente.");
+        savedClient = res.client ? normalizeClient(res.client) : null;
         toast.success("Cliente atualizado com sucesso!");
       } else {
         const res = await apiRequest<{ client?: Client; id?: string }>("/billing/admin/ops/clients", {
@@ -304,14 +310,41 @@ export default function ClientsScreen() {
         if (!res || (!res.client && !res.id)) {
           throw new Error("Servidor não confirmou persistência do cliente.");
         }
+        savedClient = res.client ? normalizeClient(res.client) : null;
         toast.success("Cliente criado com sucesso!");
       }
 
+      // Fecha o modal e limpa os campos
       setCreating(false);
       setEditing(null);
       setForm(emptyForm);
 
+      // ATUALIZAÇÃO INSTANTÂNEA REATIVA NO CACHE DO REACT QUERY (SEM PRECISAR DE F5)
+      if (savedClient) {
+        qc.setQueriesData({ queryKey: ["ops-billing-clients"] }, (old: any) => {
+          if (!old || !Array.isArray(old.clients)) {
+            return { clients: savedClient ? [savedClient] : [], balances: old?.balances ?? {} };
+          }
+          if (editing) {
+            return {
+              ...old,
+              clients: old.clients.map((c: Client) => (c.id === savedClient!.id ? savedClient : c)),
+            };
+          } else {
+            const withoutNew = old.clients.filter((c: Client) => c.id !== savedClient!.id);
+            return {
+              ...old,
+              clients: [savedClient, ...withoutNew],
+            };
+          }
+        });
+      }
+
+      // Sincroniza em background
       await qc.invalidateQueries({ queryKey: ["ops-billing-clients"] });
+      await qc.invalidateQueries({ queryKey: ["ops-billing-clients-lite-for-invoices"] });
+      await refetch();
+
       if (editing?.id) {
         await qc.invalidateQueries({ queryKey: ["ops-billing-client-detail", editing.id] });
       }
@@ -325,14 +358,27 @@ export default function ClientsScreen() {
   const confirmDelete = async () => {
     if (!toDelete) return;
     try {
-      await apiRequest(`/billing/admin/ops/clients/${toDelete.id}`, {
+      const deletedId = toDelete.id;
+      await apiRequest(`/billing/admin/ops/clients/${deletedId}`, {
         method: "DELETE",
       });
       toast.success("Cliente removido com sucesso!");
       setToDelete(null);
-      qc.invalidateQueries({ queryKey: ["ops-billing-clients"] });
-      qc.removeQueries({ queryKey: ["ops-billing-client-detail", toDelete.id] });
-      if (detail?.id === toDelete.id) {
+
+      // ATUALIZAÇÃO INSTANTÂNEA NO CACHE PARA EXCLUSÃO (SEM PRECISAR DE F5)
+      qc.setQueriesData({ queryKey: ["ops-billing-clients"] }, (old: any) => {
+        if (!old || !Array.isArray(old.clients)) return old;
+        return {
+          ...old,
+          clients: old.clients.filter((c: Client) => c.id !== deletedId),
+        };
+      });
+
+      await qc.invalidateQueries({ queryKey: ["ops-billing-clients"] });
+      await qc.invalidateQueries({ queryKey: ["ops-billing-clients-lite-for-invoices"] });
+      await refetch();
+      qc.removeQueries({ queryKey: ["ops-billing-client-detail", deletedId] });
+      if (detail?.id === deletedId) {
         setDetail(null);
       }
     } catch (e: any) {
