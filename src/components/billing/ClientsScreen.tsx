@@ -615,7 +615,16 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
     setSupportTier(null); setCapability(null); setLookupStatus(null);
     setTotalMs(null);
     try {
-      const r = await lookupCompany(q.trim(), "FR");
+      const detectedType = detectQueryType(q.trim());
+      let countryHint = "FR";
+      if (detectedType === "cnpj") countryHint = "BR";
+      else if (detectedType === "ein") countryHint = "US";
+      else if (detectedType === "gstin") countryHint = "IN";
+      else if (detectedType === "bn_ca") countryHint = "CA";
+      else if (detectedType === "rfc_mx") countryHint = "MX";
+      else if (detectedType === "vat_eu" && /^[A-Z]{2}/.test(q.trim())) countryHint = q.trim().slice(0, 2).toUpperCase();
+
+      const r = await lookupCompany(q.trim(), countryHint);
       if (!r) throw new Error("Sem resposta do serviço de identificação");
       setProviderAvailable(r.provider_available ?? true);
       setMessage(r.message ?? null);
@@ -1013,9 +1022,9 @@ function ClientFormDialog({
               {isPro && (
                 <>
                   <div>
-                    <Label className="text-[10px] uppercase tracking-wider">SIREN</Label>
+                    <Label className="text-[10px] uppercase tracking-wider">SIREN / CNPJ / Doc Fiscal</Label>
                     <Input value={form.siren} onChange={(e) => setForm({ ...form, siren: e.target.value })}
-                      maxLength={9} className="h-8 text-xs font-mono" placeholder="123456789" />
+                      maxLength={32} className="h-8 text-xs font-mono" placeholder="SIREN ou CNPJ" />
                   </div>
                   <div>
                     <Label className="text-[10px] uppercase tracking-wider">SIRET</Label>

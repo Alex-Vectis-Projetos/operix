@@ -97,6 +97,23 @@ export const TIER_LABEL: Record<SupportTier, string> = {
 
 // ── Identifier detection (mirror of edge core, used by UI hints) ──────────
 
+export function isValidCnpj(v: string): boolean {
+  const s = v.replace(/\D/g, "");
+  if (s.length !== 14 || /^(\d)\1+$/.test(s)) return false;
+  const calc = (base: string) => {
+    const w = base.length === 12
+      ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    let sum = 0;
+    for (let i = 0; i < base.length; i++) sum += parseInt(base[i], 10) * w[i];
+    const r = sum % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  const d1 = calc(s.slice(0, 12));
+  const d2 = calc(s.slice(0, 12) + d1);
+  return d1 === parseInt(s[12], 10) && d2 === parseInt(s[13], 10);
+}
+
 export function detectQueryType(raw: string): DocumentKind {
   const v = (raw ?? "").trim();
   if (!v) return "unknown";
@@ -104,9 +121,11 @@ export function detectQueryType(raw: string): DocumentKind {
   const digits = v.replace(/\D/g, "");
 
   if (/^[A-Z]{2}/.test(upper) && digits.length >= 7) return "vat_eu";
-  if (/[\.\/-]/.test(v) && digits.length === 14) return "cnpj";
+  if (digits.length === 14) {
+    if (/[\.\/-]/.test(v) || isValidCnpj(digits)) return "cnpj";
+  }
   if (/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(upper)) return "gstin";
-  if (/^\d{2}-\d{7}$/.test(v)) return "ein";
+  if (/^\d{2}-?\d{7}$/.test(v)) return "ein";
   if (/^\d{9}\s?(RT|RC|RP)?\s?\d{0,4}$/i.test(v)) return "bn_ca";
   if (/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(upper)) return "rfc_mx";
   if (digits.length === 13 && digits === v.replace(/\s/g, "")) return "corp_jp";
@@ -159,7 +178,7 @@ export function mergeCompanyIntoForm<F extends Record<string, any>>(form: F, c: 
   return {
     ...form,
     name: c.company_name || c.legal_name || form.name,
-    siren: c.siren || form.siren,
+    siren: c.siren || c.tax_id || form.siren,
     siret: c.siret || form.siret,
     tva_intracom: c.vat_number || form.tva_intracom,
     tax_id: c.tax_id || form.tax_id,

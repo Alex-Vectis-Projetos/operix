@@ -207,11 +207,25 @@ export function emptyCompany(provider: string): NormalizedCompany {
 async function fetchWithTimeout(url: string, init?: RequestInit, ms = 7000): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
+  const defaultHeaders = {
+    "User-Agent": "Operix/1.0 (Business Identification; +https://operix-pro.com)",
+    "Accept": "application/json",
+  };
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(url, {
+      ...init,
+      headers: { ...defaultHeaders, ...(init?.headers || {}) },
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timer);
   }
+}
+
+export function formatCnpj(v: string): string {
+  const s = v.replace(/\D/g, "").slice(0, 14);
+  if (s.length !== 14) return v;
+  return s.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
 }
 
 // Detection
@@ -221,23 +235,52 @@ export function detectDocument(raw: string): { kind: DocumentKind; country: stri
   const upper = v.toUpperCase();
   const digits = v.replace(/\D/g, "");
 
-  // EU VAT
-  if (/^[A-Z]{2}/.test(upper) && digits.length >= 7) {
+  // EU VAT (ex: FR12345678901, DE123456789, IT12345678901, etc.)
+  if (/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(upper.replace(/[\s\.-]/g, "")) && digits.length >= 7) {
     const cc = upper.slice(0, 2);
-    return { kind: "vat_eu", country: cc, score: 0.9 };
+    return { kind: "vat_eu", country: cc, score: 0.95 };
   }
 
-  // Brazil CNPJ
-  if (/[\.\/-]/.test(v) && digits.length === 14) {
-    return { kind: "cnpj", country: "BR", score: isValidCnpj(v) ? 1.0 : 0.7 };
+  // Brazil CNPJ (14 dígitos com máscara ou 14 dígitos válidos no algoritmo módulo 11)
+  if (digits.length === 14) {
+    if (/[\.\/-]/.test(v) || isValidCnpj(digits)) {
+      return { kind: "cnpj", country: "BR", score: isValidCnpj(digits) ? 1.0 : 0.75 };
+    }
   }
 
-  // France SIREN / SIRET
+  // France SIREN (9 dígitos puros)
   if (digits.length === 9 && digits === v.replace(/\s/g, "")) {
     return { kind: "siren", country: "FR", score: isValidSiren(digits) ? 1.0 : 0.8 };
   }
+
+  // France SIRET (14 dígitos puros com algoritmo Luhn)
   if (digits.length === 14 && digits === v.replace(/\s/g, "")) {
     return { kind: "siret", country: "FR", score: isValidSiret(digits) ? 1.0 : 0.8 };
+  }
+
+  // US EIN (XX-XXXXXXX)
+  if (/^\d{2}-?\d{7}$/.test(v)) {
+    return { kind: "ein", country: "US", score: 0.9 };
+  }
+
+  // India GSTIN
+  if (/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(upper)) {
+    return { kind: "gstin", country: "IN", score: 0.95 };
+  }
+
+  // Canada BN (Business Number)
+  if (/^\d{9}\s?(RT|RC|RP)?\s?\d{0,4}$/i.test(v)) {
+    return { kind: "bn_ca", country: "CA", score: 0.85 };
+  }
+
+  // Mexico RFC
+  if (/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(upper)) {
+    return { kind: "rfc_mx", country: "MX", score: 0.85 };
+  }
+
+  // Japan Corporate Number (13 dígitos)
+  if (digits.length === 13 && digits === v.replace(/\s/g, "")) {
+    return { kind: "corp_jp", country: "JP", score: 0.9 };
   }
 
   // Fallback to name search
@@ -365,12 +408,187 @@ export async function lookupCompanyService(
 
   const digits = query.replace(/\D/g, "");
 
-  // FR Primary lookup via Recherche-Entreprises (API Oficial Francesa - Gratuita e Oficial)
-  if (classification.kind === "siret" || classification.kind === "siren" || countryHint === "FR" || classification.kind === "name") {
+function normalizeBrazilianCompany(d: any, provider: string, digits: string): NormalizedCompany {
+  const c = emptyCompany(provider);
+  c.country = "BR";
+  c.tax_id = formatCnpj(digits);
+  c.siren = formatCnpj(digits);
+  c.siret = digits;
+  c.company_name = d?.razao_social || d?.nome_fantasia || null;
+  c.legal_name = d?.razao_social || c.company_name;
+  const situacao = String(d?.descricao_situacao_cadastral || d?.situacao_cadastral || "").toUpperCase();
+  c.company_status = (situacao.includes("ATIVA") || situacao === "2") ? "active" : "ceased";
+  c.legal_form = d?.natureza_juridica || (d?.codigo_natureza_juridica ? String(d.codigo_natureza_juridica) : null);
+  c.creation_date = d?.data_inicio_atividade || null;
+
+  const logradouro = [d?.descricao_tipo_de_logradouro, d?.logradouro].filter(Boolean).join(" ").trim() || d?.logradouro || null;
+  const bairro = d?.bairro ? ` - ${d.bairro}` : "";
+  const fullStreet = logradouro ? `${logradouro}${bairro}` : null;
+
+  c.address = {
+    street: fullStreet,
+    street_number: d?.numero || null,
+    postal_code: d?.cep ? String(d.cep).replace(/^(\d{5})(\d{3})$/, "$1-$2") : null,
+    city: d?.municipio || null,
+    state: d?.uf || null,
+    country: "Brasil",
+  };
+  c.address_line = joinAddress(c.address);
+  c.confidence = "fully_enriched";
+  return c;
+}
+
+  // 1. Brazil CNPJ Lookup (Priority for CNPJ kind or BR country hint)
+  if (classification.kind === "cnpj" || (countryHint === "BR" && digits.length === 14)) {
+    const fetchT0 = Date.now();
+    let found = false;
+
+    // Provider A: BrasilAPI (Oficial / Espelho RFB)
+    try {
+      const resp = await fetchWithTimeout(`https://brasilapi.com.br/api/cnpj/v1/${digits}`, {}, 7000);
+      if (resp.ok) {
+        const d = await resp.json();
+        result = normalizeBrazilianCompany(d, "brasilapi", digits);
+        logs.push({ provider: "brazil-brasilapi", ms: Date.now() - fetchT0, ok: true });
+        found = true;
+      } else {
+        logs.push({ provider: "brazil-brasilapi", ms: Date.now() - fetchT0, ok: false, notes: `HTTP ${resp.status}` });
+      }
+    } catch (err: any) {
+      logs.push({ provider: "brazil-brasilapi", ms: Date.now() - fetchT0, ok: false, notes: String(err?.message ?? err) });
+    }
+
+    // Provider B: Minha Receita (Fallback aberto de alta disponibilidade da RFB)
+    if (!found) {
+      const mrT0 = Date.now();
+      try {
+        const resp = await fetchWithTimeout(`https://minhareceita.org/${digits}`, {}, 7000);
+        if (resp.ok) {
+          const d = await resp.json();
+          result = normalizeBrazilianCompany(d, "minha-receita", digits);
+          logs.push({ provider: "minha-receita", ms: Date.now() - mrT0, ok: true });
+          found = true;
+        } else {
+          logs.push({ provider: "minha-receita", ms: Date.now() - mrT0, ok: false, notes: `HTTP ${resp.status}` });
+        }
+      } catch (err: any) {
+        logs.push({ provider: "minha-receita", ms: Date.now() - mrT0, ok: false, notes: String(err?.message ?? err) });
+      }
+    }
+
+    // Provider C: CNPJ.ws Pública (Segundo Fallback)
+    if (!found) {
+      const wsT0 = Date.now();
+      try {
+        const resp = await fetchWithTimeout(`https://publica.cnpj.ws/cnpj/${digits}`, {}, 7000);
+        if (resp.ok) {
+          const d = await resp.json();
+          const estab = d?.estabelecimento || {};
+          const c = emptyCompany("cnpj-ws");
+          c.country = "BR";
+          c.tax_id = formatCnpj(digits);
+          c.siren = formatCnpj(digits);
+          c.siret = digits;
+          c.company_name = d?.razao_social || estab?.nome_fantasia || null;
+          c.legal_name = d?.razao_social || c.company_name;
+          c.company_status = estab?.situacao_cadastral === "Ativa" ? "active" : "ceased";
+          c.legal_form = d?.natureza_juridica?.descricao || null;
+          c.creation_date = estab?.data_inicio_atividade || null;
+          const logr = [estab?.tipo_logradouro, estab?.logradouro].filter(Boolean).join(" ").trim() || estab?.logradouro || null;
+          const b = estab?.bairro ? ` - ${estab.bairro}` : "";
+          c.address = {
+            street: logr ? `${logr}${b}` : null,
+            street_number: estab?.numero || null,
+            postal_code: estab?.cep ? String(estab.cep).replace(/^(\d{5})(\d{3})$/, "$1-$2") : null,
+            city: estab?.cidade?.nome || null,
+            state: estab?.estado?.sigla || null,
+            country: "Brasil",
+          };
+          c.address_line = joinAddress(c.address);
+          c.confidence = "fully_enriched";
+          result = c;
+          logs.push({ provider: "cnpj-ws", ms: Date.now() - wsT0, ok: true });
+          found = true;
+        } else {
+          logs.push({ provider: "cnpj-ws", ms: Date.now() - wsT0, ok: false, notes: `HTTP ${resp.status}` });
+        }
+      } catch (err: any) {
+        logs.push({ provider: "cnpj-ws", ms: Date.now() - wsT0, ok: false, notes: String(err?.message ?? err) });
+      }
+    }
+  }
+
+  // 2. EU VAT / TVA Intracomunitária
+  if (!result && classification.kind === "vat_eu") {
+    const cc = (classification.country || query.slice(0, 2)).toUpperCase();
+    const cleanVat = query.slice(2).replace(/[\s\.-]/g, "").toUpperCase();
+
+    // Se for TVA francesa (FR), os 9 dígitos finais são o SIREN!
+    if (cc === "FR" && cleanVat.length >= 9) {
+      const frenchSiren = cleanVat.slice(-9);
+      const frT0 = Date.now();
+      try {
+        const resp = await fetchWithTimeout(`https://recherche-entreprises.api.gouv.fr/search?q=${frenchSiren}&page=1&per_page=1`, {}, 7000);
+        if (resp.ok) {
+          const data = await resp.json();
+          const results = data?.results ?? [];
+          if (results.length > 0) {
+            result = normalizeRechercheEntreprise(results[0]);
+            result.vat_number = query.toUpperCase();
+            logs.push({ provider: "france-recherche-entreprises", ms: Date.now() - frT0, ok: true });
+          }
+        }
+      } catch (err: any) {
+        logs.push({ provider: "france-recherche-entreprises", ms: Date.now() - frT0, ok: false, notes: String(err?.message ?? err) });
+      }
+    }
+
+    // Fallback Oficial: VIES (Comissão Europeia)
+    if (!result) {
+      const viesT0 = Date.now();
+      try {
+        const viesUrl = `https://ec.europa.eu/taxation_customs/vies/rest-api/ms/${cc}/vat/${cleanVat}`;
+        const resp = await fetchWithTimeout(viesUrl, {}, 7000);
+        if (resp.ok) {
+          const data = await resp.json();
+          vies = data;
+          if (data?.isValid) {
+            const c = emptyCompany("eu-vies");
+            c.country = cc;
+            c.vat_number = `${cc}${cleanVat}`;
+            c.tax_id = c.vat_number;
+            c.company_name = data.name && data.name !== "---" ? data.name : null;
+            c.legal_name = c.company_name;
+            c.company_status = "active";
+            const rawAddr = data.address && data.address !== "---" ? data.address : "";
+            c.address_line = rawAddr || null;
+            c.address = {
+              street: rawAddr || null,
+              street_number: null,
+              postal_code: null,
+              city: null,
+              state: null,
+              country: cc,
+            };
+            c.confidence = c.company_name ? "fully_enriched" : "validated";
+            result = c;
+            logs.push({ provider: "eu-vies", ms: Date.now() - viesT0, ok: true });
+          } else {
+            logs.push({ provider: "eu-vies", ms: Date.now() - viesT0, ok: false, notes: data?.userError || "Número de IVA inválido" });
+          }
+        }
+      } catch (err: any) {
+        logs.push({ provider: "eu-vies", ms: Date.now() - viesT0, ok: false, notes: String(err?.message ?? err) });
+      }
+    }
+  }
+
+  // 3. FR Primary lookup via Recherche-Entreprises (SIRET / SIREN / Nome / França)
+  if (!result && (classification.kind === "siret" || classification.kind === "siren" || (countryHint === "FR" && classification.kind !== "cnpj") || (classification.kind === "name" && countryHint !== "BR"))) {
     const fetchT0 = Date.now();
     try {
       const searchUrl = `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(query)}&page=1&per_page=${classification.kind === "name" ? 8 : 1}`;
-      const resp = await fetchWithTimeout(searchUrl, { headers: { Accept: "application/json" } }, 8000);
+      const resp = await fetchWithTimeout(searchUrl, {}, 8000);
       if (resp.ok) {
         const data = await resp.json();
         const results = data?.results ?? [];
@@ -389,7 +607,7 @@ export async function lookupCompanyService(
             provider: "france-recherche-entreprises",
             ms: Date.now() - fetchT0,
             ok: false,
-            notes: "Nenhum resultado encontrado na base oficial.",
+            notes: "Nenhum resultado encontrado na base oficial francesa.",
           });
         }
       } else {
@@ -410,50 +628,20 @@ export async function lookupCompanyService(
     }
   }
 
-  // Brazil CNPJ fallback
-  if (!result && (classification.kind === "cnpj" || countryHint === "BR") && digits.length === 14) {
-    const fetchT0 = Date.now();
-    try {
-      const resp = await fetchWithTimeout(`https://brasilapi.com.br/api/cnpj/v1/${digits}`, {}, 8000);
-      if (resp.ok) {
-        const d = await resp.json();
-        const c = emptyCompany("brazil-brasilapi");
-        c.country = "BR";
-        c.tax_id = digits;
-        c.company_name = d?.razao_social ?? d?.nome_fantasia ?? null;
-        c.legal_name = d?.razao_social ?? null;
-        c.company_status = d?.descricao_situacao_cadastral === "ATIVA" ? "active" : "ceased";
-        c.legal_form = d?.codigo_natureza_juridica ? String(d.codigo_natureza_juridica) : null;
-        c.creation_date = d?.data_inicio_atividade ?? null;
-        c.address = {
-          street: d?.logradouro ?? null,
-          street_number: d?.numero ?? null,
-          postal_code: d?.cep ?? null,
-          city: d?.municipio ?? null,
-          state: d?.uf ?? null,
-          country: "Brasil",
-        };
-        c.address_line = joinAddress(c.address);
-        c.confidence = "fully_enriched";
-        result = c;
-        logs.push({ provider: "brazil-brasilapi", ms: Date.now() - fetchT0, ok: true });
-      }
-    } catch (err: any) {
-      logs.push({ provider: "brazil-brasilapi", ms: Date.now() - fetchT0, ok: false, notes: String(err?.message ?? err) });
-    }
-  }
-
   // Format boost
   let formatScore = classification.score;
   if (classification.kind === "siren" && isValidSiren(query)) formatScore = 1.0;
   if (classification.kind === "siret" && isValidSiret(query)) formatScore = 1.0;
+  if (classification.kind === "cnpj" && isValidCnpj(digits)) formatScore = 1.0;
+  if (classification.kind === "vat_eu" && result) formatScore = 1.0;
 
   const conf = scoreCompany({ company: result, formatScore, countryHint });
   if (result) result.confidence = conf.level;
 
-  const tier: SupportTier = (result?.country ?? classification.country ?? "FR") === "FR" ? "A" : "B";
+  const countryCode = result?.country ?? classification.country ?? "FR";
+  const tier: SupportTier = (countryCode === "FR" || countryCode === "BR") ? "A" : "B";
   const capability: CountryCapability = {
-    iso2: result?.country ?? classification.country ?? "FR",
+    iso2: countryCode,
     model: "A",
     enrichment: "full",
     validation: true,
