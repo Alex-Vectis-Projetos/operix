@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { uploadFile as storageUpload, deleteFiles, getFileUrl } from "@/lib/storage";
+import { uploadFile as storageUpload, deleteFiles, getFileUrl, openSecureStorageFile } from "@/lib/storage";
 import { apiRequest } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/hooks/useLanguage";
@@ -908,11 +908,12 @@ export function Documents() {
       const storagePath = `documents/${Date.now()}_${safeName}`;
       await withPromiseTimeout<any>(
         storageUpload("uploads", storagePath, file, file.type || undefined),
-        10000,
+        30000,
         "documents_global_upload",
       );
       await apiRequest("/documents", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: safeName,
           type: "file",
@@ -927,6 +928,7 @@ export function Documents() {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       toast.success(t("docs.fileUploaded"));
     } catch (err) {
+      console.error("[uploadFile]", err);
       toast.error(err instanceof Error ? err.message : "Falha no upload.");
     }
   };
@@ -942,15 +944,12 @@ export function Documents() {
 
   const handleDownload = (doc: any) => {
     if (!doc.storage_path) return;
-    const a = document.createElement("a");
-    a.href = getFileUrl("uploads", doc.storage_path);
-    a.download = doc.name;
-    a.click();
+    void openSecureStorageFile("uploads", doc.storage_path, doc.name);
   };
 
   const handlePreview = (doc: any) => {
     if (!doc.storage_path) return;
-    setPreviewDoc({ ...doc, url: getFileUrl("uploads", doc.storage_path) });
+    void openSecureStorageFile("uploads", doc.storage_path, doc.name);
   };
 
   const handlePrint = (doc: any) => {

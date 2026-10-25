@@ -43,6 +43,8 @@ function mapRequirement(r: any) {
     applies_to: r.appliesTo,
     sort_order: r.sortOrder,
     active: r.active,
+    template_storage_path: r.templateStoragePath ?? null,
+    template_file_name: r.templateFileName ?? null,
     created_at: r.createdAt.toISOString(),
     updated_at: r.updatedAt.toISOString(),
   };
@@ -190,7 +192,7 @@ countryDocumentRequirementsRouter.post("/", requireAuth, async (req: Authenticat
   if (!checkPermission(req, "edit")) {
     return res.status(403).json({ message: "Você não tem permissão para editar esta configuração." });
   }
-  const { country, document_name, applies_to, sort_order } = req.body ?? {};
+  const { country, document_name, applies_to, sort_order, template_storage_path, template_file_name } = req.body ?? {};
   if (!String(country ?? "").trim() || !String(document_name ?? "").trim()) {
     return res.status(400).json({ message: "country e document_name são obrigatórios." });
   }
@@ -204,7 +206,13 @@ countryDocumentRequirementsRouter.post("/", requireAuth, async (req: Authenticat
   if (existing && !existing.active) {
     const reactivated = await prisma.countryDocumentRequirement.update({
       where: { id: existing.id },
-      data: { active: true, sortOrder: sort_order ?? existing.sortOrder, appliesTo: applies_to ?? existing.appliesTo },
+      data: {
+        active: true,
+        sortOrder: sort_order ?? existing.sortOrder,
+        appliesTo: applies_to ?? existing.appliesTo,
+        templateStoragePath: template_storage_path !== undefined ? (template_storage_path ? String(template_storage_path) : null) : existing.templateStoragePath,
+        templateFileName: template_file_name !== undefined ? (template_file_name ? String(template_file_name) : null) : existing.templateFileName,
+      },
     });
     return res.status(201).json(mapRequirement(reactivated));
   }
@@ -215,6 +223,8 @@ countryDocumentRequirementsRouter.post("/", requireAuth, async (req: Authenticat
       documentName: String(document_name).trim(),
       appliesTo: applies_to === "technician" || applies_to === "provider_operational" ? applies_to : "both",
       sortOrder: typeof sort_order === "number" ? sort_order : 0,
+      templateStoragePath: template_storage_path ? String(template_storage_path) : null,
+      templateFileName: template_file_name ? String(template_file_name) : null,
     },
   });
   return res.status(201).json(mapRequirement(requirement));
@@ -226,13 +236,15 @@ countryDocumentRequirementsRouter.patch("/:id", requireAuth, async (req: Authent
     return res.status(403).json({ message: "Você não tem permissão para editar esta configuração." });
   }
   const id = req.params["id"] as string;
-  const { document_name, applies_to, sort_order, active } = req.body ?? {};
+  const { document_name, applies_to, sort_order, active, template_storage_path, template_file_name } = req.body ?? {};
 
   const data: Record<string, unknown> = {};
   if (document_name !== undefined) data.documentName = String(document_name).trim();
   if (applies_to !== undefined) data.appliesTo = applies_to;
   if (sort_order !== undefined) data.sortOrder = sort_order;
   if (active !== undefined) data.active = Boolean(active);
+  if (template_storage_path !== undefined) data.templateStoragePath = template_storage_path ? String(template_storage_path) : null;
+  if (template_file_name !== undefined) data.templateFileName = template_file_name ? String(template_file_name) : null;
 
   if (Object.keys(data).length === 0) {
     return res.status(400).json({ message: "Nenhum campo para atualizar." });

@@ -23,6 +23,8 @@ export interface PersonDocumentSummaryItem {
   status: PersonDocumentStatus;
   document_id: string | null;
   expiry_date: string | null;
+  template_storage_path?: string | null;
+  template_file_name?: string | null;
 }
 
 export interface PersonIdentityDocument {

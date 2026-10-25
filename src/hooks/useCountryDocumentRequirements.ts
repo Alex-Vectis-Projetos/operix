@@ -9,6 +9,8 @@ export interface CountryDocumentRequirement {
   applies_to: "both" | "technician" | "provider_operational";
   sort_order: number;
   active: boolean;
+  template_storage_path?: string | null;
+  template_file_name?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,7 +38,14 @@ export function useCountryDocumentRequirements(country?: string, includeInactive
   const invalidate = () => qc.invalidateQueries({ queryKey: QK });
 
   const create = useMutation({
-    mutationFn: (input: { country: string; document_name: string; applies_to?: string; sort_order?: number }) =>
+    mutationFn: (input: {
+      country: string;
+      document_name: string;
+      applies_to?: string;
+      sort_order?: number;
+      template_storage_path?: string | null;
+      template_file_name?: string | null;
+    }) =>
       apiRequest<CountryDocumentRequirement>("/country-document-requirements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -51,7 +60,18 @@ export function useCountryDocumentRequirements(country?: string, includeInactive
   });
 
   const update = useMutation({
-    mutationFn: ({ id, ...input }: { id: string; document_name?: string; applies_to?: "both" | "technician" | "provider_operational"; sort_order?: number; active?: boolean }) =>
+    mutationFn: ({
+      id,
+      ...input
+    }: {
+      id: string;
+      document_name?: string;
+      applies_to?: "both" | "technician" | "provider_operational";
+      sort_order?: number;
+      active?: boolean;
+      template_storage_path?: string | null;
+      template_file_name?: string | null;
+    }) =>
       apiRequest<CountryDocumentRequirement>(`/country-document-requirements/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

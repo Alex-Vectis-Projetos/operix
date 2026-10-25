@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Paperclip, Trash2, Upload, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import { Loader2, Paperclip, Trash2, Upload, AlertTriangle, CheckCircle2, Clock, FileDown } from "lucide-react";
 import { usePersonDocuments } from "@/hooks/usePeople";
 import type { PersonDocumentSummaryItem } from "@/hooks/usePeople";
 import { uploadFile, getFileUrl, openSecureStorageFile } from "@/lib/storage";
@@ -84,15 +84,28 @@ export function PersonDocumentsPanel({ personId, documentsSummary, countryNotCon
           <Label className="text-xs uppercase tracking-wide text-muted-foreground">Documentos obrigatórios</Label>
           <div className="space-y-2">
             {documentsSummary.map((item) => (
-              <div key={item.requirement_id} className="flex items-center justify-between rounded-md border p-2.5">
-                <div className="flex items-center gap-2">
-                  <Paperclip className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm">{item.document_name}</span>
+              <div key={item.requirement_id} className="flex flex-col sm:flex-row sm:items-center justify-between rounded-md border p-2.5 gap-2">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Paperclip className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm font-medium">{item.document_name}</span>
+                  </div>
+                  {item.template_storage_path && (
+                    <button
+                      type="button"
+                      onClick={() => void openSecureStorageFile("uploads", item.template_storage_path!, item.template_file_name ?? "modelo.pdf")}
+                      className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-400 hover:underline pl-6 sm:pl-0 font-medium cursor-pointer"
+                      title="Baixar formulário ou modelo oficial deste requisito"
+                    >
+                      <FileDown className="h-3 w-3" />
+                      <span>Baixar modelo oficial ({item.template_file_name || "PDF"})</span>
+                    </button>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 self-end sm:self-auto">
                   <StatusBadge status={item.status} />
                   {item.status === "pending" && (
-                    <Button size="sm" variant="outline" disabled={uploading} onClick={() => triggerUploadFor(item.requirement_id)}>
+                    <Button type="button" size="sm" variant="outline" disabled={uploading} onClick={() => triggerUploadFor(item.requirement_id)}>
                       {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
                     </Button>
                   )}
@@ -115,7 +128,7 @@ export function PersonDocumentsPanel({ personId, documentsSummary, countryNotCon
               <Label className="text-[10px] text-muted-foreground">Validade</Label>
               <Input type="date" className="h-8 w-[140px]" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
             </div>
-            <Button size="sm" disabled={uploading} onClick={() => triggerUploadFor(null)}>
+            <Button type="button" size="sm" disabled={uploading} onClick={() => triggerUploadFor(null)}>
               {uploading ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1 h-3.5 w-3.5" />}
               Anexar documento
             </Button>

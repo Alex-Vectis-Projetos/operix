@@ -1332,10 +1332,12 @@ model CountryDocumentRequirement {
   country      String
   documentName String   @map("document_name")
   appliesTo    String   @default("both") @map("applies_to")
-  sortOrder    Int      @default(0) @map("sort_order")
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  sortOrder           Int      @default(0) @map("sort_order")
+  active              Boolean  @default(true)
+  templateStoragePath String?  @map("template_storage_path")
+  templateFileName    String?  @map("template_file_name")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
   documents Document[]
 

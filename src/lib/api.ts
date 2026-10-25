@@ -51,6 +51,10 @@ export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promis
     headers.set("X-Workspace-Id", selectedWs);
   }
 
+  if (init?.body && typeof init.body === "string" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   try {
     const response = await fetch(`${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`, {
       ...init,

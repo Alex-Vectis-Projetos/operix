@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   FileCheck2, Plus, Loader2, Trash2, Globe, Sparkles, Check, Edit2, X,
-  ShieldCheck, AlertCircle, HelpCircle
+  ShieldCheck, AlertCircle, HelpCircle, FileDown, Paperclip, Upload
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,8 @@ import {
 } from "@/hooks/useCountryDocumentRequirements";
 import { useRole } from "@/hooks/useRole";
 import { COUNTRIES } from "@/lib/countries";
+import { uploadFile, openSecureStorageFile } from "@/lib/storage";
+import { toast } from "@/hooks/use-toast";
 
 const TOP_COUNTRIES = [
   "Portugal",
@@ -44,6 +46,9 @@ export default function CountryDocumentRequirementsPage() {
   // New document form state
   const [newDocumentName, setNewDocumentName] = useState("");
   const [newAppliesTo, setNewAppliesTo] = useState<"both" | "technician" | "provider_operational">("both");
+  const [newTemplateFile, setNewTemplateFile] = useState<File | null>(null);
+  const [isAddingDocument, setIsAddingDocument] = useState(false);
+  const [templateUploadingId, setTemplateUploadingId] = useState<string | null>(null);
 
   // Inline editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -68,13 +73,80 @@ export default function CountryDocumentRequirementsPage() {
 
   async function handleAddDocument() {
     if (!effectiveCountry || !newDocumentName.trim()) return;
-    await create.mutateAsync({
-      country: effectiveCountry,
-      document_name: newDocumentName.trim(),
-      applies_to: newAppliesTo,
-      sort_order: activeRequirements.length + 1,
-    });
-    setNewDocumentName("");
+    setIsAddingDocument(true);
+    try {
+      let templateStoragePath: string | undefined;
+      let templateFileName: string | undefined;
+
+      if (newTemplateFile) {
+        const path = `country-templates/${effectiveCountry}/${Date.now()}-${newTemplateFile.name}`;
+        const { path: storedPath } = await uploadFile("uploads", path, newTemplateFile, newTemplateFile.type);
+        templateStoragePath = storedPath;
+        templateFileName = newTemplateFile.name;
+      }
+
+      await create.mutateAsync({
+        country: effectiveCountry,
+        document_name: newDocumentName.trim(),
+        applies_to: newAppliesTo,
+        sort_order: activeRequirements.length + 1,
+        template_storage_path: templateStoragePath,
+        template_file_name: templateFileName,
+      });
+
+      setNewDocumentName("");
+      setNewTemplateFile(null);
+    } catch (err) {
+      toast({
+        title: "Erro ao adicionar documento",
+        description: String((err as any)?.message ?? err),
+        variant: "destructive",
+      });
+    } finally {
+      setIsAddingDocument(false);
+    }
+  }
+
+  async function handleUploadTemplate(reqId: string, file: File) {
+    setTemplateUploadingId(reqId);
+    try {
+      const path = `country-templates/${effectiveCountry}/${Date.now()}-${file.name}`;
+      const { path: storedPath } = await uploadFile("uploads", path, file, file.type);
+      await update.mutateAsync({
+        id: reqId,
+        template_storage_path: storedPath,
+        template_file_name: file.name,
+      });
+      toast({
+        title: "Modelo oficial anexado com sucesso!",
+        description: `O arquivo ${file.name} agora está disponível para download pelos colaboradores.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Erro ao enviar modelo",
+        description: String((err as any)?.message ?? err),
+        variant: "destructive",
+      });
+    } finally {
+      setTemplateUploadingId(null);
+    }
+  }
+
+  async function handleRemoveTemplate(req: CountryDocumentRequirement) {
+    try {
+      await update.mutateAsync({
+        id: req.id,
+        template_storage_path: null,
+        template_file_name: null,
+      });
+      toast({ title: "Modelo removido deste requisito." });
+    } catch (err) {
+      toast({
+        title: "Erro ao remover modelo",
+        description: String((err as any)?.message ?? err),
+        variant: "destructive",
+      });
+    }
   }
 
   async function handleAddCustomCountry() {
@@ -361,13 +433,60 @@ export default function CountryDocumentRequirementsPage() {
                       </div>
                     ) : (
                       <>
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-semibold text-muted-foreground shrink-0">
-                            {idx + 1}
-                          </span>
-                          <span className="text-sm font-medium text-foreground truncate">
-                            {req.document_name}
-                          </span>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0 flex-1">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-semibold text-muted-foreground shrink-0">
+                              {idx + 1}
+                            </span>
+                            <span className="text-sm font-medium text-foreground truncate">
+                              {req.document_name}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-wrap pl-9 sm:pl-0">
+                            {req.template_storage_path ? (
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => void openSecureStorageFile("uploads", req.template_storage_path!, req.template_file_name ?? "modelo.pdf")}
+                                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-blue-500/10 text-blue-500 border border-blue-500/20 hover:bg-blue-500/20 transition-colors"
+                                  title="Baixar ou visualizar modelo oficial"
+                                >
+                                  <FileDown className="h-3 w-3" />
+                                  <span className="max-w-[160px] truncate">{req.template_file_name || "Modelo oficial"}</span>
+                                </button>
+                                {canManage && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveTemplate(req)}
+                                    className="text-muted-foreground hover:text-destructive p-0.5"
+                                    title="Remover modelo"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                )}
+                              </div>
+                            ) : canManage ? (
+                              <label className="cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-muted-foreground border border-dashed border-border hover:border-primary/50 hover:text-foreground transition-colors">
+                                {templateUploadingId === req.id ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Upload className="h-3 w-3" />
+                                )}
+                                <span>{templateUploadingId === req.id ? "A enviar..." : "+ Anexar Modelo"}</span>
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  disabled={templateUploadingId === req.id}
+                                  onChange={(e) => {
+                                    const f = e.target.files?.[0];
+                                    if (f) void handleUploadTemplate(req.id, f);
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            ) : null}
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
@@ -423,52 +542,83 @@ export default function CountryDocumentRequirementsPage() {
                 </h4>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
-                <div className="flex-1 space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Nome do Documento</label>
-                  <Input
-                    value={newDocumentName}
-                    onChange={(e) => setNewDocumentName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleAddDocument();
-                      }
-                    }}
-                    placeholder="Ex.: Certificado de Seguro de Responsabilidade Civil..."
-                    className="bg-background"
-                  />
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
+                  <div className="flex-1 space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Nome do Documento</label>
+                    <Input
+                      value={newDocumentName}
+                      onChange={(e) => setNewDocumentName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleAddDocument();
+                        }
+                      }}
+                      placeholder="Ex.: Certificado de Seguro de Responsabilidade Civil..."
+                      className="bg-background"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5 sm:w-56">
+                    <label className="text-xs font-medium text-muted-foreground">Aplica-se a</label>
+                    <Select
+                      value={newAppliesTo}
+                      onValueChange={(val: any) => setNewAppliesTo(val)}
+                    >
+                      <SelectTrigger className="bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="both">Técnicos & Prestadores</SelectItem>
+                        <SelectItem value="technician">Apenas Técnicos</SelectItem>
+                        <SelectItem value="provider_operational">Apenas Prestadores</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
-                <div className="space-y-1.5 sm:w-56">
-                  <label className="text-xs font-medium text-muted-foreground">Aplica-se a</label>
-                  <Select
-                    value={newAppliesTo}
-                    onValueChange={(val: any) => setNewAppliesTo(val)}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-border/50">
+                  <div className="flex items-center gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-background border border-border hover:bg-muted/50 transition-colors">
+                      <Paperclip className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span>{newTemplateFile ? newTemplateFile.name : "Anexar arquivo modelo/instruções (opcional)"}</span>
+                      <input
+                        type="file"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) setNewTemplateFile(f);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                    {newTemplateFile && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-destructive"
+                        onClick={() => setNewTemplateFile(null)}
+                      >
+                        <X className="h-3.5 w-3.5 mr-1" /> Remover
+                      </Button>
+                    )}
+                  </div>
+
+                  <Button
+                    onClick={handleAddDocument}
+                    disabled={isAddingDocument || !newDocumentName.trim()}
+                    className="gap-1.5 shrink-0"
                   >
-                    <SelectTrigger className="bg-background">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="both">Técnicos & Prestadores</SelectItem>
-                      <SelectItem value="technician">Apenas Técnicos</SelectItem>
-                      <SelectItem value="provider_operational">Apenas Prestadores</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    {isAddingDocument ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
+                    <span>Adicionar Documento</span>
+                  </Button>
                 </div>
-
-                <Button
-                  onClick={handleAddDocument}
-                  disabled={create.isPending || !newDocumentName.trim()}
-                  className="gap-1.5 shrink-0"
-                >
-                  {create.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="h-4 w-4" />
-                  )}
-                  <span>Adicionar</span>
-                </Button>
               </div>
             </div>
           ) : (

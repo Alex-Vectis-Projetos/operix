@@ -18,6 +18,8 @@ export function computeDocumentStatus(document: DocumentLike, today: Date = new 
 export interface CountryRequirementLike {
   id: string;
   documentName: string;
+  templateStoragePath?: string | null;
+  templateFileName?: string | null;
 }
 
 export interface PersonDocumentSummaryItem {
@@ -26,6 +28,8 @@ export interface PersonDocumentSummaryItem {
   status: PersonDocumentStatus;
   document_id: string | null;
   expiry_date: string | null;
+  template_storage_path?: string | null;
+  template_file_name?: string | null;
 }
 
 /**
@@ -48,6 +52,8 @@ export function buildPersonDocumentSummary<D extends DocumentLike & { id: string
         status: "pending" as const,
         document_id: null,
         expiry_date: null,
+        template_storage_path: req.templateStoragePath ?? null,
+        template_file_name: req.templateFileName ?? null,
       };
     }
     return {
@@ -56,6 +62,8 @@ export function buildPersonDocumentSummary<D extends DocumentLike & { id: string
       status: computeDocumentStatus(doc, today),
       document_id: doc.id,
       expiry_date: doc.expiryDate ? new Date(doc.expiryDate).toISOString() : null,
+      template_storage_path: req.templateStoragePath ?? null,
+      template_file_name: req.templateFileName ?? null,
     };
   });
 }
