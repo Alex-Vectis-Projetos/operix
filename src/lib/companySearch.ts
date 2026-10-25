@@ -114,23 +114,33 @@ export function isValidCnpj(v: string): boolean {
   return d1 === parseInt(s[12], 10) && d2 === parseInt(s[13], 10);
 }
 
+export const EU_COUNTRY_CODES = new Set([
+  "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES",
+  "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV",
+  "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI"
+]);
+
 export function detectQueryType(raw: string): DocumentKind {
   const v = (raw ?? "").trim();
   if (!v) return "unknown";
   const upper = v.toUpperCase();
   const digits = v.replace(/\D/g, "");
+  const cleanAlpha = upper.replace(/[\s\.-]/g, "");
 
-  if (/^[A-Z]{2}/.test(upper) && digits.length >= 7) return "vat_eu";
+  if (/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(cleanAlpha)) {
+    const cc = cleanAlpha.slice(0, 2);
+    if (EU_COUNTRY_CODES.has(cc) && digits.length >= 7) return "vat_eu";
+  }
   if (digits.length === 14) {
     if (/[\.\/-]/.test(v) || isValidCnpj(digits)) return "cnpj";
   }
+  if (digits.length === 9 && digits === v.replace(/\s/g, "")) return "siren";
+  if (digits.length === 14 && digits === v.replace(/\s/g, "")) return "siret";
+  if (/^\d{2}-\d{7}$/.test(v)) return "ein";
   if (/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(upper)) return "gstin";
-  if (/^\d{2}-?\d{7}$/.test(v)) return "ein";
   if (/^\d{9}\s?(RT|RC|RP)?\s?\d{0,4}$/i.test(v)) return "bn_ca";
   if (/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(upper)) return "rfc_mx";
   if (digits.length === 13 && digits === v.replace(/\s/g, "")) return "corp_jp";
-  if (digits.length === 9 && digits === v.replace(/\s/g, "")) return "siren";
-  if (digits.length === 14 && digits === v.replace(/\s/g, "")) return "siret";
   return "name";
 }
 

@@ -228,17 +228,26 @@ export function formatCnpj(v: string): string {
   return s.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
 }
 
+export const EU_COUNTRY_CODES = new Set([
+  "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES",
+  "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV",
+  "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI"
+]);
+
 // Detection
 export function detectDocument(raw: string): { kind: DocumentKind; country: string | null; score: number } {
   const v = (raw ?? "").trim();
   if (!v) return { kind: "unknown", country: null, score: 0 };
   const upper = v.toUpperCase();
   const digits = v.replace(/\D/g, "");
+  const cleanAlpha = upper.replace(/[\s\.-]/g, "");
 
   // EU VAT (ex: FR12345678901, DE123456789, IT12345678901, etc.)
-  if (/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(upper.replace(/[\s\.-]/g, "")) && digits.length >= 7) {
-    const cc = upper.slice(0, 2);
-    return { kind: "vat_eu", country: cc, score: 0.95 };
+  if (/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(cleanAlpha)) {
+    const cc = cleanAlpha.slice(0, 2);
+    if (EU_COUNTRY_CODES.has(cc) && digits.length >= 7) {
+      return { kind: "vat_eu", country: cc, score: 0.95 };
+    }
   }
 
   // Brazil CNPJ (14 dígitos com máscara ou 14 dígitos válidos no algoritmo módulo 11)
@@ -259,8 +268,8 @@ export function detectDocument(raw: string): { kind: DocumentKind; country: stri
   }
 
   // US EIN (XX-XXXXXXX)
-  if (/^\d{2}-?\d{7}$/.test(v)) {
-    return { kind: "ein", country: "US", score: 0.9 };
+  if (/^\d{2}-\d{7}$/.test(v)) {
+    return { kind: "ein", country: "US", score: 0.95 };
   }
 
   // India GSTIN
