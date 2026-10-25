@@ -744,22 +744,24 @@ export function Fleet() {
 // ─── DOCUMENTS (WINDOWS FILE EXPLORER EXPERIENCE) ───
 
 function cleanDisplayName(name: string, displayName?: string | null): string {
-  if (displayName && displayName.trim()) return displayName.trim();
-  if (!name) return "Documento";
+  // If name was updated to a human-friendly name (not a UUID), use name!
+  if (name && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}/.test(name)) {
+    let cleaned = name.replace(/^\d{10,14}[-_]/, "");
+    cleaned = cleaned.replace(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}[-_]?/, "");
+    return cleaned || name;
+  }
 
-  // Remove leading millisecond / unix timestamps (e.g. 1729876543210_ or 20261025_)
-  let cleaned = name.replace(/^\d{10,14}[-_]/, "");
-
-  // Remove UUID prefix with hyphen/underscore (e.g. 9bb7fc36-6128-497b-b747-0a8b1c2d3e4f_)
+  // Fallback to displayName if available and not a raw hash
+  const raw = displayName && displayName.trim() ? displayName.trim() : (name || "Documento");
+  let cleaned = raw.replace(/^\d{10,14}[-_]/, "");
   cleaned = cleaned.replace(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}[-_]?/, "");
 
-  // If the file was literally named as a bare UUID (e.g. 9bb7fc36-6128-497b-b747-0a8...)
-  if (/^[0-9a-fA-F-]{20,}/.test(cleaned) && cleaned.length >= 24) {
+  if (/^[0-9a-fA-F-]{20,}/.test(cleaned) || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}/.test(cleaned)) {
     const ext = cleaned.includes(".") ? cleaned.slice(cleaned.lastIndexOf(".")) : "";
     return `Doc_${cleaned.slice(0, 8)}${ext}`;
   }
 
-  return cleaned || name;
+  return cleaned || raw;
 }
 
 function getFileExtension(name: string): string {
@@ -815,6 +817,7 @@ export function Documents() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [folderName, setFolderName] = useState("");
   const [showFolderDialog, setShowFolderDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -961,9 +964,12 @@ export function Documents() {
       }
       await apiRequest(`/documents/${doc.id}`, { method: "DELETE" });
     },
-    onSuccess: () => {
+    onSuccess: (_, doc) => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       queryClient.invalidateQueries({ queryKey: ["doc-folders-all"] });
+      if (parentId === doc?.id) {
+        navigateTo(null, t("common.root"));
+      }
       toast.success(t("toast.deleted"));
     },
     onError: (err) => toast.error((err as Error).message),
@@ -1037,11 +1043,12 @@ export function Documents() {
     mutationFn: async ({ id, name }: { id: string; name: string }) => {
       await apiRequest(`/documents/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, display_name: name }),
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["doc-folders-all"] });
       setRenamingId(null);
       toast.success(t("toast.updated"));
     },
@@ -1341,9 +1348,39 @@ export function Documents() {
             Acesso Rápido
           </div>
           <button
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes("application/operix-doc")) {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOverFolderId("__root__");
+              }
+            }}
+            onDragLeave={(e) => {
+              e.stopPropagation();
+              if (dragOverFolderId === "__root__") setDragOverFolderId(null);
+            }}
+            onDrop={(e) => {
+              if (e.dataTransfer.types.includes("application/operix-doc")) {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOverFolderId(null);
+                try {
+                  const payload = JSON.parse(e.dataTransfer.getData("application/operix-doc"));
+                  if (payload?.id && parentId !== null) {
+                    moveMutation.mutate({ docIds: [payload.id], newParentId: null });
+                  }
+                } catch (err) {
+                  console.error(err);
+                }
+              }
+            }}
             onClick={() => navigateTo(null, t("common.root"))}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors font-medium ${
-              parentId === null ? "bg-primary/15 text-primary" : "text-foreground/80 hover:bg-muted/50"
+            className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-all font-medium ${
+              dragOverFolderId === "__root__"
+                ? "ring-2 ring-primary bg-primary/25 text-primary scale-[1.02]"
+                : parentId === null
+                ? "bg-primary/15 text-primary"
+                : "text-foreground/80 hover:bg-muted/50"
             }`}
           >
             <HardDrive className="h-3.5 w-3.5 text-primary shrink-0" />
@@ -1357,16 +1394,62 @@ export function Documents() {
             {allFolders
               .filter((f: any) => !f.parent_id)
               .map((f: any) => (
-                <button
+                <div
                   key={f.id}
-                  onClick={() => navigateTo(f.id, f.name)}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors ${
-                    parentId === f.id ? "bg-primary/15 text-primary font-medium" : "text-foreground/80 hover:bg-muted/50"
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes("application/operix-doc")) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragOverFolderId(f.id);
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    e.stopPropagation();
+                    if (dragOverFolderId === f.id) setDragOverFolderId(null);
+                  }}
+                  onDrop={(e) => {
+                    if (e.dataTransfer.types.includes("application/operix-doc")) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragOverFolderId(null);
+                      try {
+                        const payload = JSON.parse(e.dataTransfer.getData("application/operix-doc"));
+                        if (payload?.id && payload.id !== f.id) {
+                          moveMutation.mutate({ docIds: [payload.id], newParentId: f.id });
+                        }
+                      } catch (err) {
+                        console.error(err);
+                      }
+                    }
+                  }}
+                  className={`group flex items-center justify-between px-2 py-1.5 rounded-md text-left transition-all ${
+                    dragOverFolderId === f.id
+                      ? "ring-2 ring-primary bg-primary/25 text-primary scale-[1.02]"
+                      : parentId === f.id
+                      ? "bg-primary/15 text-primary font-medium"
+                      : "text-foreground/80 hover:bg-muted/50"
                   }`}
                 >
-                  <Folder className="h-3.5 w-3.5 text-amber-500 fill-amber-500/20 shrink-0" />
-                  <span className="truncate">{cleanDisplayName(f.name, f.display_name)}</span>
-                </button>
+                  <button
+                    onClick={() => navigateTo(f.id, f.name)}
+                    className="flex items-center gap-2 flex-1 min-w-0"
+                  >
+                    <Folder className="h-3.5 w-3.5 text-amber-500 fill-amber-500/20 shrink-0" />
+                    <span className="truncate">{cleanDisplayName(f.name, f.display_name)}</span>
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteMutation.mutate(f);
+                    }}
+                    title={t("action.delete")}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
               ))}
             {allFolders.filter((f: any) => !f.parent_id).length === 0 && (
               <p className="px-2 py-1 text-[11px] text-muted-foreground italic">Nenhuma subpasta</p>
@@ -1427,13 +1510,45 @@ export function Documents() {
                   return (
                     <div
                       key={d.id}
+                      draggable={renamingId !== d.id}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("application/operix-doc", JSON.stringify({ id: d.id, name: d.name, type: d.type }));
+                      }}
+                      onDragOver={(e) => {
+                        if (isFolder && e.dataTransfer.types.includes("application/operix-doc")) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDragOverFolderId(d.id);
+                        }
+                      }}
+                      onDragLeave={(e) => {
+                        e.stopPropagation();
+                        if (dragOverFolderId === d.id) setDragOverFolderId(null);
+                      }}
+                      onDrop={(e) => {
+                        if (isFolder && e.dataTransfer.types.includes("application/operix-doc")) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDragOverFolderId(null);
+                          try {
+                            const payload = JSON.parse(e.dataTransfer.getData("application/operix-doc"));
+                            if (payload?.id && payload.id !== d.id) {
+                              moveMutation.mutate({ docIds: [payload.id], newParentId: d.id });
+                            }
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }
+                      }}
                       onClick={(e) => toggleSelect(d.id, e)}
                       onDoubleClick={() => {
                         if (isFolder) navigateTo(d.id, d.name);
                         else handlePreview(d);
                       }}
                       className={`group relative flex flex-col items-center justify-between p-2.5 rounded-lg border text-center transition-all cursor-pointer select-none ${
-                        isSelected
+                        dragOverFolderId === d.id
+                          ? "ring-2 ring-primary bg-primary/20 scale-105 border-primary shadow-md"
+                          : isSelected
                           ? "bg-primary/10 border-primary shadow-xs ring-1 ring-primary/40"
                           : "border-border/60 hover:bg-muted/40 hover:border-border"
                       }`}
@@ -1493,7 +1608,7 @@ export function Documents() {
                         </p>
                       </div>
 
-                      {/* Hover Actions Quickbar */}
+                      {/* Actions Quickbar */}
                       <div
                         className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-0.5 pt-1.5 mt-1 border-t border-border/40 w-full"
                         onClick={(e) => e.stopPropagation()}
@@ -1526,8 +1641,22 @@ export function Documents() {
                           className="h-6 w-6 text-muted-foreground hover:text-foreground"
                           onClick={(e) => {
                             e.stopPropagation();
+                            setMoveTarget(d);
+                            setMoveDestination("__root__");
+                            setShowMoveDialog(true);
+                          }}
+                          title={t("fm.move")}
+                        >
+                          <MoveRight className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setRenamingId(d.id);
-                            setRenameValue(d.name);
+                            setRenameValue(cleanDisplayName(d.name, d.display_name));
                           }}
                           title={t("fm.rename")}
                         >
@@ -1563,7 +1692,7 @@ export function Documents() {
                       <TableHead className="w-28">{t("label.type")}</TableHead>
                       <TableHead className="w-24">{t("docs.size")}</TableHead>
                       <TableHead className="w-32">{t("label.date")}</TableHead>
-                      <TableHead className="w-28 text-right pr-3">{t("label.actions")}</TableHead>
+                      <TableHead className="w-32 text-right pr-3">{t("label.actions")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1647,8 +1776,22 @@ export function Documents() {
                                 className="h-7 w-7"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  setMoveTarget(d);
+                                  setMoveDestination("__root__");
+                                  setShowMoveDialog(true);
+                                }}
+                                title={t("fm.move")}
+                              >
+                                <MoveRight className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setRenamingId(d.id);
-                                  setRenameValue(d.name);
+                                  setRenameValue(cleanDisplayName(d.name, d.display_name));
                                 }}
                                 title={t("fm.rename")}
                               >

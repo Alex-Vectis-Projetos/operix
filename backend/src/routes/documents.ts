@@ -113,7 +113,12 @@ documentsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res
   }
 
   const data: Record<string, unknown> = {};
-  if (b.name !== undefined) data.name = b.name;
+  if (b.name !== undefined) {
+    data.name = b.name;
+    if (b.display_name === undefined) {
+      data.displayName = b.name;
+    }
+  }
   if (b.display_name !== undefined) data.displayName = b.display_name;
   if (b.parent_id !== undefined) data.parentId = b.parent_id;
   if (b.rotation !== undefined) data.rotation = b.rotation;
@@ -159,19 +164,57 @@ documentsRouter.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res
   return res.json(mapDoc(doc));
 });
 
+// Helper to collect all child documents of a folder recursively
+async function collectDescendantIds(parentId: string, workspaceId?: string | null): Promise<string[]> {
+  const children = await prisma.document.findMany({
+    where: { parentId, ...(workspaceId ? { workspaceId } : {}) },
+    select: { id: true, type: true },
+  });
+  let ids: string[] = [];
+  for (const child of children) {
+    ids.push(child.id);
+    if (child.type === "folder") {
+      const sub = await collectDescendantIds(child.id, workspaceId);
+      ids = ids.concat(sub);
+    }
+  }
+  return ids;
+}
+
 // DELETE /documents/batch  (must be before /:id)
 documentsRouter.delete("/batch", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const { ids } = req.body as { ids?: string[] };
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ message: "ids (array) é obrigatório." });
   }
-  await prisma.document.deleteMany({ where: { id: { in: ids } } });
-  return res.json({ deleted: ids.length });
+
+  const workspaceId = req.ctx?.activeWorkspaceId;
+  let allIds = [...ids];
+  for (const id of ids) {
+    const descendants = await collectDescendantIds(id, workspaceId);
+    allIds = allIds.concat(descendants);
+  }
+  const uniqueIds = Array.from(new Set(allIds));
+
+  await prisma.document.deleteMany({ where: { id: { in: uniqueIds } } });
+  return res.json({ deleted: uniqueIds.length });
 });
 
 // DELETE /documents/:id
 documentsRouter.delete("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const id = req.params["id"] as string;
+  const workspaceId = req.ctx?.activeWorkspaceId;
+
+  const existing = await prisma.document.findUnique({ where: { id } });
+  if (!existing) {
+    return res.status(404).json({ message: "Documento ou pasta não encontrado." });
+  }
+
+  const descendantIds = await collectDescendantIds(id, workspaceId);
+  if (descendantIds.length > 0) {
+    await prisma.document.deleteMany({ where: { id: { in: descendantIds } } });
+  }
+
   await prisma.document.delete({ where: { id } });
-  return res.json({ deleted: 1 });
+  return res.json({ deleted: 1 + descendantIds.length });
 });
