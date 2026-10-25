@@ -269,7 +269,7 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{editing ? "Editar Pessoa" : "Nova Pessoa"}</DialogTitle>
+          <DialogTitle>{editing ? "Editar Colaborador" : "Novo Colaborador"}</DialogTitle>
         </DialogHeader>
 
         {errors.length > 0 && (
@@ -506,7 +506,7 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
           <Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button>
           <Button onClick={handleSubmit} disabled={saving}>
             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {editing ? "Salvar" : "Criar Pessoa"}
+            {editing ? "Salvar" : "Criar Colaborador"}
           </Button>
         </DialogFooter>
       </DialogContent>

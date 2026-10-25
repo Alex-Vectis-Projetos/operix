@@ -113,17 +113,17 @@ export function usePeople(filters: { type?: PersonType; status?: PersonStatus; l
       }),
     onSuccess: (person) => {
       if (!person?.id) {
-        toast({ title: "Erro ao criar Pessoa", description: "Resposta inválida do servidor.", variant: "destructive" });
+        toast({ title: "Erro ao criar Colaborador", description: "Resposta inválida do servidor.", variant: "destructive" });
         return;
       }
       invalidate();
       if (person.warning === "tax_id_duplicate") {
-        toast({ title: "Pessoa criada com aviso", description: "Já existe outro Prestador com este número de identificação fiscal.", variant: "destructive" });
+        toast({ title: "Colaborador criado com aviso", description: "Já existe outro Prestador com este número de identificação fiscal.", variant: "destructive" });
       } else {
-        toast({ title: "Pessoa criada com sucesso." });
+        toast({ title: "Colaborador criado com sucesso." });
       }
     },
-    onError: (err) => toast({ title: "Erro ao criar Pessoa", description: String((err as any)?.message ?? err), variant: "destructive" }),
+    onError: (err) => toast({ title: "Erro ao criar Colaborador", description: String((err as any)?.message ?? err), variant: "destructive" }),
   });
 
   const update = useMutation({
@@ -136,18 +136,18 @@ export function usePeople(filters: { type?: PersonType; status?: PersonStatus; l
       }),
     onSuccess: () => {
       invalidate();
-      toast({ title: "Pessoa atualizada." });
+      toast({ title: "Colaborador atualizado." });
     },
-    onError: (err) => toast({ title: "Erro ao atualizar Pessoa", description: String((err as any)?.message ?? err), variant: "destructive" }),
+    onError: (err) => toast({ title: "Erro ao atualizar Colaborador", description: String((err as any)?.message ?? err), variant: "destructive" }),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => apiRequest(`/people/${id}`, { method: "DELETE", timeoutMs: 10000 }),
     onSuccess: () => {
       invalidate();
-      toast({ title: "Pessoa excluída." });
+      toast({ title: "Colaborador excluído." });
     },
-    onError: (err) => toast({ title: "Erro ao excluir Pessoa", description: String((err as any)?.message ?? err), variant: "destructive" }),
+    onError: (err) => toast({ title: "Erro ao excluir Colaborador", description: String((err as any)?.message ?? err), variant: "destructive" }),
   });
 
   return { ...query, people: query.data ?? [], create, update, remove };

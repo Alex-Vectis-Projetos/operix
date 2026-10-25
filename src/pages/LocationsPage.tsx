@@ -123,7 +123,7 @@ export default function LocationsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir Local?</AlertDialogTitle>
             <AlertDialogDescription>
-              "{toDelete?.name}" será excluído. Se houver Pessoas vinculadas, a exclusão será bloqueada — inative o Local nesse caso.
+              "{toDelete?.name}" será excluído. Se houver Colaboradores vinculados, a exclusão será bloqueada — inative o Local nesse caso.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

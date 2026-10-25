@@ -60,10 +60,10 @@ export default function PeoplePage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <IdCard className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-2xl font-semibold">Pessoas</h1>
+          <h1 className="text-2xl font-semibold">Colaboradores</h1>
         </div>
         <Button onClick={openCreate}>
-          <Plus className="mr-2 h-4 w-4" /> Nova Pessoa
+          <Plus className="mr-2 h-4 w-4" /> Novo Colaborador
         </Button>
       </div>
 
@@ -96,7 +96,7 @@ export default function PeoplePage() {
           {isLoading ? (
             <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
           ) : people.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">Nenhuma Pessoa cadastrada.</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">Nenhum Colaborador cadastrado.</p>
           ) : (
             <Table>
               <TableHeader>
@@ -170,8 +170,8 @@ export default function PeoplePage() {
       <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir Pessoa?</AlertDialogTitle>
-            <AlertDialogDescription>"{toDelete?.full_name}" será removida da listagem.</AlertDialogDescription>
+            <AlertDialogTitle>Excluir Colaborador?</AlertDialogTitle>
+            <AlertDialogDescription>"{toDelete?.full_name}" será removido(a) da listagem.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
