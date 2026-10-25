@@ -30,6 +30,9 @@ import {
   Plus, Save, Trash2, Upload, FolderPlus, ChevronRight, Loader2, Pencil,
   CheckSquare, MoveRight, Eye, Download, Printer, FileText, Check, X, Crown,
   Copy, Link, AlertTriangle, Shield,
+  LayoutGrid, List, ArrowLeft, ArrowRight, ArrowUp, RefreshCw, Search,
+  HardDrive, FileSpreadsheet, Image as ImageIcon, UploadCloud, Folder, File,
+  FileArchive,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -738,13 +741,80 @@ export function Fleet() {
   );
 }
 
-// ─── DOCUMENTS ───
+// ─── DOCUMENTS (WINDOWS FILE EXPLORER EXPERIENCE) ───
+
+function cleanDisplayName(name: string, displayName?: string | null): string {
+  if (displayName && displayName.trim()) return displayName.trim();
+  if (!name) return "Documento";
+
+  // Remove leading millisecond / unix timestamps (e.g. 1729876543210_ or 20261025_)
+  let cleaned = name.replace(/^\d{10,14}[-_]/, "");
+
+  // Remove UUID prefix with hyphen/underscore (e.g. 9bb7fc36-6128-497b-b747-0a8b1c2d3e4f_)
+  cleaned = cleaned.replace(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}[-_]?/, "");
+
+  // If the file was literally named as a bare UUID (e.g. 9bb7fc36-6128-497b-b747-0a8...)
+  if (/^[0-9a-fA-F-]{20,}/.test(cleaned) && cleaned.length >= 24) {
+    const ext = cleaned.includes(".") ? cleaned.slice(cleaned.lastIndexOf(".")) : "";
+    return `Doc_${cleaned.slice(0, 8)}${ext}`;
+  }
+
+  return cleaned || name;
+}
+
+function getFileExtension(name: string): string {
+  const parts = name.split(".");
+  return parts.length > 1 ? parts.pop()!.toLowerCase() : "";
+}
+
+function formatFileSize(bytes?: number | null): string {
+  if (!bytes) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderItemIcon(type: string, mime?: string | null, name: string = "", isGrid: boolean = false) {
+  const sizeClass = isGrid ? "h-12 w-12" : "h-4 w-4";
+  if (type === "folder") {
+    return <Folder className={`${sizeClass} text-amber-500 fill-amber-500/20 shrink-0`} />;
+  }
+  const ext = getFileExtension(name);
+  if (mime?.startsWith("image/") || ["png", "jpg", "jpeg", "webp", "gif", "svg"].includes(ext)) {
+    return <ImageIcon className={`${sizeClass} text-sky-500 shrink-0`} />;
+  }
+  if (mime === "application/pdf" || ext === "pdf") {
+    return <FileText className={`${sizeClass} text-rose-500 shrink-0`} />;
+  }
+  if (["xls", "xlsx", "csv"].includes(ext)) {
+    return <FileSpreadsheet className={`${sizeClass} text-emerald-500 shrink-0`} />;
+  }
+  if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) {
+    return <FileArchive className={`${sizeClass} text-amber-600 shrink-0`} />;
+  }
+  return <File className={`${sizeClass} text-muted-foreground shrink-0`} />;
+}
+
 export function Documents() {
   const { t, formatDate } = useLanguage();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { workspaceName } = useWorkspace();
   const [parentId, setParentId] = useState<string | null>(null);
   const [path, setPath] = useState<{ id: string | null; name: string }[]>([{ id: null, name: t("common.root") }]);
+  const [history, setHistory] = useState<{ id: string | null; name: string }[]>([{ id: null, name: t("common.root") }]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+
+  const [viewMode, setViewMode] = useState<"grid" | "details">(() => {
+    try {
+      return (localStorage.getItem("operix_doc_view_mode") as "grid" | "details") || "grid";
+    } catch {
+      return "grid";
+    }
+  });
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [showFolderDialog, setShowFolderDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -755,8 +825,9 @@ export function Documents() {
   const [previewDoc, setPreviewDoc] = useState<any>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
 
-  const { data: docs = [], isLoading } = useQuery({
+  const { data: docs = [], isLoading, isRefetching } = useQuery({
     queryKey: ["documents", parentId],
     queryFn: async () => {
       const url = `/documents?entity_type=documents&module=global${parentId ? `&parent_id=${parentId}` : "&parent_id=null"}`;
@@ -769,12 +840,27 @@ export function Documents() {
     queryFn: async () => {
       return await apiRequest<any[]>("/documents/folders?entity_type=documents");
     },
-    enabled: showMoveDialog,
   });
 
-  const allSelected = docs.length > 0 && docs.every((d: any) => selectedIds.has(d.id));
+  const changeViewMode = (mode: "grid" | "details") => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem("operix_doc_view_mode", mode);
+    } catch {}
+  };
 
-  const toggleSelect = (id: string) => {
+  const filteredDocs = docs.filter((d: any) => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    const friendly = cleanDisplayName(d.name, d.display_name).toLowerCase();
+    const raw = (d.name || "").toLowerCase();
+    return friendly.includes(term) || raw.includes(term);
+  });
+
+  const allSelected = filteredDocs.length > 0 && filteredDocs.every((d: any) => selectedIds.has(d.id));
+
+  const toggleSelect = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -784,10 +870,66 @@ export function Documents() {
 
   const toggleAll = () => {
     if (allSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(docs.map((d: any) => d.id)));
+    else setSelectedIds(new Set(filteredDocs.map((d: any) => d.id)));
   };
 
   const clearSelection = () => setSelectedIds(new Set());
+
+  const navigateTo = (id: string | null, name: string, pushToHistory = true) => {
+    clearSelection();
+    setParentId(id);
+
+    if (id === null) {
+      setPath([{ id: null, name: t("common.root") }]);
+    } else {
+      const idx = path.findIndex((p) => p.id === id);
+      if (idx >= 0) {
+        setPath(path.slice(0, idx + 1));
+      } else {
+        setPath([...path, { id, name }]);
+      }
+    }
+
+    if (pushToHistory) {
+      const newHist = history.slice(0, historyIndex + 1);
+      newHist.push({ id, name });
+      setHistory(newHist);
+      setHistoryIndex(newHist.length - 1);
+    }
+  };
+
+  const goBack = () => {
+    if (historyIndex > 0) {
+      const nextIdx = historyIndex - 1;
+      const target = history[nextIdx];
+      setHistoryIndex(nextIdx);
+      navigateTo(target.id, target.name, false);
+    }
+  };
+
+  const goForward = () => {
+    if (historyIndex < history.length - 1) {
+      const nextIdx = historyIndex + 1;
+      const target = history[nextIdx];
+      setHistoryIndex(nextIdx);
+      navigateTo(target.id, target.name, false);
+    }
+  };
+
+  const goUp = () => {
+    if (path.length > 1) {
+      const target = path[path.length - 2];
+      navigateTo(target.id, target.name);
+    } else if (parentId !== null) {
+      navigateTo(null, t("common.root"));
+    }
+  };
+
+  const refreshCurrent = () => {
+    queryClient.invalidateQueries({ queryKey: ["documents", parentId] });
+    queryClient.invalidateQueries({ queryKey: ["doc-folders-all"] });
+    toast.success("Pasta atualizada");
+  };
 
   const createFolder = useMutation({
     mutationFn: async () => {
@@ -804,6 +946,7 @@ export function Documents() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["doc-folders-all"] });
       setShowFolderDialog(false);
       setFolderName("");
       toast.success(t("docs.folderCreated"));
@@ -820,6 +963,7 @@ export function Documents() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["doc-folders-all"] });
       toast.success(t("toast.deleted"));
     },
     onError: (err) => toast.error((err as Error).message),
@@ -837,6 +981,7 @@ export function Documents() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["doc-folders-all"] });
       clearSelection();
       toast.success(t("toast.deleted"));
     },
@@ -856,6 +1001,7 @@ export function Documents() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["doc-folders-all"] });
       setShowMoveDialog(false);
       setMoveTarget(null);
       clearSelection();
@@ -903,6 +1049,7 @@ export function Documents() {
   });
 
   const uploadFile = async (file: File) => {
+    setIsUploading(true);
     try {
       const safeName = (file.name || "document").replace(/[^\w.\-()]+/g, "_").slice(0, 160);
       const storagePath = `documents/${Date.now()}_${safeName}`;
@@ -930,36 +1077,49 @@ export function Documents() {
     } catch (err) {
       console.error("[uploadFile]", err);
       toast.error(err instanceof Error ? err.message : "Falha no upload.");
+    } finally {
+      setIsUploading(false);
     }
   };
 
-  const navigateTo = (id: string | null, name: string) => {
-    clearSelection();
-    if (id === null) { setParentId(null); setPath([{ id: null, name: t("common.root") }]); return; }
-    setParentId(id);
-    const idx = path.findIndex(p => p.id === id);
-    if (idx >= 0) setPath(path.slice(0, idx + 1));
-    else setPath([...path, { id, name }]);
-  };
-
-  const handleDownload = (doc: any) => {
+  const handleDownload = (doc: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!doc.storage_path) return;
     void openSecureStorageFile("uploads", doc.storage_path, doc.name);
   };
 
-  const handlePreview = (doc: any) => {
+  const handlePreview = (doc: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!doc.storage_path) return;
     void openSecureStorageFile("uploads", doc.storage_path, doc.name);
   };
 
-  const handlePrint = (doc: any) => {
+  const handlePrint = (doc: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!doc.storage_path) return;
     const w = window.open(getFileUrl("uploads", doc.storage_path), "_blank");
     w?.addEventListener("load", () => w.print());
   };
 
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length === 0) return;
+
+    toast.info(`Fazendo upload de ${files.length} arquivo(s)...`);
+    for (const file of files) {
+      await uploadFile(file);
+    }
+  };
+
   const selectedArray = Array.from(selectedIds);
   const isBulkMode = selectedArray.length > 0;
+  const totalSelectedBytes = docs
+    .filter((d: any) => selectedIds.has(d.id) && d.size_bytes)
+    .reduce((acc: number, cur: any) => acc + (cur.size_bytes || 0), 0);
 
   const openBulkMove = () => {
     setMoveTarget(null);
@@ -969,55 +1129,202 @@ export function Documents() {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-            <FolderOpen className="h-5 w-5 text-primary" />
+    <div className="space-y-4 animate-fade-in flex flex-col h-[calc(100vh-8.5rem)] min-h-[580px]">
+      {/* ─── WINDOWS EXPLORER TOP COMMAND BAR ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
+            <FolderOpen className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-foreground">{t("docs.title")}</h1>
-            <p className="text-xs text-muted-foreground">{t("docs.subtitle")}</p>
+            <h1 className="text-base font-semibold text-foreground tracking-tight flex items-center gap-2">
+              {t("docs.title")}
+              <Badge variant="outline" className="text-[10px] font-normal uppercase py-0 px-1.5 h-4 text-muted-foreground border-border/60">
+                Explorer
+              </Badge>
+            </h1>
+            <p className="text-[11px] text-muted-foreground leading-none">{t("docs.subtitle")}</p>
           </div>
         </div>
-        <div className="flex gap-2">
+
+        {/* Action Controls */}
+        <div className="flex items-center gap-1.5 ml-auto">
           <Dialog open={showFolderDialog} onOpenChange={setShowFolderDialog}>
-            <DialogTrigger asChild><Button variant="outline" size="sm"><FolderPlus className="h-4 w-4 mr-1" />{t("docs.newFolder")}</Button></DialogTrigger>
-            <DialogContent className="bg-card border-border">
-              <DialogHeader><DialogTitle>{t("docs.createFolder")}</DialogTitle></DialogHeader>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 text-xs font-medium gap-1.5 border-border/80 shadow-xs">
+                <FolderPlus className="h-3.5 w-3.5 text-amber-500" />
+                {t("docs.newFolder")}
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-card border-border sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <FolderPlus className="h-4 w-4 text-primary" />
+                  {t("docs.createFolder")}
+                </DialogTitle>
+              </DialogHeader>
               <div className="space-y-4 pt-2">
-                <Input value={folderName} onChange={e => setFolderName(e.target.value)} placeholder={t("label.name")} />
-                <Button className="w-full" onClick={() => createFolder.mutate()} disabled={!folderName.trim()}>{t("action.save")}</Button>
+                <Input
+                  value={folderName}
+                  onChange={(e) => setFolderName(e.target.value)}
+                  placeholder={t("label.name")}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && folderName.trim()) createFolder.mutate();
+                  }}
+                />
+                <Button className="w-full" onClick={() => createFolder.mutate()} disabled={!folderName.trim() || createFolder.isPending}>
+                  {createFolder.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : t("action.save")}
+                </Button>
               </div>
             </DialogContent>
           </Dialog>
-          <Button size="sm" asChild>
+
+          <Button size="sm" className="h-8 text-xs font-medium gap-1.5 shadow-xs" disabled={isUploading} asChild>
             <label className="cursor-pointer">
-              <Upload className="h-4 w-4 mr-1" />{t("action.upload")}
-              <input type="file" className="hidden" onChange={e => { if (e.target.files?.[0]) uploadFile(e.target.files[0]); e.target.value = ""; }} />
+              {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {isUploading ? "Enviando..." : t("action.upload")}
+              <input
+                type="file"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  e.target.value = "";
+                  for (const f of files) await uploadFile(f);
+                }}
+              />
             </label>
           </Button>
+
+          {/* View Mode Switcher */}
+          <div className="flex items-center rounded-md border border-border/70 p-0.5 bg-muted/40 ml-1">
+            <Button
+              variant={viewMode === "grid" ? "secondary" : "ghost"}
+              size="icon"
+              className="h-7 w-7 rounded-sm"
+              onClick={() => changeViewMode("grid")}
+              title="Ícones Grandes (Grade)"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant={viewMode === "details" ? "secondary" : "ghost"}
+              size="icon"
+              className="h-7 w-7 rounded-sm"
+              onClick={() => changeViewMode("details")}
+              title="Detalhes (Lista)"
+            >
+              <List className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Bulk action bar */}
+      {/* ─── WINDOWS EXPLORER NAVIGATION & ADDRESS BAR ─── */}
+      <div className="flex flex-wrap items-center gap-2 bg-card/60 border border-border/70 rounded-md p-1.5 shadow-xs">
+        {/* Navigation Buttons (Back / Forward / Up / Refresh) */}
+        <div className="flex items-center gap-0.5 border-r border-border/60 pr-1.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-30"
+            disabled={historyIndex <= 0}
+            onClick={goBack}
+            title="Voltar (Alt + Esquerda)"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-30"
+            disabled={historyIndex >= history.length - 1}
+            onClick={goForward}
+            title="Avançar (Alt + Direita)"
+          >
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-30"
+            disabled={parentId === null}
+            onClick={goUp}
+            title="Subir um nível (Alt + Cima)"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground"
+            onClick={refreshCurrent}
+            title="Atualizar (F5)"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefetching ? "animate-spin text-primary" : ""}`} />
+          </Button>
+        </div>
+
+        {/* Address Bar (Breadcrumb) */}
+        <div className="flex-1 min-w-[220px] flex items-center gap-1 px-2.5 py-1 bg-background/80 border border-border/70 rounded text-xs text-muted-foreground overflow-x-auto scrollbar-none">
+          <HardDrive className="h-3.5 w-3.5 text-primary shrink-0 mr-1" />
+          {path.map((p, i) => (
+            <span key={i} className="flex items-center gap-1 shrink-0">
+              {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground/60 shrink-0" />}
+              <button
+                onClick={() => navigateTo(p.id, p.name)}
+                className={`px-1.5 py-0.5 rounded hover:bg-muted/60 transition-colors font-medium truncate max-w-[160px] ${
+                  i === path.length - 1 ? "text-foreground bg-primary/10" : "hover:text-foreground"
+                }`}
+              >
+                {p.name}
+              </button>
+            </span>
+          ))}
+        </div>
+
+        {/* Search Bar */}
+        <div className="relative w-full sm:w-64">
+          <Search className="h-3.5 w-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <Input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder={`Pesquisar em ${path[path.length - 1]?.name || "Documentos"}...`}
+            className="h-7 text-xs pl-8 pr-7 bg-background/80 border-border/70 focus-visible:ring-1"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ─── BULK SELECTION ACTION BAR ─── */}
       {isBulkMode && (
-        <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
-          <CheckSquare className="h-4 w-4 text-primary" />
-          <span className="text-xs font-medium text-foreground">
+        <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs animate-in fade-in slide-in-from-top-1">
+          <CheckSquare className="h-4 w-4 text-primary shrink-0" />
+          <span className="font-semibold text-foreground">
             {selectedArray.length} {t("fm.selected")}
           </span>
-          <div className="ml-auto flex items-center gap-1">
-            <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={openBulkMove}>
-              <MoveRight className="h-3 w-3 mr-1" />{t("fm.move")}
+          <span className="text-muted-foreground text-[11px]">({formatFileSize(totalSelectedBytes)})</span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1 bg-card/80" onClick={openBulkMove}>
+              <MoveRight className="h-3 w-3" />
+              {t("fm.move")}
             </Button>
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-[11px] text-destructive border-destructive/30"
+              className="h-7 text-[11px] text-destructive border-destructive/40 bg-card/80 hover:bg-destructive/10"
               onClick={() => bulkDeleteMutation.mutate(selectedArray)}
             >
-              <Trash2 className="h-3 w-3 mr-1" />{t("action.delete")}
+              <Trash2 className="h-3 w-3 mr-1" />
+              {t("action.delete")}
             </Button>
             <Button variant="ghost" size="sm" className="h-7 text-[11px]" onClick={clearSelection}>
               {t("action.cancel")}
@@ -1026,113 +1333,402 @@ export function Documents() {
         </div>
       )}
 
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-        {path.map((p, i) => (
-          <span key={i} className="flex items-center gap-1">
-            {i > 0 && <ChevronRight className="h-3 w-3" />}
-            <button onClick={() => navigateTo(p.id, p.name)} className="hover:text-foreground">{p.name}</button>
-          </span>
-        ))}
+      {/* ─── MAIN EXPLORER WORKSPACE (SIDEBAR + CONTENT) ─── */}
+      <div className="flex-1 flex gap-3 min-h-0 overflow-hidden">
+        {/* Left Navigation Pane (Windows Explorer Acesso Rápido) */}
+        <aside className="hidden md:flex flex-col w-52 shrink-0 border border-border/60 bg-card/40 rounded-lg p-2.5 text-xs overflow-y-auto">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 px-2 mb-1.5">
+            Acesso Rápido
+          </div>
+          <button
+            onClick={() => navigateTo(null, t("common.root"))}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors font-medium ${
+              parentId === null ? "bg-primary/15 text-primary" : "text-foreground/80 hover:bg-muted/50"
+            }`}
+          >
+            <HardDrive className="h-3.5 w-3.5 text-primary shrink-0" />
+            <span className="truncate">{workspaceName || "Este Workspace"}</span>
+          </button>
+
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 px-2 mt-4 mb-1.5">
+            Pastas Principais
+          </div>
+          <div className="space-y-0.5">
+            {allFolders
+              .filter((f: any) => !f.parent_id)
+              .map((f: any) => (
+                <button
+                  key={f.id}
+                  onClick={() => navigateTo(f.id, f.name)}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors ${
+                    parentId === f.id ? "bg-primary/15 text-primary font-medium" : "text-foreground/80 hover:bg-muted/50"
+                  }`}
+                >
+                  <Folder className="h-3.5 w-3.5 text-amber-500 fill-amber-500/20 shrink-0" />
+                  <span className="truncate">{cleanDisplayName(f.name, f.display_name)}</span>
+                </button>
+              ))}
+            {allFolders.filter((f: any) => !f.parent_id).length === 0 && (
+              <p className="px-2 py-1 text-[11px] text-muted-foreground italic">Nenhuma subpasta</p>
+            )}
+          </div>
+        </aside>
+
+        {/* Right Main Container (Drag & Drop Zone + Views) */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!isDraggingOver) setIsDraggingOver(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDraggingOver(false);
+          }}
+          onDrop={handleDrop}
+          className={`flex-1 flex flex-col rounded-lg border border-border/60 bg-card/20 relative overflow-hidden transition-all ${
+            isDraggingOver ? "border-primary ring-2 ring-primary/20 bg-primary/5" : ""
+          }`}
+        >
+          {/* Drag Overlay */}
+          {isDraggingOver && (
+            <div className="absolute inset-0 z-50 bg-background/85 backdrop-blur-xs flex flex-col items-center justify-center gap-2 border-2 border-dashed border-primary rounded-lg pointer-events-none">
+              <UploadCloud className="h-12 w-12 text-primary animate-bounce" />
+              <p className="text-sm font-semibold text-primary">Solte os arquivos aqui para fazer upload</p>
+              <p className="text-xs text-muted-foreground">Destino: {path[path.length - 1]?.name || "Raiz"}</p>
+            </div>
+          )}
+
+          {/* Content Area */}
+          <div className="flex-1 overflow-auto p-3">
+            {isLoading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <Skeleton key={i} className="h-28 w-full rounded-lg" />
+                ))}
+              </div>
+            ) : filteredDocs.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
+                <FolderOpen className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                <p className="text-sm font-medium text-foreground">Esta pasta está vazia</p>
+                <p className="text-xs mt-1 max-w-sm">
+                  {searchTerm ? "Nenhum documento encontrado com o filtro atual." : "Arraste e solte arquivos aqui direto do seu computador ou use o botão 'Enviar'."}
+                </p>
+              </div>
+            ) : viewMode === "grid" ? (
+              /* ─── GRID VIEW (WINDOWS TILES / ICONS) ─── */
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-2.5">
+                {filteredDocs.map((d: any) => {
+                  const isSelected = selectedIds.has(d.id);
+                  const friendly = cleanDisplayName(d.name, d.display_name);
+                  const isFolder = d.type === "folder";
+
+                  return (
+                    <div
+                      key={d.id}
+                      onClick={(e) => toggleSelect(d.id, e)}
+                      onDoubleClick={() => {
+                        if (isFolder) navigateTo(d.id, d.name);
+                        else handlePreview(d);
+                      }}
+                      className={`group relative flex flex-col items-center justify-between p-2.5 rounded-lg border text-center transition-all cursor-pointer select-none ${
+                        isSelected
+                          ? "bg-primary/10 border-primary shadow-xs ring-1 ring-primary/40"
+                          : "border-border/60 hover:bg-muted/40 hover:border-border"
+                      }`}
+                    >
+                      {/* Checkbox (visible on hover or when selected) */}
+                      <div
+                        className={`absolute top-1.5 left-1.5 transition-opacity ${
+                          isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                        }`}
+                        onClick={(e) => toggleSelect(d.id, e)}
+                      >
+                        <Checkbox checked={isSelected} />
+                      </div>
+
+                      {/* Icon or Thumbnail */}
+                      <div className="w-full h-16 flex items-center justify-center my-1">
+                        {renderItemIcon(d.type, d.mime_type, d.name, true)}
+                      </div>
+
+                      {/* Title & Info */}
+                      <div className="w-full space-y-0.5 mt-1">
+                        {renamingId === d.id ? (
+                          <form
+                            className="flex items-center gap-1"
+                            onClick={(e) => e.stopPropagation()}
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              if (renameValue.trim()) renameMutation.mutate({ id: d.id, name: renameValue.trim() });
+                            }}
+                          >
+                            <Input
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              className="h-6 text-xs text-center"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") setRenamingId(null);
+                              }}
+                            />
+                            <Button type="submit" variant="ghost" size="icon" className="h-5 w-5 shrink-0" disabled={!renameValue.trim()}>
+                              <Check className="h-3 w-3 text-primary" />
+                            </Button>
+                            <Button type="button" variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => setRenamingId(null)}>
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </form>
+                        ) : (
+                          <p
+                            className="text-xs font-medium text-foreground truncate px-1"
+                            title={`${friendly} (${d.name})`}
+                          >
+                            {friendly}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground">
+                          {isFolder ? t("common.folder") : formatFileSize(d.size_bytes)}
+                        </p>
+                      </div>
+
+                      {/* Hover Actions Quickbar */}
+                      <div
+                        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-0.5 pt-1.5 mt-1 border-t border-border/40 w-full"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {!isFolder && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                              onClick={(e) => handlePreview(d, e)}
+                              title={t("fm.preview")}
+                            >
+                              <Eye className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                              onClick={(e) => handleDownload(d, e)}
+                              title={t("fm.download")}
+                            >
+                              <Download className="h-3 w-3" />
+                            </Button>
+                          </>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRenamingId(d.id);
+                            setRenameValue(d.name);
+                          }}
+                          title={t("fm.rename")}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-destructive hover:text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteMutation.mutate(d);
+                          }}
+                          title={t("action.delete")}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* ─── DETAILS VIEW (WINDOWS LIST / TABLE) ─── */
+              <div className="rounded-md border border-border/60 overflow-hidden bg-card/40">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="text-[11px] bg-muted/40 hover:bg-muted/40">
+                      <TableHead className="w-8 pl-3">
+                        <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label={t("fm.selectAll")} />
+                      </TableHead>
+                      <TableHead>{t("label.name")}</TableHead>
+                      <TableHead className="w-28">{t("label.type")}</TableHead>
+                      <TableHead className="w-24">{t("docs.size")}</TableHead>
+                      <TableHead className="w-32">{t("label.date")}</TableHead>
+                      <TableHead className="w-28 text-right pr-3">{t("label.actions")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredDocs.map((d: any) => {
+                      const isSelected = selectedIds.has(d.id);
+                      const friendly = cleanDisplayName(d.name, d.display_name);
+                      const isFolder = d.type === "folder";
+
+                      return (
+                        <TableRow
+                          key={d.id}
+                          onClick={() => toggleSelect(d.id)}
+                          onDoubleClick={() => {
+                            if (isFolder) navigateTo(d.id, d.name);
+                            else handlePreview(d);
+                          }}
+                          className={`text-xs cursor-pointer select-none transition-colors ${
+                            isSelected ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-muted/30"
+                          }`}
+                        >
+                          <TableCell className="w-8 pl-3" onClick={(e) => toggleSelect(d.id, e)}>
+                            <Checkbox checked={isSelected} />
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              {renderItemIcon(d.type, d.mime_type, d.name, false)}
+                              {renamingId === d.id ? (
+                                <form
+                                  className="flex items-center gap-1"
+                                  onClick={(e) => e.stopPropagation()}
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if (renameValue.trim()) renameMutation.mutate({ id: d.id, name: renameValue.trim() });
+                                  }}
+                                >
+                                  <Input
+                                    value={renameValue}
+                                    onChange={(e) => setRenameValue(e.target.value)}
+                                    className="h-6 text-xs w-[200px]"
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Escape") setRenamingId(null);
+                                    }}
+                                  />
+                                  <Button type="submit" variant="ghost" size="icon" className="h-5 w-5" disabled={!renameValue.trim()}>
+                                    <Check className="h-3 w-3 text-primary" />
+                                  </Button>
+                                  <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setRenamingId(null)}>
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </form>
+                              ) : (
+                                <span className="truncate max-w-[280px]" title={`${friendly} (${d.name})`}>
+                                  {friendly}
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-[10px] font-normal py-0">
+                              {isFolder ? t("common.folder") : getFileExtension(d.name).toUpperCase() || t("common.file")}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{isFolder ? "—" : formatFileSize(d.size_bytes)}</TableCell>
+                          <TableCell className="text-muted-foreground">{formatDate(d.created_at)}</TableCell>
+                          <TableCell className="pr-3 text-right" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1">
+                              {!isFolder && (
+                                <>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => handlePreview(d, e)} title={t("fm.preview")}>
+                                    <Eye className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => handleDownload(d, e)} title={t("fm.download")}>
+                                    <Download className="h-3.5 w-3.5" />
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRenamingId(d.id);
+                                  setRenameValue(d.name);
+                                }}
+                                title={t("fm.rename")}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-destructive"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteMutation.mutate(d);
+                                }}
+                                title={t("action.delete")}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          {/* ─── WINDOWS EXPLORER STATUS BAR (FOOTER) ─── */}
+          <div className="flex items-center justify-between px-3 py-1.5 border-t border-border/60 bg-muted/20 text-[11px] text-muted-foreground select-none">
+            <div className="flex items-center gap-2">
+              <span>{filteredDocs.length} {filteredDocs.length === 1 ? "item" : "itens"}</span>
+              {selectedArray.length > 0 && (
+                <>
+                  <span className="text-border">|</span>
+                  <span className="text-primary font-medium">
+                    {selectedArray.length} {selectedArray.length === 1 ? "selecionado" : "selecionados"}
+                    {totalSelectedBytes > 0 && ` (${formatFileSize(totalSelectedBytes)})`}
+                  </span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wider">{viewMode === "grid" ? "Grade" : "Lista Detalhada"}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
-      ) : docs.length === 0 ? (
-        <div className="text-center py-12 text-sm text-muted-foreground">{t("docs.emptyFolder")}</div>
-      ) : (
-        <div className="rounded-lg border border-border/50 overflow-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="text-[11px]">
-                <TableHead className="w-8">
-                  <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label={t("fm.selectAll")} />
-                </TableHead>
-                <TableHead>{t("label.name")}</TableHead>
-                <TableHead>{t("label.type")}</TableHead>
-                <TableHead>{t("docs.size")}</TableHead>
-                <TableHead>{t("label.date")}</TableHead>
-                <TableHead>{t("label.actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {docs.map((d: any) => (
-                <TableRow key={d.id} className={`text-xs ${selectedIds.has(d.id) ? "bg-primary/5" : ""}`}>
-                  <TableCell className="w-8">
-                    <Checkbox checked={selectedIds.has(d.id)} onCheckedChange={() => toggleSelect(d.id)} />
-                  </TableCell>
-                  <TableCell className="font-medium flex items-center gap-2 cursor-pointer" onClick={() => renamingId !== d.id && d.type === "folder" && navigateTo(d.id, d.name)}>
-                    {d.type === "folder" ? <FolderOpen className="h-4 w-4 text-primary shrink-0" /> : <FileText className="h-4 w-4 text-muted-foreground shrink-0" />}
-                    {renamingId === d.id ? (
-                      <form className="flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); if (renameValue.trim()) renameMutation.mutate({ id: d.id, name: renameValue.trim() }); }}>
-                        <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="h-6 text-xs w-[180px]" autoFocus onKeyDown={(e) => { if (e.key === "Escape") setRenamingId(null); }} />
-                        <Button type="submit" variant="ghost" size="icon" className="h-5 w-5" disabled={!renameValue.trim()}><Check className="h-3 w-3 text-primary" /></Button>
-                        <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setRenamingId(null)}><X className="h-3 w-3" /></Button>
-                      </form>
-                    ) : (
-                      <span className="truncate max-w-[200px]">{d.name}</span>
-                    )}
-                  </TableCell>
-                  <TableCell><Badge variant="outline">{d.type === "folder" ? t("common.folder") : t("common.file")}</Badge></TableCell>
-                  <TableCell>{d.size_bytes ? `${(d.size_bytes / 1024).toFixed(1)} KB` : "—"}</TableCell>
-                  <TableCell className="text-muted-foreground">{formatDate(d.created_at)}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      {d.type === "file" && (
-                        <>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handlePreview(d)} title={t("fm.preview")}>
-                            <Eye className="h-3 w-3" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(d)} title={t("fm.download")}>
-                            <Download className="h-3 w-3" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handlePrint(d)} title={t("fm.print")}>
-                            <Printer className="h-3 w-3" />
-                          </Button>
-                        </>
-                      )}
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setRenamingId(d.id); setRenameValue(d.name); }} title={t("fm.rename")}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
-                        setMoveTarget(d);
-                        setMoveDestination("__root__");
-                        setNewFolderInMove("");
-                        setShowMoveDialog(true);
-                      }} title={t("fm.move")}>
-                        <MoveRight className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(d); }}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-
-      {/* Move dialog */}
+      {/* ─── MOVE DIALOG ─── */}
       <Dialog open={showMoveDialog} onOpenChange={setShowMoveDialog}>
-        <DialogContent className="bg-card border-border">
-          <DialogHeader><DialogTitle>{t("fm.moveTo")}</DialogTitle></DialogHeader>
+        <DialogContent className="bg-card border-border sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
+              <MoveRight className="h-4 w-4 text-primary" />
+              {t("fm.moveTo")}
+            </DialogTitle>
+          </DialogHeader>
           <div className="space-y-4 pt-2">
             <p className="text-xs text-muted-foreground">
-              {moveTarget
-                ? <>{t("fm.moveFile")}: <strong>{moveTarget.name}</strong></>
-                : <>{selectedArray.length} {t("fm.selected")}</>
-              }
+              {moveTarget ? (
+                <>
+                  {t("fm.moveFile")}: <strong>{cleanDisplayName(moveTarget.name, moveTarget.display_name)}</strong>
+                </>
+              ) : (
+                <>{selectedArray.length} {t("fm.selected")}</>
+              )}
             </p>
             <Select value={moveDestination} onValueChange={setMoveDestination}>
-              <SelectTrigger className="h-9 text-xs"><SelectValue placeholder={t("fm.selectFolder")} /></SelectTrigger>
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder={t("fm.selectFolder")} />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__root__">{t("common.root")}</SelectItem>
                 {allFolders
                   .filter((f: any) => f.id !== moveTarget?.id && !selectedIds.has(f.id))
                   .map((f: any) => (
-                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    <SelectItem key={f.id} value={f.id}>
+                      {cleanDisplayName(f.name, f.display_name)}
+                    </SelectItem>
                   ))}
               </SelectContent>
             </Select>
@@ -1150,7 +1746,8 @@ export function Documents() {
                 disabled={!newFolderInMove.trim()}
                 onClick={() => createFolderInMove.mutate(newFolderInMove.trim())}
               >
-                <FolderPlus className="h-3 w-3 mr-1" />{t("action.add")}
+                <FolderPlus className="h-3 w-3 mr-1" />
+                {t("action.add")}
               </Button>
             </div>
             <Button
@@ -1167,18 +1764,24 @@ export function Documents() {
         </DialogContent>
       </Dialog>
 
-      {/* Preview dialog */}
+      {/* ─── PREVIEW DIALOG ─── */}
       <Dialog open={!!previewDoc} onOpenChange={() => setPreviewDoc(null)}>
         <DialogContent className="bg-card border-border max-w-3xl max-h-[80vh]">
-          <DialogHeader><DialogTitle>{previewDoc?.name}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="truncate text-sm font-semibold">
+              {previewDoc ? cleanDisplayName(previewDoc.name, previewDoc.display_name) : ""}
+            </DialogTitle>
+          </DialogHeader>
           <div className="overflow-auto max-h-[65vh]">
             {previewDoc?.mime_type?.startsWith("image/") ? (
-              <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full rounded" />
+              <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full rounded mx-auto" />
             ) : previewDoc?.mime_type === "application/pdf" ? (
               <iframe src={previewDoc.url} className="w-full h-[60vh] rounded" />
             ) : (
               <div className="text-center py-8 text-sm text-muted-foreground">
-                <a href={previewDoc?.url} target="_blank" rel="noopener noreferrer" className="text-primary underline">{t("fm.download")}</a>
+                <a href={previewDoc?.url} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                  {t("fm.download")}
+                </a>
               </div>
             )}
           </div>
