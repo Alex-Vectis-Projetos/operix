@@ -27,6 +27,7 @@ function mapDoc(doc: any) {
     visual_state: doc.visualState,
     uploaded_by: doc.uploadedBy,
     workspace_id: doc.workspaceId,
+    country_requirement_id: doc.countryRequirementId,
     created_at: doc.createdAt,
     updated_at: doc.updatedAt,
   };
@@ -96,6 +97,7 @@ documentsRouter.post("/", requireAuth, async (req: AuthenticatedRequest, res: Re
       visualState: b.visual_state ?? null,
       uploadedBy: req.ctx?.actorUserId ?? req.auth?.userId ?? null,
       workspaceId: req.ctx?.activeWorkspaceId ?? null,
+      countryRequirementId: b.country_requirement_id ?? null,
       ...(b.created_at ? { createdAt: new Date(b.created_at) } : {}),
     },
   });

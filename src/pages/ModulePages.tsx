@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { uploadFile as storageUpload, deleteFiles, getFileUrl, openSecureStorageFile } from "@/lib/storage";
@@ -17,9 +17,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -32,9 +34,12 @@ import {
   Copy, Link, AlertTriangle, Shield,
   LayoutGrid, List, ArrowLeft, ArrowRight, ArrowUp, RefreshCw, Search,
   HardDrive, FileSpreadsheet, Image as ImageIcon, UploadCloud, Folder, File,
-  FileArchive,
+  FileArchive, Globe, Building2, User, FileCheck2, Sparkles,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { usePeople } from "@/hooks/usePeople";
+import { useClients } from "@/hooks/useServiceOrders";
+import { useCountryDocumentRequirements } from "@/hooks/useCountryDocumentRequirements";
 
 import { Can } from "@/components/Can";
 import { getCurrentUserId, logSaveError, logSavePayload } from "@/lib/authUser";
@@ -818,8 +823,180 @@ export function Documents() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const { people = [] } = usePeople();
+  const { data: clients = [] } = useClients();
+
   const [folderName, setFolderName] = useState("");
   const [showFolderDialog, setShowFolderDialog] = useState(false);
+  const [folderDialogTab, setFolderDialogTab] = useState<"normal" | "country">("normal");
+  const [selectedCountry, setSelectedCountry] = useState<string>("Bélgica");
+  const [countryTargetType, setCountryTargetType] = useState<"person" | "client">("person");
+  const [selectedPersonId, setSelectedPersonId] = useState<string>("");
+  const [selectedClientId, setSelectedClientId] = useState<string>("");
+  const [countryFolderName, setCountryFolderName] = useState<string>("");
+  const [isCreatingCountryFolder, setIsCreatingCountryFolder] = useState<boolean>(false);
+
+  const { requirements: countryReqs = [] } = useCountryDocumentRequirements(selectedCountry);
+
+  const DEFAULT_REQUIREMENTS: Record<string, string[]> = {
+    "Bélgica": [
+      "Documento de Identidade Oficial / Passaporte",
+      "Declaração Limosa / Documento A1 (Destacamento)",
+      "Registo Empresarial / Número de IVA (BCE / KBO)",
+      "Seguro de Responsabilidade Civil Profissional",
+      "Certificação Técnica PDR",
+      "Carta de Condução",
+    ],
+    "França": [
+      "Pièce d'Identité / Titre de Séjour / Passeport",
+      "Extrait Kbis / Attestation URSSAF / SIRET",
+      "Assurance Responsabilité Civile Professionnelle (RC Pro)",
+      "Attestation A1 (si détachement européen)",
+      "Certificação Técnica PDR",
+      "Permis de Conduire",
+    ],
+    "Espanha": [
+      "Documento de Identidade (DNI / NIE / Passaporte)",
+      "Certificado de Alta no RETA / IAE / CIF",
+      "Seguro de Responsabilidade Civil",
+      "Certificado de Estar al Corriente con Seguridad Social",
+      "Certificação Técnica PDR / Automóvel",
+      "Carta de Condução",
+    ],
+    "Portugal": [
+      "Documento de Identificação (CC / Passaporte)",
+      "Comprovativo de Início de Atividade / Certidão Permanente",
+      "Seguro de Acidentes de Trabalho / RC",
+      "Comprovativo de Morada / Domicílio Fiscal",
+      "Certificação Técnica PDR / Automóvel",
+      "Carta de Condução",
+    ],
+    "Alemanha": [
+      "Personalausweis / Reisepass (Identificação Oficial)",
+      "Gewerbeanmeldung (Registo Comercial)",
+      "Betriebshaftpflichtversicherung (Seguro RC)",
+      "Freistellungsbescheinigung (Certificado Fiscal)",
+      "Certificação Técnica PDR",
+      "Führerschein (Carta de Condução)",
+    ],
+    "Brasil": [
+      "Documento de Identidade Oficial (RG / CNH) e CPF",
+      "Comprovante de CNPJ / MEI / Contrato Social",
+      "Comprovante de Residência Atualizado",
+      "Certificado de Formação / Qualificação Técnica PDR",
+      "Carteira Nacional de Habilitação (CNH)",
+    ],
+    "Luxemburgo": [
+      "Document d'Identité / Passeport",
+      "Autorisation d'Établissement / TVA",
+      "Assurance Responsabilité Civile",
+      "Certificat A1 / Détachement",
+    ],
+    "default": [
+      "Documento Oficial de Identificação / Passaporte",
+      "Comprovativo de Registo Fiscal e Empresarial",
+      "Seguro de Responsabilidade Civil Profissional",
+      "Comprovativo de Morada / Domicílio",
+      "Certificação Técnica / Qualificação PDR",
+      "Carta / Licença de Condução",
+    ],
+  };
+
+  const activeDocReqs: { id: string | null; name: string }[] = useMemo(() => {
+    if (countryReqs && countryReqs.length > 0) {
+      return countryReqs.filter((r: any) => r.active).map((r: any) => ({ id: r.id, name: r.document_name }));
+    }
+    const fallback = DEFAULT_REQUIREMENTS[selectedCountry] || DEFAULT_REQUIREMENTS["default"];
+    return fallback.map((name) => ({ id: null, name }));
+  }, [countryReqs, selectedCountry]);
+
+  const updateSuggestedCountryFolderName = (country: string, type: "person" | "client", personId: string, clientId: string) => {
+    let targetName = "";
+    if (type === "person" && personId) {
+      const p = people.find((x: any) => x.id === personId);
+      if (p) targetName = p.full_name;
+    } else if (type === "client" && clientId) {
+      const c = clients.find((x: any) => x.id === clientId);
+      if (c) targetName = c.name || c.trade_name || "";
+    }
+    if (targetName) {
+      setCountryFolderName(`${country} - ${targetName}`);
+    } else {
+      setCountryFolderName(country);
+    }
+  };
+
+  const handleCountryChange = (c: string) => {
+    setSelectedCountry(c);
+    updateSuggestedCountryFolderName(c, countryTargetType, selectedPersonId, selectedClientId);
+  };
+
+  const handleTargetTypeChange = (type: "person" | "client") => {
+    setCountryTargetType(type);
+    setSelectedPersonId("");
+    setSelectedClientId("");
+    updateSuggestedCountryFolderName(selectedCountry, type, "", "");
+  };
+
+  const handlePersonSelect = (pId: string) => {
+    setSelectedPersonId(pId);
+    updateSuggestedCountryFolderName(selectedCountry, "person", pId, "");
+  };
+
+  const handleClientSelect = (cId: string) => {
+    setSelectedClientId(cId);
+    updateSuggestedCountryFolderName(selectedCountry, "client", "", cId);
+  };
+
+  const handleCreateCountryFolder = async () => {
+    if (!countryFolderName.trim()) return;
+    setIsCreatingCountryFolder(true);
+    try {
+      const parentDoc = await apiRequest<{ id: string }>("/documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: countryFolderName.trim(),
+          type: "folder",
+          parent_id: parentId,
+          entity_type: "documents",
+          module: "global",
+        }),
+      });
+
+      for (const req of activeDocReqs) {
+        await apiRequest("/documents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: req.name,
+            type: "folder",
+            parent_id: parentDoc.id,
+            country_requirement_id: req.id || null,
+            entity_type: "documents",
+            module: "global",
+          }),
+        });
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["doc-folders-all"] });
+      setShowFolderDialog(false);
+      setFolderName("");
+      setCountryFolderName("");
+      setSelectedPersonId("");
+      setSelectedClientId("");
+      toast.success(`Pasta criada com ${activeDocReqs.length} requisitos de compliance!`);
+      navigateTo(parentDoc.id, countryFolderName.trim());
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || "Erro ao criar pasta de documentos por país.");
+    } finally {
+      setIsCreatingCountryFolder(false);
+    }
+  };
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveTarget, setMoveTarget] = useState<any>(null);
@@ -1156,6 +1333,17 @@ export function Documents() {
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs font-medium gap-1.5 border-border/80 shadow-xs hidden sm:flex text-muted-foreground hover:text-foreground"
+            onClick={() => navigate("/country-document-requirements")}
+            title="Configurar Exigências de Documentos por País"
+          >
+            <FileCheck2 className="h-3.5 w-3.5 text-blue-500" />
+            <span className="hidden md:inline">Exigências por País</span>
+          </Button>
+
           <Dialog open={showFolderDialog} onOpenChange={setShowFolderDialog}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 text-xs font-medium gap-1.5 border-border/80 shadow-xs">
@@ -1163,27 +1351,168 @@ export function Documents() {
                 {t("docs.newFolder")}
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-card border-border sm:max-w-md">
+            <DialogContent className="bg-card border-border sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
                   <FolderPlus className="h-4 w-4 text-primary" />
                   {t("docs.createFolder")}
                 </DialogTitle>
               </DialogHeader>
-              <div className="space-y-4 pt-2">
-                <Input
-                  value={folderName}
-                  onChange={(e) => setFolderName(e.target.value)}
-                  placeholder={t("label.name")}
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && folderName.trim()) createFolder.mutate();
-                  }}
-                />
-                <Button className="w-full" onClick={() => createFolder.mutate()} disabled={!folderName.trim() || createFolder.isPending}>
-                  {createFolder.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : t("action.save")}
-                </Button>
-              </div>
+
+              <Tabs value={folderDialogTab} onValueChange={(v) => setFolderDialogTab(v as "normal" | "country")} className="pt-1">
+                <TabsList className="grid grid-cols-2 mb-3 h-8 bg-muted/60 p-0.5">
+                  <TabsTrigger value="normal" className="flex items-center gap-1.5 text-xs py-1">
+                    <Folder className="h-3.5 w-3.5 text-amber-500" />
+                    Pasta Normal
+                  </TabsTrigger>
+                  <TabsTrigger value="country" className="flex items-center gap-1.5 text-xs py-1">
+                    <Globe className="h-3.5 w-3.5 text-blue-500" />
+                    Documento por País
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="normal" className="space-y-4 pt-1">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">{t("label.name")}</Label>
+                    <Input
+                      value={folderName}
+                      onChange={(e) => setFolderName(e.target.value)}
+                      placeholder="Ex: Contratos, Relatórios Gerais..."
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && folderName.trim()) createFolder.mutate();
+                      }}
+                    />
+                  </div>
+                  <Button className="w-full" onClick={() => createFolder.mutate()} disabled={!folderName.trim() || createFolder.isPending}>
+                    {createFolder.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : t("action.save")}
+                  </Button>
+                </TabsContent>
+
+                <TabsContent value="country" className="space-y-3.5 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* Seleção do País */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium">País de Atuação</Label>
+                      <Select value={selectedCountry} onValueChange={handleCountryChange}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Selecione o país..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Bélgica">🇧🇪 Bélgica</SelectItem>
+                          <SelectItem value="França">🇫🇷 França</SelectItem>
+                          <SelectItem value="Espanha">🇪🇸 Espanha</SelectItem>
+                          <SelectItem value="Portugal">🇵🇹 Portugal</SelectItem>
+                          <SelectItem value="Alemanha">🇩🇪 Alemanha</SelectItem>
+                          <SelectItem value="Brasil">🇧🇷 Brasil</SelectItem>
+                          <SelectItem value="Luxemburgo">🇱🇺 Luxemburgo</SelectItem>
+                          <SelectItem value="Holanda">🇳🇱 Holanda</SelectItem>
+                          <SelectItem value="Itália">🇮🇹 Itália</SelectItem>
+                          <SelectItem value="Suíça">🇨🇭 Suíça</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Vínculo (Colaborador ou Cliente) */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium">Vincular a</Label>
+                      <Select value={countryTargetType} onValueChange={(v: "person" | "client") => handleTargetTypeChange(v)}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="person">
+                            <span className="flex items-center gap-1.5">
+                              <User className="h-3 w-3 text-primary" /> Colaborador
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="client">
+                            <span className="flex items-center gap-1.5">
+                              <Building2 className="h-3 w-3 text-emerald-500" /> Cliente
+                            </span>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Seleção da Entidade */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium">
+                      {countryTargetType === "person" ? "Colaborador Cadastrado" : "Cliente Cadastrado"}
+                    </Label>
+                    {countryTargetType === "person" ? (
+                      <Select value={selectedPersonId} onValueChange={handlePersonSelect}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Selecione o colaborador..." />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-56">
+                          {people.map((p: any) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.full_name} {p.person_type ? `(${p.person_type})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Select value={selectedClientId} onValueChange={handleClientSelect}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Selecione o cliente..." />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-56">
+                          {clients.map((c: any) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name || c.trade_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+
+                  {/* Nome da Pasta Principal */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium">Nome da Pasta</Label>
+                    <Input
+                      value={countryFolderName}
+                      onChange={(e) => setCountryFolderName(e.target.value)}
+                      placeholder={`Ex: ${selectedCountry} - Nome`}
+                      className="h-8 text-xs font-medium"
+                    />
+                  </div>
+
+                  {/* Subpastas que serão criadas */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[11px] font-medium text-muted-foreground">
+                        Subpastas de Compliance para Upload ({activeDocReqs.length})
+                      </Label>
+                      <span className="text-[10px] text-primary font-medium">Geração Automática</span>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-muted/20 p-2 max-h-32 overflow-y-auto space-y-1 text-xs">
+                      {activeDocReqs.map((req, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-foreground/80 py-0.5">
+                          <Folder className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                          <span className="truncate">{req.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <Button
+                    className="w-full gap-2"
+                    disabled={!countryFolderName.trim() || isCreatingCountryFolder}
+                    onClick={handleCreateCountryFolder}
+                  >
+                    {isCreatingCountryFolder ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 text-amber-300" />
+                    )}
+                    Criar Pasta e Estrutura de Documentos
+                  </Button>
+                </TabsContent>
+              </Tabs>
             </DialogContent>
           </Dialog>
 

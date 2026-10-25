@@ -75,7 +75,6 @@ export const AppSidebar = memo(function AppSidebar() {
         { title: t("nav.clients", "Clientes"), url: "/clients", icon: UserPlus, module: "accounting", action: "view" },
         { title: t("nav.locations", "Locais"), url: "/locations", icon: MapPin, module: "locations", action: "view" },
         { title: t("nav.people", "Colaboradores"), url: "/people", icon: IdCard, module: "people", action: "view" },
-        { title: t("nav.countryDocuments", "Documentos por País"), url: "/country-document-requirements", icon: FileCheck2, module: "country_document_requirements", action: "view" },
       ],
     },
     {
