@@ -24,8 +24,38 @@ export interface Location {
   latitude?: number | null;
   longitude?: number | null;
   is_approximate?: boolean;
+  maps_url?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface MapUrlResolvedAddress {
+  street: string;
+  number: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+}
+
+export interface MapUrlResolvedResponse {
+  success: boolean;
+  latitude: number | null;
+  longitude: number | null;
+  resolved_url: string;
+  is_approximate: boolean;
+  address: MapUrlResolvedAddress;
+  name_hint?: string | null;
+}
+
+export async function resolveMapUrl(url: string): Promise<MapUrlResolvedResponse> {
+  return await apiRequest<MapUrlResolvedResponse>("/locations/resolve-map-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+    timeoutMs: 12000,
+  });
 }
 
 export type LocationInput = Omit<Location, "id" | "created_at" | "updated_at" | "workspace_id"> & {

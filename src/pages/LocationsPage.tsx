@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MapPin, Plus, Search, Pencil, Trash2, Loader2 } from "lucide-react";
+import { MapPin, Plus, Search, Pencil, Trash2, Loader2, ExternalLink } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,7 +87,22 @@ export default function LocationsPage() {
                 {locations.map((loc) => (
                   <TableRow key={loc.id}>
                     <TableCell className="font-medium">{loc.name}</TableCell>
-                    <TableCell>{loc.address_city} — {loc.address_country}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5">
+                        <span>{loc.address_city} — {loc.address_country}</span>
+                        {(loc.maps_url || (loc.latitude && loc.longitude)) && (
+                          <a
+                            href={loc.maps_url || `https://www.google.com/maps?q=${loc.latitude},${loc.longitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center text-muted-foreground hover:text-primary transition-colors p-1"
+                            title="Abrir no Google Maps"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>{loc.manager_name}</TableCell>
                     <TableCell>
                       <Badge variant={loc.status === "active" ? "default" : "secondary"}>
@@ -95,10 +110,10 @@ export default function LocationsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right space-x-1">
-                      <Button size="icon" variant="ghost" onClick={() => openEdit(loc)}>
+                      <Button size="icon" variant="ghost" onClick={() => openEdit(loc)} title="Editar Local">
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button size="icon" variant="ghost" onClick={() => setToDelete(loc)}>
+                      <Button size="icon" variant="ghost" onClick={() => setToDelete(loc)} title="Excluir Local">
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </TableCell>

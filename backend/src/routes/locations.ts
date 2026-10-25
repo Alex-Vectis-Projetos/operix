@@ -38,8 +38,181 @@ function mapLocation(l: any) {
     latitude: l.latitude != null ? Number(l.latitude) : null,
     longitude: l.longitude != null ? Number(l.longitude) : null,
     is_approximate: Boolean(l.isApproximate),
+    maps_url: l.mapsUrl ?? null,
     created_at: l.createdAt.toISOString(),
     updated_at: l.updatedAt.toISOString(),
+  };
+}
+
+export async function resolveMapUrlToAddress(rawUrl: string): Promise<{
+  success: boolean;
+  latitude: number | null;
+  longitude: number | null;
+  resolved_url: string;
+  is_approximate: boolean;
+  address: {
+    street: string;
+    number: string;
+    neighborhood: string;
+    city: string;
+    state: string;
+    zip: string;
+    country: string;
+  };
+  name_hint?: string | null;
+}> {
+  let finalUrl = rawUrl.trim();
+
+  // 1. Resolver redirects (se for link encurtador de compartilhamento)
+  if (/goo\.gl|maps\.app\.goo\.gl|waze\.com/i.test(finalUrl)) {
+    try {
+      const resp = await fetch(finalUrl, {
+        method: "GET",
+        redirect: "follow",
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        signal: AbortSignal.timeout(7000),
+      });
+      finalUrl = resp.url || finalUrl;
+    } catch {
+      // continua com a URL original se falhar o redirect
+    }
+  }
+
+  let lat: number | null = null;
+  let lon: number | null = null;
+  let nameHint: string | null = null;
+
+  // Extrair nameHint de /place/Nome+Do+Lugar/
+  const placeMatch = finalUrl.match(/\/place\/([^/@?]+)/i);
+  if (placeMatch && placeMatch[1]) {
+    try {
+      nameHint = decodeURIComponent(placeMatch[1].replace(/\+/g, " "));
+    } catch {}
+  }
+
+  // Regex 1: @lat,lon (Google Maps padrão)
+  const atMatch = finalUrl.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+  if (atMatch) {
+    lat = parseFloat(atMatch[1]);
+    lon = parseFloat(atMatch[2]);
+  }
+
+  // Regex 2: !3dlat!4dlon (Google Maps data embed)
+  if (lat == null) {
+    const dataMatch = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+    if (dataMatch) {
+      lat = parseFloat(dataMatch[1]);
+      lon = parseFloat(dataMatch[2]);
+    }
+  }
+
+  // Regex 3: ?q=lat,lon ou ll=lat,lon ou query=lat,lon (Google Maps / Waze)
+  if (lat == null) {
+    const qMatch = finalUrl.match(/[?&](?:q|ll|query)=(-?\d+\.\d+)[,%20]+(-?\d+\.\d+)/i);
+    if (qMatch) {
+      lat = parseFloat(qMatch[1]);
+      lon = parseFloat(qMatch[2]);
+    }
+  }
+
+  // Regex 4: OpenStreetMap (#map=zoom/lat/lon ou ?mlat=...&mlon=...)
+  if (lat == null) {
+    const osmMatch = finalUrl.match(/#map=\d+\/(-?\d+\.\d+)\/(-?\d+\.\d+)/);
+    if (osmMatch) {
+      lat = parseFloat(osmMatch[1]);
+      lon = parseFloat(osmMatch[2]);
+    }
+    const osmQMatch = finalUrl.match(/[?&]mlat=(-?\d+\.\d+)&mlon=(-?\d+\.\d+)/i);
+    if (osmQMatch) {
+      lat = parseFloat(osmQMatch[1]);
+      lon = parseFloat(osmQMatch[2]);
+    }
+  }
+
+  // Regex 5: Coordenadas brutas digitadas/coladas
+  if (lat == null) {
+    const directMatch = finalUrl.match(/^(-?\d+\.\d+)[,\s]+(-?\d+\.\d+)$/);
+    if (directMatch) {
+      lat = parseFloat(directMatch[1]);
+      lon = parseFloat(directMatch[2]);
+    }
+  }
+
+  // Fallback: se não encontrou coordenadas por regex, mas tem termo de busca, geocodifica
+  if (lat == null) {
+    const qTextMatch = finalUrl.match(/[?&]q=([^&]+)/i);
+    const searchTarget = nameHint || (qTextMatch ? decodeURIComponent(qTextMatch[1].replace(/\+/g, " ")) : null);
+    if (searchTarget) {
+      try {
+        const nomSearchUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchTarget)}&limit=1&addressdetails=1&accept-language=pt`;
+        const sResp = await fetch(nomSearchUrl, {
+          headers: { "User-Agent": "Operix-Operations/1.0 (admin@operix-pro.com)" },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (sResp.ok) {
+          const sData = await sResp.json();
+          const first = Array.isArray(sData) && sData[0];
+          if (first?.lat && first?.lon) {
+            lat = parseFloat(first.lat);
+            lon = parseFloat(first.lon);
+            const addr = first.address || {};
+            return {
+              success: true,
+              latitude: lat,
+              longitude: lon,
+              resolved_url: finalUrl,
+              is_approximate: true,
+              address: {
+                street: addr.road || addr.pedestrian || addr.footway || searchTarget,
+                number: addr.house_number || "",
+                neighborhood: addr.suburb || addr.neighbourhood || addr.city_district || "",
+                city: addr.city || addr.town || addr.municipality || addr.village || "",
+                state: addr.state || addr.province || addr.region || "",
+                zip: addr.postcode || "",
+                country: addr.country || "",
+              },
+              name_hint: nameHint,
+            };
+          }
+        }
+      } catch {}
+    }
+  }
+
+  if (lat == null || lon == null) {
+    throw new Error("Não foi possível identificar coordenadas geográficas a partir deste link.");
+  }
+
+  // Reverse Geocode com Nominatim
+  const nomUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1&accept-language=pt`;
+  const nomResp = await fetch(nomUrl, {
+    headers: { "User-Agent": "Operix-Operations/1.0 (admin@operix-pro.com)" },
+    signal: AbortSignal.timeout(6000),
+  });
+
+  if (!nomResp.ok) {
+    throw new Error("Serviço de geocodificação temporariamente indisponível.");
+  }
+
+  const nomData = await nomResp.json();
+  const addr = nomData?.address || {};
+
+  return {
+    success: true,
+    latitude: lat,
+    longitude: lon,
+    resolved_url: finalUrl,
+    is_approximate: !addr.house_number,
+    address: {
+      street: addr.road || addr.pedestrian || addr.footway || addr.amenity || addr.building || "",
+      number: addr.house_number || "",
+      neighborhood: addr.suburb || addr.neighbourhood || addr.city_district || "",
+      city: addr.city || addr.town || addr.municipality || addr.village || "",
+      state: addr.state || addr.province || addr.region || "",
+      zip: addr.postcode || "",
+      country: addr.country || "",
+    },
+    name_hint: nameHint || addr.amenity || addr.tourism || addr.shop || null,
   };
 }
 
@@ -169,6 +342,20 @@ locationsRouter.get("/:id", async (req: AuthenticatedRequest, res: Response, nex
   }
 });
 
+// POST /locations/resolve-map-url
+locationsRouter.post("/resolve-map-url", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const url = String(req.body?.url ?? "").trim();
+    if (!url) {
+      return res.status(400).json({ message: "URL ou termo do mapa obrigatório." });
+    }
+    const result = await resolveMapUrlToAddress(url);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ message: err?.message || "Não foi possível identificar o endereço a partir deste link." });
+  }
+});
+
 // POST /locations
 locationsRouter.post("/", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
@@ -221,6 +408,7 @@ locationsRouter.post("/", async (req: AuthenticatedRequest, res: Response, next:
         latitude: lat,
         longitude: lng,
         isApproximate: isApprox,
+        mapsUrl: body.maps_url ? String(body.maps_url).trim() : null,
         createdBy: req.auth?.userId ?? null,
       },
     });
@@ -258,6 +446,7 @@ locationsRouter.patch("/:id", async (req: AuthenticatedRequest, res: Response, n
       manager_phone: "managerPhone",
       manager_email: "managerEmail",
       status: "status",
+      maps_url: "mapsUrl",
     };
 
     const data: Record<string, unknown> = {};
