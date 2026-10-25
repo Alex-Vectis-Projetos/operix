@@ -31,7 +31,54 @@ export function getFileUrl(bucket: string, path: string): string {
     return `${API_URL}/storage/public/${bucket}/${path}`;
   }
   const resolvedPath = qualifyTenantPath(path, bucket);
-  return `${API_URL}/storage/file/${bucket}/${resolvedPath}`;
+  const baseUrl = `${API_URL}/storage/file/${bucket}/${resolvedPath}`;
+  const token = getAccessToken();
+  const wsId = getActiveWorkspaceId();
+  const params = new URLSearchParams();
+  if (token) params.set("token", token);
+  if (wsId) params.set("workspace_id", wsId);
+  const qs = params.toString();
+  return qs ? `${baseUrl}?${qs}` : baseUrl;
+}
+
+/**
+ * Abre ou descarrega arquivos privados de forma segura via fetch autenticado com Blob,
+ * com fallback imediato para window.open com presigned/token.
+ */
+export async function openSecureStorageFile(
+  bucket: string,
+  path: string,
+  fileName = "documento"
+): Promise<void> {
+  const url = getFileUrl(bucket, path);
+  if (PUBLIC_BUCKETS.has(bucket)) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: buildAuthHeaders(),
+    });
+    if (!res.ok) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, "_blank");
+    if (!win) {
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 }
 
 /**

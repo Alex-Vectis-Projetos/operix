@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Paperclip, Trash2, Upload, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { usePersonDocuments } from "@/hooks/usePeople";
 import type { PersonDocumentSummaryItem } from "@/hooks/usePeople";
-import { uploadFile, getFileUrl } from "@/lib/storage";
+import { uploadFile, getFileUrl, openSecureStorageFile } from "@/lib/storage";
 import { toast } from "@/hooks/use-toast";
 
 const BUCKET = "uploads";
@@ -132,7 +132,11 @@ export function PersonDocumentsPanel({ personId, documentsSummary, countryNotCon
                   href={getFileUrl(BUCKET, doc.storage_path ?? "")}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex items-center gap-2 text-sm hover:underline"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openSecureStorageFile(BUCKET, doc.storage_path ?? "", doc.name);
+                  }}
+                  className="flex items-center gap-2 text-sm hover:underline cursor-pointer text-foreground"
                 >
                   <Paperclip className="h-4 w-4 text-muted-foreground" />
                   {doc.name}

@@ -53,6 +53,8 @@ async function streamObject(
     if (obj.ContentType) res.setHeader("Content-Type", obj.ContentType);
     if (obj.ContentLength) res.setHeader("Content-Length", obj.ContentLength);
     res.setHeader("Cache-Control", cacheControl);
+    const baseName = filePath.split("/").pop() || "documento";
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(baseName)}"`);
     (obj.Body as Readable).pipe(res);
   } catch (err: unknown) {
     const code = (err as { name?: string })?.name;

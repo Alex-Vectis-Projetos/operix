@@ -7,8 +7,10 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus, Trash2, UploadCloud, Sparkles } from "lucide-react";
+import { Loader2, Plus, Trash2, UploadCloud, Sparkles, CheckCircle2, Paperclip } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/api";
+import { uploadFile } from "@/lib/storage";
 import { fileToBase64, pdfFirstPageToImageBase64 } from "@/lib/pdfUtils";
 import { toast } from "@/hooks/use-toast";
 import { useLocations } from "@/hooks/useLocations";
@@ -59,11 +61,13 @@ interface PersonFormDialogProps {
 }
 
 export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onSubmit, saving }: PersonFormDialogProps) {
+  const qc = useQueryClient();
   const [form, setForm] = useState<PersonInput>(EMPTY_FORM);
   const [errors, setErrors] = useState<string[]>([]);
   const [savedPerson, setSavedPerson] = useState<Person | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [extractingIdDoc, setExtractingIdDoc] = useState(false);
+  const [pendingOcrDoc, setPendingOcrDoc] = useState<{ file: File; expiration_date?: string } | null>(null);
 
   const { locations } = useLocations({ status: "active" });
   const { data: assignableUsers } = useAssignableUsers();
@@ -91,6 +95,7 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
           : { ...EMPTY_FORM, id_documents: [{ ...EMPTY_IDENTITY_DOCUMENT }], type: defaultType ?? "administrative" }
       );
       setSavedPerson(editing);
+      setPendingOcrDoc(null);
       setErrors([]);
     }
   }, [open, editing, defaultType]);
@@ -149,6 +154,32 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
       const person = await onSubmit(payload);
       if (person?.id) {
         setSavedPerson(person);
+
+        // Se houver documento pendente de OCR em novo colaborador, faz o upload e anexa agora
+        if (pendingOcrDoc?.file) {
+          try {
+            const path = `people/${person.id}/${Date.now()}-${pendingOcrDoc.file.name}`;
+            const { path: storedPath } = await uploadFile("uploads", path, pendingOcrDoc.file, pendingOcrDoc.file.type);
+            await apiRequest(`/people/${person.id}/documents`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: pendingOcrDoc.file.name,
+                storage_path: storedPath,
+                mime_type: pendingOcrDoc.file.type,
+                size_bytes: pendingOcrDoc.file.size,
+                expiry_date: pendingOcrDoc.expiration_date || undefined,
+              }),
+              timeoutMs: 15000,
+            });
+            qc.invalidateQueries({ queryKey: ["people", person.id, "documents"] });
+            qc.invalidateQueries({ queryKey: ["people"] });
+            setPendingOcrDoc(null);
+          } catch (uploadErr) {
+            console.error("[attachPendingOcrDocument]", uploadErr);
+          }
+        }
+
         onOpenChange(false);
       }
     } catch {
@@ -207,6 +238,7 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
         document_number?: string;
         birth_date?: string;
         tax_id?: string;
+        expiration_date?: string;
       }>("/extract/identity-document", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -248,10 +280,46 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
         return updated;
       });
 
-      toast({
-        title: "Documento lido com sucesso!",
-        description: `Dados de ${data.full_name ?? "identificação"} extraídos e preenchidos no formulário.`,
-      });
+      const targetPersonId = savedPerson?.id ?? editing?.id;
+      if (targetPersonId) {
+        try {
+          const path = `people/${targetPersonId}/${Date.now()}-${file.name}`;
+          const { path: storedPath } = await uploadFile("uploads", path, file, file.type || "application/pdf");
+          await apiRequest(`/people/${targetPersonId}/documents`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: file.name,
+              storage_path: storedPath,
+              mime_type: file.type || "application/pdf",
+              size_bytes: file.size,
+              expiry_date: data.expiration_date || undefined,
+            }),
+            timeoutMs: 15000,
+          });
+          qc.invalidateQueries({ queryKey: ["people", targetPersonId, "documents"] });
+          qc.invalidateQueries({ queryKey: ["people", "detail", targetPersonId] });
+          qc.invalidateQueries({ queryKey: ["people"] });
+
+          toast({
+            title: "Documento lido e anexado com sucesso!",
+            description: `Dados de ${data.full_name ?? "identificação"} extraídos e documento anexado aos registros do colaborador.`,
+          });
+        } catch (uploadErr) {
+          console.error("[attachOcrDocExistingPerson]", uploadErr);
+          toast({
+            title: "Documento lido, mas houve falha ao anexar arquivo",
+            description: String((uploadErr as any)?.message ?? uploadErr),
+            variant: "destructive",
+          });
+        }
+      } else {
+        setPendingOcrDoc({ file, expiration_date: data.expiration_date });
+        toast({
+          title: "Documento lido com sucesso!",
+          description: `Dados de ${data.full_name ?? "identificação"} preenchidos. O arquivo será anexado automaticamente ao salvar o colaborador.`,
+        });
+      }
     } catch (err) {
       toast({
         title: "Erro ao ler documento",
@@ -363,6 +431,24 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
                     <div className="rounded-md border border-primary/30 bg-primary/5 p-2.5 text-xs text-primary flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                       <span>A inteligência artificial está analisando o documento para preencher nome, tipo, número e data de nascimento...</span>
+                    </div>
+                  )}
+
+                  {pendingOcrDoc && (
+                    <div className="flex items-center justify-between rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400">
+                      <div className="flex items-center gap-2">
+                        <Paperclip className="h-4 w-4 shrink-0" />
+                        <span>Arquivo <strong>{pendingOcrDoc.file.name}</strong> pronto para ser anexado aos documentos ao salvar o colaborador.</span>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-destructive hover:text-destructive"
+                        onClick={() => setPendingOcrDoc(null)}
+                      >
+                        <Trash2 className="h-3 w-3 mr-1" /> Remover
+                      </Button>
                     </div>
                   )}
 
