@@ -4,7 +4,7 @@ export type ConfidenceLevel = "validated" | "partially_enriched" | "fully_enrich
 
 export type DocumentKind =
   | "siren" | "siret" | "vat_eu"
-  | "cnpj" | "ein" | "gstin" | "bn_ca" | "rfc_mx" | "corp_jp"
+  | "cnpj" | "nif_pt" | "cif_es" | "ein" | "gstin" | "bn_ca" | "rfc_mx" | "corp_jp"
   | "name" | "unknown";
 
 export type CompanyQueryType = DocumentKind; // backward-compat alias
@@ -120,6 +120,31 @@ export const EU_COUNTRY_CODES = new Set([
   "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI"
 ]);
 
+export function isValidPortugueseNif(v: string): boolean {
+  const s = v.replace(/\D/g, "");
+  if (s.length !== 9) return false;
+  if (!["1", "2", "3", "5", "6", "8", "9"].includes(s[0])) return false;
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    sum += parseInt(s[i], 10) * (9 - i);
+  }
+  const mod = sum % 11;
+  const checkDigit = mod < 2 ? 0 : 11 - mod;
+  return checkDigit === parseInt(s[8], 10);
+}
+
+export function formatPortugueseNif(v: string): string {
+  const s = v.replace(/\D/g, "").slice(0, 9);
+  if (s.length !== 9) return v;
+  return s.replace(/^(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3");
+}
+
+export function isSpanishCif(v: string): boolean {
+  const clean = v.replace(/[\s\.-]/g, "").toUpperCase();
+  const s = clean.startsWith("ES") ? clean.slice(2) : clean;
+  return /^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/.test(s);
+}
+
 export function detectQueryType(raw: string): DocumentKind {
   const v = (raw ?? "").trim();
   if (!v) return "unknown";
@@ -127,14 +152,45 @@ export function detectQueryType(raw: string): DocumentKind {
   const digits = v.replace(/\D/g, "");
   const cleanAlpha = upper.replace(/[\s\.-]/g, "");
 
+  // Portugal NIF explícito com PT (ex: PT500697256)
+  if (/^PT\s*\d{9}$/i.test(cleanAlpha) || (cleanAlpha.startsWith("PT") && digits.length === 9)) {
+    return "nif_pt";
+  }
+
+  // Spain CIF explícito (ex: ESB12345678)
+  if (/^ES[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/i.test(cleanAlpha) || (isSpanishCif(cleanAlpha) && cleanAlpha.length === 9)) {
+    return "cif_es";
+  }
+
+  // EU VAT geral (ex: DE123456789, IT12345678901, etc.)
   if (/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(cleanAlpha)) {
     const cc = cleanAlpha.slice(0, 2);
-    if (EU_COUNTRY_CODES.has(cc) && digits.length >= 7) return "vat_eu";
+    if (EU_COUNTRY_CODES.has(cc) && digits.length >= 7) {
+      if (cc === "PT") return "nif_pt";
+      if (cc === "ES") return "cif_es";
+      return "vat_eu";
+    }
   }
+
+  // Brazil CNPJ (14 dígitos)
   if (digits.length === 14) {
     if (/[\.\/-]/.test(v) || isValidCnpj(digits)) return "cnpj";
   }
-  if (digits.length === 9 && digits === v.replace(/\s/g, "")) return "siren";
+
+  // 9 dígitos: Portugal NIF (começando com 5, 6, 8, 9 de pessoas coletivas) ou França SIREN
+  if (digits.length === 9 && digits === v.replace(/\s/g, "")) {
+    if (["5", "6", "8", "9"].includes(digits[0]) && isValidPortugueseNif(digits)) {
+      return "nif_pt";
+    }
+    if (isValidSiren(digits)) {
+      return "siren";
+    }
+    if (isValidPortugueseNif(digits)) {
+      return "nif_pt";
+    }
+    return "siren";
+  }
+
   if (digits.length === 14 && digits === v.replace(/\s/g, "")) return "siret";
   if (/^\d{2}-\d{7}$/.test(v)) return "ein";
   if (/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(upper)) return "gstin";

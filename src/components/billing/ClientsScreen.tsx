@@ -602,7 +602,8 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
   const [totalMs, setTotalMs] = useState<number | null>(null);
 
   const labelByType: Partial<Record<CompanyQueryType, string>> = {
-    siren: "SIREN (FR)", siret: "SIRET (FR)", vat_eu: "TVA / VAT EU",
+    siren: "SIREN (FR)", siret: "SIRET (FR)", vat_eu: "TVA / VAT (Europa)",
+    nif_pt: "NIF / NIPC (PT)", cif_es: "CIF (ES)",
     cnpj: "CNPJ (BR)", ein: "EIN (US)", gstin: "GSTIN (IN)",
     bn_ca: "BN (CA)", rfc_mx: "RFC (MX)", corp_jp: "法人番号 (JP)",
     name: "Buscar por nome", unknown: "—",
@@ -618,6 +619,8 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
       const detectedType = detectQueryType(q.trim());
       let countryHint = "FR";
       if (detectedType === "cnpj") countryHint = "BR";
+      else if (detectedType === "nif_pt") countryHint = "PT";
+      else if (detectedType === "cif_es") countryHint = "ES";
       else if (detectedType === "ein") countryHint = "US";
       else if (detectedType === "gstin") countryHint = "IN";
       else if (detectedType === "bn_ca") countryHint = "CA";
@@ -652,7 +655,7 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
         <div className="flex items-center gap-1.5 font-medium text-foreground">
           <Sparkles className="h-3.5 w-3.5 text-primary" />
-          Identificação inteligente — SIREN, SIRET, TVA, CNPJ, EIN, GSTIN ou nome
+          Identificação inteligente — NIF (PT), SIREN/SIRET (FR), TVA/VAT (Europa), CNPJ (BR), EIN ou nome
         </div>
         <div className="flex items-center gap-1.5 font-mono text-[11px]">
           <span>{labelByType[type]}</span>
@@ -664,7 +667,7 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
           value={q}
           onChange={(e) => { setQ(e.target.value); setType(detectQueryType(e.target.value)); }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); run(); } }}
-          placeholder="Ex: 30134058407355, 301340584 ou nome da empresa"
+          placeholder="Ex: 500697256 (PT), 301340584 (FR), CNPJ, VAT europeu ou nome da empresa"
           className="h-10 text-xs font-mono bg-background/80"
         />
         <Button

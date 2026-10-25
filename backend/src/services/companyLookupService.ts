@@ -10,7 +10,7 @@ export type ConfidenceLevel =
 
 export type DocumentKind =
   | "siren" | "siret" | "vat_eu"
-  | "cnpj" | "ein" | "gstin" | "bn_ca" | "rfc_mx" | "corp_jp"
+  | "cnpj" | "nif_pt" | "cif_es" | "ein" | "gstin" | "bn_ca" | "rfc_mx" | "corp_jp"
   | "name" | "unknown";
 
 export interface NormalizedAddress {
@@ -234,6 +234,113 @@ export const EU_COUNTRY_CODES = new Set([
   "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI"
 ]);
 
+export const EU_COUNTRY_NAMES: Record<string, string> = {
+  AT: "Áustria",
+  BE: "Bélgica",
+  BG: "Bulgária",
+  CY: "Chipre",
+  CZ: "Tchéquia",
+  DE: "Alemanha",
+  DK: "Dinamarca",
+  EE: "Estônia",
+  EL: "Grécia",
+  GR: "Grécia",
+  ES: "Espanha",
+  FI: "Finlândia",
+  FR: "França",
+  HR: "Croácia",
+  HU: "Hungria",
+  IE: "Irlanda",
+  IT: "Itália",
+  LT: "Lituânia",
+  LU: "Luxemburgo",
+  LV: "Letônia",
+  MT: "Malta",
+  NL: "Países Baixos",
+  PL: "Polônia",
+  PT: "Portugal",
+  RO: "Romênia",
+  SE: "Suécia",
+  SI: "Eslovênia",
+  SK: "Eslováquia",
+  XI: "Reino Unido (Irlanda do Norte)",
+};
+
+export function isValidPortugueseNif(v: string): boolean {
+  const s = v.replace(/\D/g, "");
+  if (s.length !== 9) return false;
+  if (!["1", "2", "3", "5", "6", "8", "9"].includes(s[0])) return false;
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    sum += parseInt(s[i], 10) * (9 - i);
+  }
+  const mod = sum % 11;
+  const checkDigit = mod < 2 ? 0 : 11 - mod;
+  return checkDigit === parseInt(s[8], 10);
+}
+
+export function formatPortugueseNif(v: string): string {
+  const s = v.replace(/\D/g, "").slice(0, 9);
+  if (s.length !== 9) return v;
+  return s.replace(/^(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3");
+}
+
+export function isSpanishCif(v: string): boolean {
+  const clean = v.replace(/[\s\.-]/g, "").toUpperCase();
+  const s = clean.startsWith("ES") ? clean.slice(2) : clean;
+  return /^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/.test(s);
+}
+
+export function parseViesAddress(raw: string | undefined | null, countryCode: string): NormalizedAddress {
+  const countryName = EU_COUNTRY_NAMES[countryCode] || countryCode;
+  if (!raw || raw.trim() === "---") {
+    return { street: null, street_number: null, postal_code: null, city: null, state: null, country: countryName };
+  }
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let street: string | null = null;
+  let street_number: string | null = null;
+  let postal_code: string | null = null;
+  let city: string | null = null;
+
+  if (countryCode === "PT") {
+    if (lines.length > 0) {
+      const line1 = lines[0];
+      const numMatch = line1.match(/(?:(?:N|Nº|N\.|NUM|NÚMERO)\s*)?(\d+[\w\/-]*)$/i);
+      if (numMatch) {
+        street_number = numMatch[1];
+        street = line1.slice(0, numMatch.index).replace(/(?:N|Nº|N\.|NUM|NÚMERO)\s*$/i, "").trim() || line1;
+      } else {
+        street = line1;
+      }
+    }
+    for (let i = 1; i < lines.length; i++) {
+      const cpMatch = lines[i].match(/(\d{4}-\d{3})(?:\s+(.+))?/);
+      if (cpMatch) {
+        postal_code = cpMatch[1];
+        if (cpMatch[2]) city = cpMatch[2].trim();
+      } else if (!city && i === 1) {
+        city = lines[i];
+      }
+    }
+    return { street, street_number, postal_code, city, state: null, country: countryName };
+  }
+
+  // Padrão Geral Europeu (FR, ES, DE, IT, etc.)
+  for (const line of lines) {
+    const cpMatch = line.match(/^(\d{4,5})\s+(.+)$/);
+    if (cpMatch && !postal_code) {
+      postal_code = cpMatch[1];
+      city = cpMatch[2].trim();
+      continue;
+    }
+    if (!street) {
+      street = line;
+    }
+  }
+
+  return { street, street_number, postal_code, city, state: null, country: countryName };
+}
+
 // Detection
 export function detectDocument(raw: string): { kind: DocumentKind; country: string | null; score: number } {
   const v = (raw ?? "").trim();
@@ -242,10 +349,25 @@ export function detectDocument(raw: string): { kind: DocumentKind; country: stri
   const digits = v.replace(/\D/g, "");
   const cleanAlpha = upper.replace(/[\s\.-]/g, "");
 
+  // Portugal NIF explícito com PT (ex: PT500697256)
+  if (/^PT\s*\d{9}$/i.test(cleanAlpha) || (cleanAlpha.startsWith("PT") && digits.length === 9)) {
+    return { kind: "nif_pt", country: "PT", score: isValidPortugueseNif(digits) ? 1.0 : 0.85 };
+  }
+
+  // Spain CIF explícito (ex: ESB12345678)
+  if (/^ES[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/i.test(cleanAlpha)) {
+    return { kind: "cif_es", country: "ES", score: 0.95 };
+  }
+  if (isSpanishCif(cleanAlpha) && cleanAlpha.length === 9) {
+    return { kind: "cif_es", country: "ES", score: 0.9 };
+  }
+
   // EU VAT (ex: FR12345678901, DE123456789, IT12345678901, etc.)
   if (/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(cleanAlpha)) {
     const cc = cleanAlpha.slice(0, 2);
     if (EU_COUNTRY_CODES.has(cc) && digits.length >= 7) {
+      if (cc === "PT") return { kind: "nif_pt", country: "PT", score: 0.95 };
+      if (cc === "ES") return { kind: "cif_es", country: "ES", score: 0.95 };
       return { kind: "vat_eu", country: cc, score: 0.95 };
     }
   }
@@ -257,9 +379,21 @@ export function detectDocument(raw: string): { kind: DocumentKind; country: stri
     }
   }
 
-  // France SIREN (9 dígitos puros)
+  // Portugal NIF / France SIREN (9 dígitos puros)
   if (digits.length === 9 && digits === v.replace(/\s/g, "")) {
-    return { kind: "siren", country: "FR", score: isValidSiren(digits) ? 1.0 : 0.8 };
+    // Se começar com 5, 6, 8, 9 e for válido no NIF PT, é pessoa coletiva em Portugal
+    if (["5", "6", "8", "9"].includes(digits[0]) && isValidPortugueseNif(digits)) {
+      return { kind: "nif_pt", country: "PT", score: 0.95 };
+    }
+    // SIREN francês com Luhn
+    if (isValidSiren(digits)) {
+      return { kind: "siren", country: "FR", score: 1.0 };
+    }
+    // Qualquer NIF PT com dígito verificador válido
+    if (isValidPortugueseNif(digits)) {
+      return { kind: "nif_pt", country: "PT", score: 0.9 };
+    }
+    return { kind: "siren", country: "FR", score: 0.8 };
   }
 
   // France SIRET (14 dígitos puros com algoritmo Luhn)
@@ -527,10 +661,45 @@ function normalizeBrazilianCompany(d: any, provider: string, digits: string): No
     }
   }
 
-  // 2. EU VAT / TVA Intracomunitária
-  if (!result && classification.kind === "vat_eu") {
-    const cc = (classification.country || query.slice(0, 2)).toUpperCase();
-    const cleanVat = query.slice(2).replace(/[\s\.-]/g, "").toUpperCase();
+  // 2. Portugal NIF / NIPC Lookup (VIES Oficial da Comissão Europeia)
+  if (!result && (classification.kind === "nif_pt" || (countryHint === "PT" && digits.length === 9))) {
+    const ptT0 = Date.now();
+    const cleanNif = digits.length === 9 ? digits : query.replace(/\D/g, "").slice(0, 9);
+    try {
+      const resp = await fetchWithTimeout(`https://ec.europa.eu/taxation_customs/vies/rest-api/ms/PT/vat/${cleanNif}`, {}, 7000);
+      if (resp.ok) {
+        const data = await resp.json();
+        vies = data;
+        if (data?.isValid) {
+          const c = emptyCompany("portugal-vies");
+          c.country = "PT";
+          c.tax_id = formatPortugueseNif(cleanNif);
+          c.siren = cleanNif;
+          c.siret = cleanNif;
+          c.vat_number = `PT${cleanNif}`;
+          c.company_name = data.name && data.name !== "---" ? data.name : null;
+          c.legal_name = c.company_name;
+          c.company_status = "active";
+          c.address = parseViesAddress(data.address, "PT");
+          c.address_line = joinAddress(c.address) || (data.address !== "---" ? data.address : null);
+          c.confidence = c.company_name ? "fully_enriched" : "validated";
+          result = c;
+          logs.push({ provider: "portugal-vies", ms: Date.now() - ptT0, ok: true });
+        } else {
+          logs.push({ provider: "portugal-vies", ms: Date.now() - ptT0, ok: false, notes: data?.userError || "NIF não ativo no VIES" });
+        }
+      }
+    } catch (err: any) {
+      logs.push({ provider: "portugal-vies", ms: Date.now() - ptT0, ok: false, notes: String(err?.message ?? err) });
+    }
+  }
+
+  // 3. EU VAT / TVA Intracomunitária / Espanha CIF
+  if (!result && (classification.kind === "vat_eu" || classification.kind === "cif_es")) {
+    const cc = (classification.country || (classification.kind === "cif_es" ? "ES" : query.slice(0, 2))).toUpperCase();
+    const cleanVat = (classification.kind === "cif_es" && !query.toUpperCase().startsWith("ES"))
+      ? query.replace(/[\s\.-]/g, "").toUpperCase()
+      : query.slice(2).replace(/[\s\.-]/g, "").toUpperCase();
 
     // Se for TVA francesa (FR), os 9 dígitos finais são o SIREN!
     if (cc === "FR" && cleanVat.length >= 9) {
@@ -552,7 +721,7 @@ function normalizeBrazilianCompany(d: any, provider: string, digits: string): No
       }
     }
 
-    // Fallback Oficial: VIES (Comissão Europeia)
+    // Fallback Oficial: VIES (Comissão Europeia) para todos os países da Europa
     if (!result) {
       const viesT0 = Date.now();
       try {
@@ -569,16 +738,8 @@ function normalizeBrazilianCompany(d: any, provider: string, digits: string): No
             c.company_name = data.name && data.name !== "---" ? data.name : null;
             c.legal_name = c.company_name;
             c.company_status = "active";
-            const rawAddr = data.address && data.address !== "---" ? data.address : "";
-            c.address_line = rawAddr || null;
-            c.address = {
-              street: rawAddr || null,
-              street_number: null,
-              postal_code: null,
-              city: null,
-              state: null,
-              country: cc,
-            };
+            c.address = parseViesAddress(data.address, cc);
+            c.address_line = joinAddress(c.address) || (data.address && data.address !== "---" ? data.address : null);
             c.confidence = c.company_name ? "fully_enriched" : "validated";
             result = c;
             logs.push({ provider: "eu-vies", ms: Date.now() - viesT0, ok: true });
@@ -592,8 +753,8 @@ function normalizeBrazilianCompany(d: any, provider: string, digits: string): No
     }
   }
 
-  // 3. FR Primary lookup via Recherche-Entreprises (SIRET / SIREN / Nome / França)
-  if (!result && (classification.kind === "siret" || classification.kind === "siren" || (countryHint === "FR" && classification.kind !== "cnpj") || (classification.kind === "name" && countryHint !== "BR"))) {
+  // 4. FR Primary lookup via Recherche-Entreprises (SIRET / SIREN / Nome / França)
+  if (!result && (classification.kind === "siret" || classification.kind === "siren" || (countryHint === "FR" && classification.kind !== "cnpj") || (classification.kind === "name" && countryHint !== "BR" && countryHint !== "PT"))) {
     const fetchT0 = Date.now();
     try {
       const searchUrl = `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(query)}&page=1&per_page=${classification.kind === "name" ? 8 : 1}`;
@@ -642,13 +803,15 @@ function normalizeBrazilianCompany(d: any, provider: string, digits: string): No
   if (classification.kind === "siren" && isValidSiren(query)) formatScore = 1.0;
   if (classification.kind === "siret" && isValidSiret(query)) formatScore = 1.0;
   if (classification.kind === "cnpj" && isValidCnpj(digits)) formatScore = 1.0;
+  if (classification.kind === "nif_pt" && isValidPortugueseNif(digits)) formatScore = 1.0;
+  if (classification.kind === "cif_es" && isSpanishCif(query)) formatScore = 1.0;
   if (classification.kind === "vat_eu" && result) formatScore = 1.0;
 
   const conf = scoreCompany({ company: result, formatScore, countryHint });
   if (result) result.confidence = conf.level;
 
   const countryCode = result?.country ?? classification.country ?? "FR";
-  const tier: SupportTier = (countryCode === "FR" || countryCode === "BR") ? "A" : "B";
+  const tier: SupportTier = (countryCode === "FR" || countryCode === "BR" || countryCode === "PT") ? "A" : "B";
   const capability: CountryCapability = {
     iso2: countryCode,
     model: "A",
