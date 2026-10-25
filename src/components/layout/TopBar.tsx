@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, LogOut, Check, Trash2, FileText, CreditCard, AlertTriangle, Info, Clock, User as UserIcon, Settings as SettingsIcon, Mail, Calendar, Calculator, MessageSquare, FileCheck } from "lucide-react";
+import { Bell, LogOut, Check, Trash2, FileText, CreditCard, AlertTriangle, Info, Clock, User as UserIcon, Settings as SettingsIcon, Mail, Calendar, Calculator, MessageSquare, FileCheck, FolderOpen } from "lucide-react";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { BrandLogo } from "@/components/BrandLogo";
 import { brandConfig } from "@/brand.config";
@@ -47,7 +47,8 @@ export const TopBar = memo(function TopBar() {
   const navigate = useNavigate();
   const { profile, signOut } = useAuth();
   const { profile: userProfile } = useUserProfile();
-  const { role } = useRole();
+  const { role, can } = useRole();
+  const canViewDocs = can ? can("documents.view") : true;
   const { t } = useLanguage();
   const { workspaceName } = useWorkspace();
   const { notifications, unreadCount, markAsRead, markAllRead, clearAll } = useNotifications();
@@ -77,6 +78,19 @@ export const TopBar = memo(function TopBar() {
       )}
 
       <div className="flex items-center gap-1.5 sm:gap-1">
+        {/* Document Explorer quick access */}
+        {canViewDocs && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate("/documents")}
+            className="h-10 w-10 md:h-8 md:w-8 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            title={t("docs.title", "Documentos")}
+            aria-label={t("docs.title", "Documentos")}
+          >
+            <FolderOpen className="h-4 w-4 text-primary" />
+          </Button>
+        )}
 
         {/* Notifications */}
         <DropdownMenu>
