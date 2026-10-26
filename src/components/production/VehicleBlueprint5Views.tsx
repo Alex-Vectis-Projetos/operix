@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,7 @@ interface VehicleBlueprintProps {
   readOnly?: boolean;
   className?: string;
   initialBodyType?: VehicleBodyType;
+  onBodyTypeChange?: (type: VehicleBodyType) => void;
 }
 
 export const CAR_PARTS: { code: string; label: string; views: VehicleViewType[] }[] = [
@@ -169,12 +170,19 @@ export function VehicleBlueprint5Views({
   readOnly = false,
   className,
   initialBodyType = "sedan",
+  onBodyTypeChange,
 }: VehicleBlueprintProps) {
   const [bodyType, setBodyType] = useState<VehicleBodyType>(initialBodyType);
   const [activeView, setActiveView] = useState<VehicleViewType | "all">("all");
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [isCadTheme, setIsCadTheme] = useState<boolean>(true); // CAD Dark vs Ficha Clara
   const [hoveredPart, setHoveredPart] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialBodyType && initialBodyType !== bodyType) {
+      setBodyType(initialBodyType);
+    }
+  }, [initialBodyType]);
 
   // Modal de confirmação para troca de carroceria com histórico preservado
   const [pendingBodyType, setPendingBodyType] = useState<VehicleBodyType | null>(null);
@@ -187,12 +195,14 @@ export function VehicleBlueprint5Views({
       setShowBodyTypeConfirm(true);
     } else {
       setBodyType(newType);
+      onBodyTypeChange?.(newType);
     }
   };
 
   const confirmBodyTypeChange = () => {
     if (pendingBodyType) {
       setBodyType(pendingBodyType);
+      onBodyTypeChange?.(pendingBodyType);
       setPendingBodyType(null);
     }
     setShowBodyTypeConfirm(false);

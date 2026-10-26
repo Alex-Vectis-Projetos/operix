@@ -357,6 +357,7 @@ export function apiBudgetToLocalBudget(api: ApiBudget): any {
     vehicle_year: vehicleSnap.year || undefined,
     vehicle_color: vehicleSnap.color || undefined,
     vehicle_km: vehicleSnap.km || undefined,
+    vehicle_body_type: vehicleSnap.body_type || vehicleSnap.bodyType || undefined,
 
     intervention_types: rev?.interventionTypes || rev?.intervention_types || [],
     diagnosis: rev?.diagnosis || undefined,
@@ -424,6 +425,7 @@ export function localBudgetToApiPayload(b: any): CreateBudgetInput {
       year: b.vehicle_year,
       color: b.vehicle_color,
       km: b.vehicle_km,
+      body_type: b.vehicle_body_type || (b.vehicle_view_state as any)?.body_type || undefined,
     },
     dossierSnapshot: {
       claim_number: b.dossier_claim_number,

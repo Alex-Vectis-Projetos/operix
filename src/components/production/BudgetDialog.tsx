@@ -566,6 +566,7 @@ export type Budget = {
   vehicle_year?: string;
   vehicle_color?: string;
   vehicle_km?: string;
+  vehicle_body_type?: string;
 
   // back-compat: mantido para registros antigos (string única)
   intervention_type?: string;
@@ -1195,6 +1196,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                 dentCount: p.dentCount,
                 contracted: p.contracted,
                 estimatedAmount: p.estimatedAmount ? Number(p.estimatedAmount) : null,
+                photoStoragePath: p.photoStoragePath || p.photo_storage_path || null,
                 notes: p.notes,
               }))
             );
@@ -2375,7 +2377,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     try {
       const savedRes: any = await onSave({ ...form, updated_at: new Date().toISOString() });
       const targetId = savedRes?.id || savedRes?.budget?.id || form.id || initial?.id;
-      if (targetId && inspectionPoints.length > 0) {
+      if (targetId) {
         try {
           await apiRequest(`/budgets/${targetId}/inspection`, {
             method: "POST",
@@ -2961,6 +2963,10 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
               </p>
               <VehicleBlueprint5Views
                 damagePoints={inspectionPoints}
+                initialBodyType={((form as any).vehicle_body_type || (initial as any)?.vehicle_body_type || "sedan") as any}
+                onBodyTypeChange={(newType) => {
+                  set("vehicle_body_type" as any, newType);
+                }}
                 onChange={async (newPoints) => {
                   setInspectionPoints(newPoints);
                   const currentId = form.id || initial?.id;
