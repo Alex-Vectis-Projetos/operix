@@ -456,19 +456,14 @@ export function buildProtocoleDeReparationPdf(
 ): Buffer {
   const content: string[] = [];
   const brand = workspace?.brandConfig || {};
-  const companyName = brand.legalName || workspace?.name || "PDR-Team SAS";
+  const companyName = brand.legalName || brand.name || workspace?.billingProfile?.companyName || workspace?.billingProfile?.legalName || workspace?.name || "PDR-Team SAS";
   const tagline = brand.tagline || "GESTION ET REPARATION DES SINISTRES GRELE";
-  const legalAddress = brand.address || "388 Rue Louis Joseph Gay Lussac";
-  const postalCity = [brand.postalCode || "26100", brand.city || "Romans sur Isere"].filter(Boolean).join(" ");
+  const legalAddress = brand.address || workspace?.billingProfile?.billingAddress || "388 Rue Louis Joseph Gay Lussac";
+  const postalCity = [brand.postalCode || workspace?.billingProfile?.postalCode || "26100", brand.city || workspace?.billingProfile?.city || "Romans sur Isere"].filter(Boolean).join(" ");
   const companyPhone = brand.phone || "04 87 20 01 47";
-  const tollFree = brand.tollFree || "04 87 20 01 47";
-  const companyEmail = brand.email || "info@pdr-team.fr";
+  const tollFree = brand.tollFree || companyPhone;
+  const companyEmail = brand.email || workspace?.billingProfile?.billingEmail || "info@pdr-team.fr";
   const companyWebsite = brand.website || "www.pdr-team.fr";
-
-  // Se for orcamento do tipo PDR / Granizo, renderiza com fidelidade maxima o Protocole de Reparation
-  if (rev?.budgetType === "pdr" || budget?.budget_type === "pdr") {
-    return buildProtocoleDeReparationPdf(budget, rev, workspace, inspection);
-  }
 
   const clientSnap = (rev?.clientSnapshot as any) || {};
   const vehiclePlate = String(budget.vehiclePlate || "SANS-PLAQUE").toUpperCase();
@@ -583,7 +578,7 @@ export function buildProtocoleDeReparationPdf(
 
   // DSP Rows
   let curY = 642;
-  const rowH = 11.5;
+  const rowH = 9.5;
   const allServices: any[] = Array.isArray(rev?.services) ? rev?.services : [];
   const damagePoints: any[] = Array.isArray(inspection?.damagePoints) ? inspection?.damagePoints : [];
 
@@ -598,7 +593,7 @@ export function buildProtocoleDeReparationPdf(
     content.push("0.75 0.78 0.82 RG 0.5 w");
     content.push(`40 ${curY} 515 ${rowH} re s`);
 
-    content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 44 ${curY + 3} Td (${pdfEscapeWinAnsi(zone.title)}) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F2 6 Tf 44 ${curY + 2.5} Td (${pdfEscapeWinAnsi(zone.title)}) Tj ET`);
     curY -= rowH;
 
     for (const p of zone.parts) {
@@ -643,17 +638,17 @@ export function buildProtocoleDeReparationPdf(
       content.push("0.85 0.88 0.9 RG 0.3 w");
       content.push(`40 ${curY} 515 ${rowH} re s`);
 
-      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 44 ${curY + 3} Td (${pdfEscapeWinAnsi(p.label)}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 175 ${curY + 3} Td (${dents > 0 ? dents : "-"}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 225 ${curY + 3} Td (${dents > 0 ? "20" : "-"}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 265 ${curY + 3} Td (${baseUt > 0 ? baseUt.toFixed(2) : "-"}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 308 ${curY + 3} Td (${isAlu ? "X" : ""}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 334 ${curY + 3} Td (${isColle ? "X" : ""}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 364 ${curY + 3} Td (${isDap ? "X" : ""}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 405 ${curY + 3} Td (${sommeUt > 0 ? sommeUt.toFixed(2) : "-"}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 460 ${curY + 3} Td (${isPaint ? "X" : ""}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 490 ${curY + 3} Td (${isNew ? "X" : ""}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 520 ${curY + 3} Td (${linePrix > 0 ? linePrix.toFixed(2) : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 44 ${curY + 2.5} Td (${pdfEscapeWinAnsi(p.label)}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 175 ${curY + 2.5} Td (${dents > 0 ? dents : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 225 ${curY + 2.5} Td (${dents > 0 ? "20" : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 265 ${curY + 2.5} Td (${baseUt > 0 ? baseUt.toFixed(2) : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6 Tf 308 ${curY + 2.5} Td (${isAlu ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6 Tf 334 ${curY + 2.5} Td (${isColle ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6 Tf 364 ${curY + 2.5} Td (${isDap ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 405 ${curY + 2.5} Td (${sommeUt > 0 ? sommeUt.toFixed(2) : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6 Tf 460 ${curY + 2.5} Td (${isPaint ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6 Tf 490 ${curY + 2.5} Td (${isNew ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6 Tf 520 ${curY + 2.5} Td (${linePrix > 0 ? linePrix.toFixed(2) : "-"}) Tj ET`);
 
       curY -= rowH;
     }
@@ -661,17 +656,80 @@ export function buildProtocoleDeReparationPdf(
 
   // TOTAL DSP ROW
   content.push("0.1 0.12 0.16 rg");
-  content.push(`40 ${curY} 515 13 re f`);
+  content.push(`40 ${curY} 515 12 re f`);
 
-  content.push(`BT 1 1 1 rg /F2 7 Tf 44 ${curY + 3.5} Td (TOTAL DSP) Tj ET`);
-  content.push(`BT 1 1 1 rg /F2 7 Tf 260 ${curY + 3.5} Td (${grandUt.toFixed(2)}) Tj ET`);
-  content.push(`BT 1 1 1 rg /F2 7 Tf 395 ${curY + 3.5} Td (${grandSommeUt.toFixed(2)}) Tj ET`);
-  content.push(`BT 1 1 1 rg /F2 7 Tf 505 ${curY + 3.5} Td (${grandPrixDsp.toFixed(2)} EUR) Tj ET`);
-  curY -= 17;
+  content.push(`BT 1 1 1 rg /F2 6.5 Tf 44 ${curY + 3} Td (TOTAL DSP) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6.5 Tf 260 ${curY + 3} Td (${grandUt.toFixed(2)}) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6.5 Tf 395 ${curY + 3} Td (${grandSommeUt.toFixed(2)}) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6.5 Tf 505 ${curY + 3} Td (${grandPrixDsp.toFixed(2)} EUR) Tj ET`);
+  curY -= 14;
 
-  // 4. SUMMARY 4 BOXES (Y: curY -> curY - 50)
+  // Option Legend Line
+  content.push("BT 0.4 0.45 0.5 rg /F1 6 Tf 40 " + curY + " Td (Option : AR = Anti-rouille, BHN = Bosses Hors Norme, I = Induction, VHN = Vehicule Hors Norme) Tj ET");
+  curY -= 12;
+
+  // 4. TABLEAU PEINTURE / MO (MAIN D'OEUVRE)
+  content.push("0.22 0.25 0.32 rg");
+  content.push(`40 ${curY} 515 11 re f`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 44 ${curY + 3} Td (Element) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 175 ${curY + 3} Td (T1) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 230 ${curY + 3} Td (T2 47,00 EUR/h) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 315 ${curY + 3} Td (Peinture 36,00 EUR/h) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 405 ${curY + 3} Td (Ing. N.V. 36,00 EUR/h) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 485 ${curY + 3} Td (Commentaire) Tj ET`);
+  curY -= 10;
+
+  const paintElements = [
+    { name: "Capot", t2: "1 H", p: "3 H", ing: "3 H" },
+    { name: "Coffre superieur", t2: "1 H", p: "1 H", ing: "1 H" },
+    { name: "Brancard G", t2: "1 H", p: "1 H", ing: "1 H" },
+  ];
+  for (const pe of paintElements) {
+    content.push("0.85 0.88 0.9 RG 0.3 w");
+    content.push(`40 ${curY} 515 9 re s`);
+    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 44 ${curY + 2.5} Td (${pdfEscapeWinAnsi(pe.name)}) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 175 ${curY + 2.5} Td (-) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 240 ${curY + 2.5} Td (${pe.t2}) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 330 ${curY + 2.5} Td (${pe.p}) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 420 ${curY + 2.5} Td (${pe.ing}) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 485 ${curY + 2.5} Td (-) Tj ET`);
+    curY -= 9;
+  }
+
+  // Somme row
+  content.push("0.92 0.94 0.96 rg");
+  content.push(`40 ${curY} 515 9 re f`);
+  content.push("0.75 0.78 0.82 RG 0.4 w");
+  content.push(`40 ${curY} 515 9 re s`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 5.5 Tf 44 ${curY + 2.5} Td (Somme) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 175 ${curY + 2.5} Td (-) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 240 ${curY + 2.5} Td (3 H) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 330 ${curY + 2.5} Td (5 H) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 420 ${curY + 2.5} Td (5 H) Tj ET`);
+  curY -= 9;
+
+  // Total row
+  content.push("0.88 0.9 0.93 rg");
+  content.push(`40 ${curY} 515 9 re f`);
+  content.push("0.75 0.78 0.82 RG 0.4 w");
+  content.push(`40 ${curY} 515 9 re s`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 5.5 Tf 44 ${curY + 2.5} Td (Total) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 230 ${curY + 2.5} Td (141.00 EUR) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 320 ${curY + 2.5} Td (180.00 EUR) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 410 ${curY + 2.5} Td (180.00 EUR) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 5.5 Tf 485 ${curY + 2.5} Td (501.00 EUR) Tj ET`);
+  curY -= 11;
+
+  // Total Peinture/MO Bar
+  content.push("0.1 0.12 0.16 rg");
+  content.push(`40 ${curY} 515 10 re f`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 44 ${curY + 2.5} Td (Total Peinture/MO) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 485 ${curY + 2.5} Td (501.00 EUR) Tj ET`);
+  curY -= 14;
+
+  // 5. SUMMARY 4 BOXES
   const boxW = 125;
-  const boxH = 48;
+  const boxH = 46;
   const bY = curY - boxH;
 
   // Box 1: Tarification
@@ -750,6 +808,19 @@ export function buildProtocoleDeReparationPdf(
 }
 
 export function generateBudgetPdfBuffer(budget: any, rev: any, workspace?: any, inspection?: any): Buffer {
+  const isPdr =
+    rev?.budgetType === "pdr" ||
+    budget?.budget_type === "pdr" ||
+    (Array.isArray(inspection?.damagePoints) && inspection.damagePoints.length > 0) ||
+    (Array.isArray(rev?.services) && rev.services.some((s: any) => {
+      const d = String(s.name || s.description || "").toLowerCase();
+      return d.includes("dsp") || d.includes("pdr") || d.includes("mossa") || d.includes("bosse") || d.includes("grele") || d.includes("granizo");
+    }));
+
+  if (isPdr) {
+    return buildProtocoleDeReparationPdf(budget, rev, workspace, inspection);
+  }
+
   const clientSnap = (rev?.clientSnapshot as any) || {};
   const currency = rev?.currencyCode || "EUR";
 

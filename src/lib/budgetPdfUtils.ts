@@ -173,7 +173,7 @@ export function buildProtocoleDeReparationHtml(
   lang: "pt" | "fr" = "fr",
 ): string {
   const brand = workspaceInfo?.brandConfig || {};
-  const companyName = brand.legalName || workspaceInfo?.name || "PDR-Team SAS";
+  const companyName = brand.legalName || brand.name || workspaceInfo?.name || "PDR-Team SAS";
   const tagline = brand.tagline || "GESTION ET RÉPARATION DES SINISTRES GRÊLE";
   const legalAddress = brand.address || "388 Rue Louis Joseph Gay Lussac";
   const postalCity = [brand.postalCode || "26100", brand.city || "Romans sur Isère"].filter(Boolean).join(" ");

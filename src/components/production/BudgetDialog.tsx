@@ -2311,7 +2311,17 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         );
         return;
       }
-      if (form.budget_type === "pdr") {
+      const isPdr =
+        form.budget_type === "pdr" ||
+        (form as any).budgetType === "pdr" ||
+        inspectionPoints.length > 0 ||
+        Boolean((form as any).vehicle_body_type) ||
+        (Array.isArray((form as any).services) && (form as any).services.some((s: any) => {
+          const d = String(s.description || s.name || "").toLowerCase();
+          return d.includes("dsp") || d.includes("pdr") || d.includes("mossa") || d.includes("bosse") || d.includes("grele") || d.includes("granizo");
+        }));
+
+      if (isPdr) {
         openBudgetPreview(form as any, langDisplay, {
           name: workspaceName,
           logoUrl: logoUrl,
