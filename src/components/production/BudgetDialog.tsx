@@ -31,6 +31,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { useWorkspace } from "@/hooks/useWorkspace";
+import { openBudgetPreview } from "@/lib/budgetPdfUtils";
 import { apiRequest } from "@/lib/api";
 import {
   Table,
@@ -1245,7 +1246,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     city?: string | null;
     country?: string | null;
   };
-  const { workspaceId } = useWorkspace();
+  const { workspaceId, workspaceName, logoUrl, brandConfig } = useWorkspace();
   const qc = useQueryClient();
   const { data: clientsData } = useQuery({
     queryKey: ["clients", workspaceId],
@@ -2284,7 +2285,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Devis_${form.number || targetId}.pdf`;
+      a.download = `Protocole_${form.number || targetId}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -2310,10 +2311,18 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         );
         return;
       }
-      const blob = await getBudgetPdf(targetId);
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener,noreferrer");
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      if (form.budget_type === "pdr") {
+        openBudgetPreview(form as any, langDisplay, {
+          name: workspaceName,
+          logoUrl: logoUrl,
+          brandConfig: brandConfig,
+        });
+      } else {
+        const blob = await getBudgetPdf(targetId);
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank", "noopener,noreferrer");
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
     } catch (error: any) {
       toast.error(error?.message || (langDisplay === "fr" ? "Impossible d'ouvrir l'aperçu." : "Não foi possível abrir a visualização."));
     } finally {

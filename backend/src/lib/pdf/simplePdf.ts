@@ -402,7 +402,354 @@ export function buildBudgetDocumentPdf(doc: BudgetPdfDocument): Buffer {
   return assemblePdf(content.join("\n"));
 }
 
-export function generateBudgetPdfBuffer(budget: any, rev: any): Buffer {
+
+function calculateBaremoUTBackend(dents: number, sizeCode = "2"): number {
+  if (!dents || dents <= 0) return 0;
+  let baseUt = 0;
+  if (dents <= 5) baseUt = 6 + (dents - 1) * 1.5;
+  else if (dents <= 15) baseUt = 12 + (dents - 5) * 1.0;
+  else if (dents <= 30) baseUt = 22 + (dents - 15) * 0.8;
+  else if (dents <= 50) baseUt = 34 + (dents - 30) * 0.6;
+  else if (dents <= 100) baseUt = 46 + (dents - 50) * 0.5;
+  else if (dents <= 200) baseUt = 71 + (dents - 100) * 0.4;
+  else baseUt = 111 + (dents - 200) * 0.35;
+  const sizeMult = sizeCode === "3" ? 1.25 : sizeCode === "4" ? 1.5 : sizeCode === "5" ? 1.8 : 1.0;
+  return Math.round(baseUt * sizeMult * 100) / 100;
+}
+
+const BACKEND_PROTOCOLE_ZONES = [
+  {
+    title: "COMPOSANTS HORIZONTAUX",
+    parts: [
+      { code: "hood", label: "Capot", match: ["capot", "capo"] },
+      { code: "roof", label: "Pavillon", match: ["pavillon", "teto", "toit"] },
+      { code: "trunk", label: "Coffre superieur", match: ["coffre", "malle", "porta-malas"] },
+      { code: "tailgate", label: "Coffre inferieur", match: ["coffre inferieur", "tampa inf"] },
+    ],
+  },
+  {
+    title: "COTE GAUCHE",
+    parts: [
+      { code: "left_rail", label: "Brancard G", match: ["brancard g", "coluna esq"] },
+      { code: "front_left_fender", label: "Aile AVG", match: ["aile avg", "para-lama d. e"] },
+      { code: "front_left_door", label: "Porte AVG", match: ["porte avg", "porta d. e"] },
+      { code: "rear_left_door", label: "Porte ARG", match: ["porte arg", "porta t. e"] },
+      { code: "rear_left_quarter", label: "Aile ARG", match: ["aile arg", "lateral t. e"] },
+    ],
+  },
+  {
+    title: "COTE DROIT",
+    parts: [
+      { code: "right_rail", label: "Brancard D", match: ["brancard d", "coluna dir"] },
+      { code: "front_right_fender", label: "Aile AVD", match: ["aile avd", "para-lama d. d"] },
+      { code: "front_right_door", label: "Porte AVD", match: ["porte avd", "porta d. d"] },
+      { code: "rear_right_quarter", label: "Aile ARD", match: ["aile ard", "lateral t. d"] },
+    ],
+  },
+];
+
+export function buildProtocoleDeReparationPdf(
+  budget: any,
+  rev: any,
+  workspace?: any,
+  inspection?: any,
+): Buffer {
+  const content: string[] = [];
+  const brand = workspace?.brandConfig || {};
+  const companyName = brand.legalName || workspace?.name || "PDR-Team SAS";
+  const tagline = brand.tagline || "GESTION ET REPARATION DES SINISTRES GRELE";
+  const legalAddress = brand.address || "388 Rue Louis Joseph Gay Lussac";
+  const postalCity = [brand.postalCode || "26100", brand.city || "Romans sur Isere"].filter(Boolean).join(" ");
+  const companyPhone = brand.phone || "04 87 20 01 47";
+  const tollFree = brand.tollFree || "04 87 20 01 47";
+  const companyEmail = brand.email || "info@pdr-team.fr";
+  const companyWebsite = brand.website || "www.pdr-team.fr";
+
+  // Se for orcamento do tipo PDR / Granizo, renderiza com fidelidade maxima o Protocole de Reparation
+  if (rev?.budgetType === "pdr" || budget?.budget_type === "pdr") {
+    return buildProtocoleDeReparationPdf(budget, rev, workspace, inspection);
+  }
+
+  const clientSnap = (rev?.clientSnapshot as any) || {};
+  const vehiclePlate = String(budget.vehiclePlate || "SANS-PLAQUE").toUpperCase();
+  const protocolCode = budget.code || "FR-PFAN";
+
+  // 1. TOP HEADER & TITLE (Y: 805 -> 765)
+  // Dark Banner for Title
+  content.push("0.1 0.12 0.16 rg");
+  content.push("310 772 245 28 re f");
+
+  content.push("BT");
+  content.push("1 1 1 rg");
+  content.push("/F2 12 Tf");
+  content.push("322 782 Td");
+  content.push(`(${pdfEscapeWinAnsi("PROTOCOLE DE REPARATION")}) Tj`);
+  content.push("ET");
+
+  // Red plate badge
+  content.push("0.98 0.94 0.94 rg");
+  content.push("465 748 90 20 re f");
+  content.push("0.85 0.15 0.15 RG 1.5 w");
+  content.push("465 748 90 20 re s");
+
+  content.push("BT");
+  content.push("0.75 0.1 0.1 rg");
+  content.push("/F2 11 Tf");
+  content.push("475 754 Td");
+  content.push(`(${pdfEscapeWinAnsi(vehiclePlate)}) Tj`);
+  content.push("ET");
+
+  // Company Brand Left
+  content.push("BT");
+  content.push("0.1 0.12 0.16 rg");
+  content.push("/F2 15 Tf");
+  content.push("40 782 Td");
+  content.push(`(${pdfEscapeWinAnsi(companyName)}) Tj`);
+  content.push("/F2 7.5 Tf");
+  content.push("0.4 0.45 0.5 rg");
+  content.push("0 -11 Td");
+  content.push(`(${pdfEscapeWinAnsi(tagline)}) Tj`);
+  content.push("ET");
+
+  // Divider Line
+  content.push("0.1 0.12 0.16 RG 1.5 w");
+  content.push("40 742 m 555 742 l S");
+
+  // 2. CLIENT & VEHICLE GRID (Y: 736 -> 676)
+  content.push("0.75 0.78 0.82 RG 0.5 w");
+  content.push("40 676 515 60 re s");
+  content.push("170 676 m 170 736 l S");
+  content.push("285 676 m 285 736 l S");
+  content.push("415 676 m 415 736 l S");
+  content.push("40 716 m 555 716 l S");
+  content.push("40 696 m 555 696 l S");
+
+  // Row 1
+  content.push("BT");
+  content.push("0.4 0.45 0.5 rg /F2 6 Tf 44 728 Td (NOM CLIENT) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F2 8 Tf 44 720 Td (" + pdfEscapeWinAnsi(budget.clientName || clientSnap.name || "-") + ") Tj ET");
+
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 174 728 Td (MARQUE) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F2 8 Tf 174 720 Td (" + pdfEscapeWinAnsi(budget.vehicleBrand || "-") + ") Tj ET");
+
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 289 728 Td (PLAQUE D'IMMATRICULATION) Tj ET");
+  content.push("BT 0.75 0.1 0.1 rg /F2 8 Tf 289 720 Td (" + pdfEscapeWinAnsi(vehiclePlate) + ") Tj ET");
+
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 419 728 Td (N' DE PROTOCOLE) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F2 8 Tf 419 720 Td (" + pdfEscapeWinAnsi(protocolCode) + ") Tj ET");
+
+  // Row 2
+  const clientAddr = clientSnap.address?.street ? [clientSnap.address.street, clientSnap.address.postal, clientSnap.address.city].filter(Boolean).join(" ") : "-";
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 44 708 Td (ADRESSE / CODE POSTAL / VILLE) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 44 700 Td (" + pdfEscapeWinAnsi(clientAddr) + ") Tj ET");
+
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 174 708 Td (MODELE) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F2 8 Tf 174 700 Td (" + pdfEscapeWinAnsi(budget.vehicleModel || "-") + ") Tj ET");
+
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 289 708 Td (N' DE CHASSIS (VIN)) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 289 700 Td (" + pdfEscapeWinAnsi(budget.vehicleVin || "-") + ") Tj ET");
+
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 419 708 Td (DATE DEBUT REPARATION) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 419 700 Td (" + pdfEscapeWinAnsi((budget.createdAt || new Date()).toISOString().slice(0, 10)) + ") Tj ET");
+
+  // Row 3
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 44 688 Td (N' TEL.) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F2 7.5 Tf 44 680 Td (" + pdfEscapeWinAnsi(budget.clientPhone || clientSnap.phone || "-") + ") Tj ET");
+
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 174 688 Td (COULEUR) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 174 680 Td (-) Tj ET");
+
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 289 688 Td (KILOMETRAGE) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 289 680 Td (-) Tj ET");
+
+  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 419 688 Td (DATE FIN REPARATION) Tj ET");
+  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 419 680 Td (-) Tj ET");
+
+  // 3. TABLE DSP (PDR) HEADER (Y: 668 -> 654)
+  content.push("0.22 0.25 0.32 rg");
+  content.push("40 654 515 15 re f");
+
+  content.push("BT 1 1 1 rg /F2 7 Tf 44 658 Td (Composants) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 165 658 Td (Nb. bosses) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 215 658 Td (Taille mm) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 265 658 Td (UT) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 305 658 Td (ALU) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 330 658 Td (Colle) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 360 658 Td (DAP) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 400 658 Td (Somme UT) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 455 658 Td (Peint) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 485 658 Td (Nouv) Tj ET");
+  content.push("BT 1 1 1 rg /F2 6.5 Tf 520 658 Td (Prix EUR) Tj ET");
+
+  // DSP Rows
+  let curY = 642;
+  const rowH = 11.5;
+  const allServices: any[] = Array.isArray(rev?.services) ? rev?.services : [];
+  const damagePoints: any[] = Array.isArray(inspection?.damagePoints) ? inspection?.damagePoints : [];
+
+  let grandUt = 0;
+  let grandSommeUt = 0;
+  let grandPrixDsp = 0;
+
+  for (const zone of BACKEND_PROTOCOLE_ZONES) {
+    // Zone header
+    content.push("0.9 0.92 0.95 rg");
+    content.push(`40 ${curY} 515 ${rowH} re f`);
+    content.push("0.75 0.78 0.82 RG 0.5 w");
+    content.push(`40 ${curY} 515 ${rowH} re s`);
+
+    content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 44 ${curY + 3} Td (${pdfEscapeWinAnsi(zone.title)}) Tj ET`);
+    curY -= rowH;
+
+    for (const p of zone.parts) {
+      // Check if point or service exists for this part
+      const pts = damagePoints.filter((dp) => dp.carPartCode === p.code || p.match.some((m) => String(dp.carPartCode).toLowerCase().includes(m)));
+      const svc = allServices.find((s) => p.match.some((m) => String(s.description || "").toLowerCase().includes(m)));
+
+      let dents = pts.reduce((sum, pt) => sum + (Number(pt.dentCount) || 1), 0);
+      let isAlu = pts.some((pt) => pt.partMaterial === "aluminum") || String(svc?.description || "").includes("[ALU]");
+      let isColle = String(svc?.description || "").toLowerCase().includes("colle");
+      let isDap = String(svc?.description || "").toLowerCase().includes("dap");
+      let isPaint = pts.some((pt) => pt.damageType === "paint_damage") || String(svc?.description || "").toLowerCase().includes("peint");
+      let isNew = pts.some((pt) => pt.damageType === "replace");
+
+      if (dents === 0 && svc) {
+        const m = String(svc.description || "").match(/(\d+)\s*mossa/i);
+        if (m) dents = parseInt(m[1], 10);
+      }
+
+      let baseUt = 0;
+      let sommeUt = 0;
+      let linePrix = 0;
+
+      if (dents > 0 || svc) {
+        baseUt = calculateBaremoUTBackend(dents || 10, "2");
+        const mult = 1.0 + (isAlu ? 0.25 : 0) + (isColle ? 0.25 : 0) - (isDap ? 0.40 : 0);
+        sommeUt = Math.round(baseUt * mult * 100) / 100;
+        if (svc && Number(svc.unit_price) > 0) {
+          linePrix = (svc.pricing_mode === "fixed" || svc.pricingMode === "fixed")
+            ? Number(svc.unit_price)
+            : Number(svc.quantity || 1) * Number(svc.unit_price);
+        } else {
+          linePrix = Math.round(sommeUt * 9.0 * 100) / 100;
+        }
+
+        grandUt += baseUt;
+        grandSommeUt += sommeUt;
+        grandPrixDsp += linePrix;
+      }
+
+      // Draw row
+      content.push("0.85 0.88 0.9 RG 0.3 w");
+      content.push(`40 ${curY} 515 ${rowH} re s`);
+
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 44 ${curY + 3} Td (${pdfEscapeWinAnsi(p.label)}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 175 ${curY + 3} Td (${dents > 0 ? dents : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 225 ${curY + 3} Td (${dents > 0 ? "20" : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 265 ${curY + 3} Td (${baseUt > 0 ? baseUt.toFixed(2) : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 308 ${curY + 3} Td (${isAlu ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 334 ${curY + 3} Td (${isColle ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 364 ${curY + 3} Td (${isDap ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 405 ${curY + 3} Td (${sommeUt > 0 ? sommeUt.toFixed(2) : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 460 ${curY + 3} Td (${isPaint ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 490 ${curY + 3} Td (${isNew ? "X" : ""}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 520 ${curY + 3} Td (${linePrix > 0 ? linePrix.toFixed(2) : "-"}) Tj ET`);
+
+      curY -= rowH;
+    }
+  }
+
+  // TOTAL DSP ROW
+  content.push("0.1 0.12 0.16 rg");
+  content.push(`40 ${curY} 515 13 re f`);
+
+  content.push(`BT 1 1 1 rg /F2 7 Tf 44 ${curY + 3.5} Td (TOTAL DSP) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 7 Tf 260 ${curY + 3.5} Td (${grandUt.toFixed(2)}) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 7 Tf 395 ${curY + 3.5} Td (${grandSommeUt.toFixed(2)}) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 7 Tf 505 ${curY + 3.5} Td (${grandPrixDsp.toFixed(2)} EUR) Tj ET`);
+  curY -= 17;
+
+  // 4. SUMMARY 4 BOXES (Y: curY -> curY - 50)
+  const boxW = 125;
+  const boxH = 48;
+  const bY = curY - boxH;
+
+  // Box 1: Tarification
+  content.push(`0.96 0.97 0.98 rg 40 ${bY} ${boxW} ${boxH} re f`);
+  content.push(`0.75 0.78 0.82 RG 0.5 w 40 ${bY} ${boxW} ${boxH} re s`);
+  content.push(`0.22 0.25 0.32 rg 40 ${bY + boxH - 10} ${boxW} 10 re f`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 44 ${bY + boxH - 7} Td (TARIFICATION) Tj ET`);
+  content.push(`BT 0.2 0.25 0.3 rg /F1 5.5 Tf 44 ${bY + 28} Td (- Aluminium : +25% | Colle : +25%) Tj 0 -7 Td (- DAP : -40% sur element) Tj 0 -7 Td (- Taux PDR : 90.00 EUR | 10UT = 1H) Tj ET`);
+
+  // Box 2: Options
+  content.push(`0.96 0.97 0.98 rg 170 ${bY} ${boxW} ${boxH} re f`);
+  content.push(`0.75 0.78 0.82 RG 0.5 w 170 ${bY} ${boxW} ${boxH} re s`);
+  content.push(`0.22 0.25 0.32 rg 170 ${bY + boxH - 10} ${boxW} 10 re f`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 174 ${bY + boxH - 7} Td (OPTIONS SUPPLEMENTAIRES) Tj ET`);
+  content.push(`BT 0.2 0.25 0.3 rg /F1 6 Tf 174 ${bY + 26} Td (- T2 : 0.00 EUR) Tj 0 -8 Td (- Peinture : 0.00 EUR) Tj ET`);
+
+  // Box 3: Degarnissage
+  content.push(`0.96 0.97 0.98 rg 300 ${bY} ${boxW} ${boxH} re f`);
+  content.push(`0.75 0.78 0.82 RG 0.5 w 300 ${bY} ${boxW} ${boxH} re s`);
+  content.push(`0.22 0.25 0.32 rg 300 ${bY + boxH - 10} ${boxW} 10 re f`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 304 ${bY + boxH - 7} Td (FORFAIT DEGARNISSAGE) Tj ET`);
+  const degarnissageVal = Number(rev?.laborTotal || 0);
+  content.push(`BT 0.2 0.25 0.3 rg /F2 6.5 Tf 304 ${bY + 20} Td (TOTAL: ${degarnissageVal.toFixed(2)} EUR) Tj ET`);
+
+  // Box 4: Prix Total
+  content.push(`0.96 0.97 0.98 rg 430 ${bY} ${boxW} ${boxH} re f`);
+  content.push(`0.1 0.12 0.16 RG 1 w 430 ${bY} ${boxW} ${boxH} re s`);
+  content.push(`0.1 0.12 0.16 rg 430 ${bY + boxH - 10} ${boxW} 10 re f`);
+  content.push(`BT 1 1 1 rg /F2 6.5 Tf 434 ${bY + boxH - 7} Td (PRIX TOTAL) Tj ET`);
+  const finalTotalVal = Number(rev?.finalTotal || grandPrixDsp);
+  const grossVal = Number(rev?.grossTotal || grandPrixDsp);
+  const tvaVal = Number(rev?.taxTotal || (finalTotalVal - grossVal));
+  content.push(`BT 0.2 0.25 0.3 rg /F1 6 Tf 434 ${bY + 26} Td (Total HT : ${grossVal.toFixed(2)} EUR) Tj 0 -8 Td (TVA (20%) : ${tvaVal.toFixed(2)} EUR) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 8 Tf 434 ${bY + 6} Td (Total : ${finalTotalVal.toFixed(2)} EUR) Tj ET`);
+
+  curY = bY - 10;
+
+  // 5. ASSURANCE & EXPERTISE (Y: curY -> curY - 40)
+  const assH = 38;
+  const aY = curY - assH;
+  content.push(`0.22 0.25 0.32 rg 40 ${aY + assH - 10} 515 10 re f`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 44 ${aY + assH - 7} Td (ASSURANCE / EXTENSION DES DOMMAGES) Tj ET`);
+  content.push(`0.75 0.78 0.82 RG 0.5 w 40 ${aY} 515 ${assH} re s`);
+
+  const dossierSnap = (rev?.dossierSnapshot as any) || {};
+  const insCompany = dossierSnap.insuranceCompany || budget.dossier_insurance_company || "-";
+  const expertName = dossierSnap.expertName || budget.dossier_expert_name || "-";
+  const claimNum = dossierSnap.claimNumber || budget.dossier_claim_number || "-";
+
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 44 ${aY + 20} Td (ASSURANCE) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7 Tf 44 ${aY + 11} Td (${pdfEscapeWinAnsi(insCompany)}) Tj ET`);
+
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 170 ${aY + 20} Td (N' SINISTRE) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7 Tf 170 ${aY + 11} Td (${pdfEscapeWinAnsi(claimNum)}) Tj ET`);
+
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 290 ${aY + 20} Td (EXPERT) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7 Tf 290 ${aY + 11} Td (${pdfEscapeWinAnsi(expertName)}) Tj ET`);
+
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 420 ${aY + 20} Td (SIGNATURE EXPERT) Tj ET`);
+  content.push(`0.8 0.82 0.86 RG 0.5 w 420 ${aY + 8} 125 10 re s`);
+
+  // 6. MULTI-TENANT WHITELABEL FOOTER (Y: 45 -> 15)
+  content.push("0.1 0.12 0.16 RG 1 w");
+  content.push("40 45 m 555 45 l S");
+
+  content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 40 35 Td (" + pdfEscapeWinAnsi(companyName) + ") Tj ET");
+  content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 40 27 Td (" + pdfEscapeWinAnsi(legalAddress + " - " + postalCity) + ") Tj ET");
+
+  content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 230 35 Td (" + pdfEscapeWinAnsi("Tel: " + companyPhone + " | N' Vert: " + tollFree) + ") Tj ET");
+  content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 230 27 Td (" + pdfEscapeWinAnsi(companyEmail + " - " + companyWebsite) + ") Tj ET");
+
+  content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 475 35 Td (Version du:) Tj ET");
+  content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 475 27 Td (" + pdfEscapeWinAnsi((new Date()).toISOString().slice(0, 10)) + ") Tj ET");
+
+  return assemblePdf(content.join("\n"));
+}
+
+export function generateBudgetPdfBuffer(budget: any, rev: any, workspace?: any, inspection?: any): Buffer {
   const clientSnap = (rev?.clientSnapshot as any) || {};
   const currency = rev?.currencyCode || "EUR";
 

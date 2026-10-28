@@ -958,7 +958,18 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
     const vehicleSnap = (rev?.vehicleSnapshot as any) || {};
     const currency = rev?.currencyCode || "EUR";
 
-    const pdfBuffer = generateBudgetPdfBuffer(budget, rev);
+    const [workspace, inspection] = await Promise.all([
+      prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        include: { billingProfile: true },
+      }),
+      prisma.vehicleInspection.findFirst({
+        where: { budgetId: budget.id, workspaceId },
+        include: { damagePoints: true },
+      }),
+    ]);
+
+    const pdfBuffer = generateBudgetPdfBuffer(budget, rev, workspace, inspection);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${budget.code}.pdf"`);
@@ -1019,7 +1030,17 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
 
     let pdfBuf: Buffer;
     try {
-      pdfBuf = generateBudgetPdfBuffer(budget, rev);
+      const [workspace, inspection] = await Promise.all([
+        prisma.workspace.findUnique({
+          where: { id: workspaceId },
+          include: { billingProfile: true },
+        }),
+        prisma.vehicleInspection.findFirst({
+          where: { budgetId: budget.id, workspaceId },
+          include: { damagePoints: true },
+        }),
+      ]);
+      pdfBuf = generateBudgetPdfBuffer(budget, rev, workspace, inspection);
     } catch {
       const pdfLines = [
         `Date: ${(rev.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,
