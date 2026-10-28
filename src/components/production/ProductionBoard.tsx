@@ -18,6 +18,7 @@ import {
   Pause,
   Loader2,
   CheckCircle2,
+  CheckCheck,
   Paintbrush,
   Filter,
   ArrowRight,
@@ -26,7 +27,13 @@ import {
   AlertOctagon,
   Check,
   Search,
+  Hammer,
+  Cog,
+  Flame,
+  Layers,
+  LayoutGrid,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   useProductionOrders,
   PRIORITY_META,
@@ -108,7 +115,7 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     key: "disassembly",
     label: "Desmontagem",
     shortLabel: "Desmontagem",
-    sectorName: "Desmontagem",
+    sectorName: "Montagem / Desmontagem",
     description: "Desmontagem de peças, forrações e presilhas",
     accent: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
     dot: "bg-amber-500",
@@ -122,7 +129,7 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     description: "Desamassamento artesanal sem repintura",
     accent: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30",
     dot: "bg-blue-500",
-    icon: ShieldCheck,
+    icon: Hammer,
   },
   {
     key: "mechanics",
@@ -132,7 +139,7 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     description: "Reparos mecânicos, suspensão e alinhamento",
     accent: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30",
     dot: "bg-indigo-500",
-    icon: Wrench,
+    icon: Cog,
   },
   {
     key: "bodywork",
@@ -142,7 +149,7 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     description: "Chapeação, alinhamento de lataria e solda",
     accent: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/30",
     dot: "bg-orange-500",
-    icon: Wrench,
+    icon: Flame,
   },
   {
     key: "paint_prep",
@@ -152,7 +159,7 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     description: "Lixamento, primer, aparelhamento e isolamento",
     accent: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/30",
     dot: "bg-yellow-500",
-    icon: Wrench,
+    icon: Layers,
   },
   {
     key: "paint",
@@ -168,7 +175,7 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     key: "assembly",
     label: "Montagem",
     shortLabel: "Montagem",
-    sectorName: "Montagem",
+    sectorName: "Montagem / Desmontagem",
     description: "Reinstalação de peças, vãos e vidraçaria",
     accent: "bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/30",
     dot: "bg-teal-500",
@@ -181,7 +188,7 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     description: "Controle de qualidade, polimento e lavagem",
     accent: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
     dot: "bg-emerald-500",
-    icon: CheckCircle2,
+    icon: CheckCheck,
   },
   {
     key: "paused",
@@ -202,6 +209,109 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     dot: "bg-green-500",
     icon: ShieldCheck,
     isTerminal: true,
+  },
+];
+
+export interface SectorFilterConfig {
+  key: string;
+  label: string;
+  shortLabel: string;
+  description: string;
+  dot: string;
+  icon: React.ComponentType<{ className?: string }>;
+  stageKeys: string[];
+}
+
+export const SECTOR_FILTERS: SectorFilterConfig[] = [
+  {
+    key: "awaiting_start",
+    label: "Aguardando Início",
+    shortLabel: "Aguardando",
+    description: "OS aprovada na fila de entrada",
+    dot: "bg-slate-400",
+    icon: Clock3,
+    stageKeys: ["awaiting_start"],
+  },
+  {
+    key: "diagnosis",
+    label: "Diagnóstico",
+    shortLabel: "Diagnóstico",
+    description: "Checklist e vistoria técnica de entrada",
+    dot: "bg-cyan-500",
+    icon: ClipboardList,
+    stageKeys: ["diagnosis"],
+  },
+  {
+    key: "assembly_disassembly",
+    label: "Montagem e Desmontagem",
+    shortLabel: "Mont./Desmont.",
+    description: "Desmontagem inicial e montagem/reinstalação pós-pintura",
+    dot: "bg-amber-500",
+    icon: Wrench,
+    stageKeys: ["disassembly", "assembly"],
+  },
+  {
+    key: "pdr",
+    label: "PDR / Martelinho",
+    shortLabel: "PDR",
+    description: "Desamassamento artesanal sem repintura",
+    dot: "bg-blue-500",
+    icon: Hammer,
+    stageKeys: ["pdr"],
+  },
+  {
+    key: "mechanics",
+    label: "Mecânica",
+    shortLabel: "Mecânica",
+    description: "Reparos mecânicos, suspensão e alinhamento",
+    dot: "bg-indigo-500",
+    icon: Cog,
+    stageKeys: ["mechanics"],
+  },
+  {
+    key: "bodywork",
+    label: "Funilaria",
+    shortLabel: "Funilaria",
+    description: "Chapeação, alinhamento de lataria e solda",
+    dot: "bg-orange-500",
+    icon: Flame,
+    stageKeys: ["bodywork"],
+  },
+  {
+    key: "paint_prep",
+    label: "Preparação",
+    shortLabel: "Preparação",
+    description: "Lixamento, primer, aparelhamento e isolamento",
+    dot: "bg-yellow-500",
+    icon: Layers,
+    stageKeys: ["paint_prep"],
+  },
+  {
+    key: "paint",
+    label: "Pintura",
+    shortLabel: "Pintura",
+    description: "Cabine de pintura, base de cor e verniz",
+    dot: "bg-purple-500",
+    icon: Paintbrush,
+    stageKeys: ["paint"],
+  },
+  {
+    key: "inspection",
+    label: "Inspeção Final",
+    shortLabel: "Inspeção / CQ",
+    description: "Controle de qualidade, polimento e lavagem",
+    dot: "bg-emerald-500",
+    icon: CheckCheck,
+    stageKeys: ["inspection"],
+  },
+  {
+    key: "paused",
+    label: "Pausado",
+    shortLabel: "Pausado",
+    description: "Interrompido por impedimento real",
+    dot: "bg-rose-500",
+    icon: Pause,
+    stageKeys: ["paused"],
   },
 ];
 
@@ -344,19 +454,23 @@ export function ProductionBoard({ onOpen }: Props) {
   // Demanda Prevista para o setor filtrado
   const forecastedOrdersForSector = useMemo(() => {
     if (sectorFilter === "all") return [];
+    const activeFilter = SECTOR_FILTERS.find((f) => f.key === sectorFilter);
+    const targetKeys = activeFilter ? activeFilter.stageKeys : [sectorFilter];
+
     return filteredOrders.filter((o) => {
       if (o.status === "delivered") return false;
       const currentStageKey = getEffectiveStage(o);
-      if (currentStageKey === sectorFilter) return false;
+      if (targetKeys.includes(currentStageKey)) return false;
 
       const route = o.recommendedRoute || (o as any).recommended_route;
       if (!Array.isArray(route)) return false;
 
-      const targetIdx = route.indexOf(sectorFilter);
       const currentIdx = route.indexOf(currentStageKey);
-
-      // Está na rota e o setor é posterior à etapa atual
-      return targetIdx > -1 && (currentIdx === -1 || targetIdx > currentIdx);
+      // Está na rota para algum dos estágios do setor e é posterior à etapa atual
+      return targetKeys.some((targetKey) => {
+        const targetIdx = route.indexOf(targetKey);
+        return targetIdx > -1 && (currentIdx === -1 || targetIdx > currentIdx);
+      });
     });
   }, [filteredOrders, sectorFilter]);
 
@@ -480,9 +594,10 @@ export function ProductionBoard({ onOpen }: Props) {
   return (
     <div className="space-y-4">
       {/* Barra de Ferramentas / Filtros do Kanban */}
-      <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 shadow-xs sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[200px] sm:w-64">
+      <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          {/* Campo de Busca */}
+          <div className="relative w-full sm:w-64 min-w-[200px]">
             <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               placeholder="Buscar por placa, OS, chassi..."
@@ -492,34 +607,65 @@ export function ProductionBoard({ onOpen }: Props) {
             />
           </div>
 
-          <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-            <Button
-              size="sm"
-              variant={sectorFilter === "all" ? "default" : "outline"}
-              className="h-8 text-xs px-2.5"
-              onClick={() => setSectorFilter("all")}
-            >
-              Todos os Setores ({filteredOrders.length})
-            </Button>
-            {WORKSHOP_STAGES.filter((s) => !s.isTerminal).map((st) => {
-              const count = (groupedOrders.get(st.key) || []).length;
-              return (
+          {/* Filtros de Setor com Ícone + Contador + Tooltip no hover */}
+          <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 max-w-full">
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button
-                  key={st.key}
                   size="sm"
-                  variant={sectorFilter === st.key ? "default" : "outline"}
-                  className="h-8 text-xs px-2.5 gap-1 shrink-0"
-                  onClick={() => setSectorFilter(st.key)}
+                  variant={sectorFilter === "all" ? "default" : "outline"}
+                  className="h-8 text-xs px-2.5 gap-1.5 shrink-0"
+                  onClick={() => setSectorFilter("all")}
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-                  {st.shortLabel} ({count})
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  <span>Todos</span>
+                  <span className="ml-0.5 rounded-full bg-muted px-1.5 py-0.2 text-[10px] font-semibold tabular-nums text-foreground">
+                    {filteredOrders.length}
+                  </span>
                 </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                <p className="font-semibold">Todos os Setores ({filteredOrders.length})</p>
+                <p className="text-[10px] text-muted-foreground">Exibe o pipeline operacional completo do Kanban</p>
+              </TooltipContent>
+            </Tooltip>
+
+            {SECTOR_FILTERS.map((st) => {
+              const count = st.stageKeys.reduce(
+                (acc, k) => acc + (groupedOrders.get(k) || []).length,
+                0
+              );
+              const Icon = st.icon;
+              const isSelected = sectorFilter === st.key;
+              return (
+                <Tooltip key={st.key}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant={isSelected ? "default" : "outline"}
+                      className={`h-8 px-2 gap-1.5 shrink-0 transition-colors ${
+                        isSelected ? "" : "hover:bg-accent/60"
+                      }`}
+                      onClick={() => setSectorFilter(isSelected ? "all" : st.key)}
+                      aria-label={`${st.label} (${count})`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
+                      <span className="text-[11px] font-semibold tabular-nums">{count}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    <p className="font-semibold">{st.label} ({count})</p>
+                    <p className="text-[10px] text-muted-foreground">{st.description}</p>
+                  </TooltipContent>
+                </Tooltip>
               );
             })}
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-auto text-xs text-muted-foreground">
+        {/* Resumo de Status Operacional */}
+        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3 pt-2 border-t border-border/40 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
             <span className="h-2 w-2 rounded-full bg-blue-500" /> Em fluxo:{" "}
             <strong className="text-foreground">
@@ -548,7 +694,7 @@ export function ProductionBoard({ onOpen }: Props) {
             <div className="flex items-center gap-2">
               <Eye className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               <h4 className="text-xs font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-300">
-                Demanda Prevista para este Setor ({forecastedOrdersForSector.length} veículo{forecastedOrdersForSector.length > 1 ? "s" : ""} na fila anterior)
+                Demanda Prevista: {SECTOR_FILTERS.find((f) => f.key === sectorFilter)?.label || "Setor"} ({forecastedOrdersForSector.length} veículo{forecastedOrdersForSector.length > 1 ? "s" : ""} na fila anterior)
               </h4>
             </div>
             <p className="text-[11px] text-muted-foreground">
@@ -595,9 +741,15 @@ export function ProductionBoard({ onOpen }: Props) {
         onDragEnd={handleDragEnd}
       >
         <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory">
-          {WORKSHOP_STAGES.filter(
-            (s) => sectorFilter === "all" || sectorFilter === s.key || s.isTerminal
-          ).map((stage) => {
+          {WORKSHOP_STAGES.filter((s) => {
+            if (sectorFilter === "all") return true;
+            if (s.isTerminal) return true;
+            const activeFilter = SECTOR_FILTERS.find((f) => f.key === sectorFilter);
+            if (activeFilter) {
+              return activeFilter.stageKeys.includes(s.key);
+            }
+            return sectorFilter === s.key;
+          }).map((stage) => {
             const items = groupedOrders.get(stage.key) ?? [];
             return (
               <DroppableStageColumn
