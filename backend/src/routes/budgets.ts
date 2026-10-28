@@ -1069,6 +1069,46 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
 });
 
 /**
+ * POST /api/budgets/:id/mark-sent
+ * Atualiza status da revisão corrente para 'submitted' (Enviado) quando o orçamento for despachado via WhatsApp ou canal externo.
+ */
+budgetsRouter.post("/:id/mark-sent", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const ctx = req.ctx;
+    const workspaceId = ctx?.activeWorkspaceId;
+    if (!workspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const budget = await prisma.budget.findUnique({
+      where: { id },
+      include: { currentRevision: true },
+    });
+    if (!budget || budget.deletedAt || budget.workspaceId !== workspaceId) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+    assertObjectAccess(ctx, budget);
+
+    const rev = budget.currentRevision;
+    if (!rev) {
+      return res.status(409).json({ message: "Orçamento sem revisão corrente." });
+    }
+
+    if (rev.status === "draft") {
+      await prisma.budgetRevision.update({
+        where: { id: rev.id },
+        data: { status: "submitted" },
+      });
+    }
+
+    return res.status(200).json({ ok: true, message: "Orçamento marcado como enviado." });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
  * GET /api/budgets/:id/inspection
  */
 budgetsRouter.get("/:id/inspection", async (req: Request, res: Response, next: NextFunction) => {

@@ -317,6 +317,12 @@ export function sendBudgetEmail(id: string, to: string): Promise<{
   });
 }
 
+export function markBudgetSent(id: string): Promise<{ ok: boolean; message: string }> {
+  return apiRequest(`/budgets/${id}/mark-sent`, {
+    method: "POST",
+  });
+}
+
 export function apiBudgetToLocalBudget(api: ApiBudget): any {
   const rev = api.currentRevision || api.current_revision;
   const canonicalStatus = rev?.status || "draft";

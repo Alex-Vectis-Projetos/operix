@@ -412,9 +412,10 @@ export function generateBudgetPdfBuffer(budget: any, rev: any): Buffer {
 
   const items: BudgetPdfItem[] = [];
   for (const s of svcRows) {
+    const isFixed = s.pricing_mode === "fixed" || s.pricingMode === "fixed";
     const qty = Math.max(1, Number(s.quantity ?? 1) || 1);
     const pu = Number(s.unit_price ?? s.unitPrice ?? s.price ?? 0) || 0;
-    const lineTotal = Number(s.total) || (qty * pu);
+    const lineTotal = Number(s.total) || (isFixed ? pu : qty * pu);
     items.push({
       type: "service",
       description: s.name || s.description || "Prestation générale",

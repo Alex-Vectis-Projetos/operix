@@ -76,7 +76,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Budget | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
-  const [filter, setFilter] = useState<null | "total" | "draft" | "approved" | "rejected">(null);
+  const [filter, setFilter] = useState<null | "total" | "draft" | "sent" | "approved" | "rejected">(null);
   const { data: productionOrders, create: createOrder } = useProductionOrders();
   const { lang } = useLanguage();
   const langDisplay = resolveInterventionDisplayLang(lang);
@@ -90,6 +90,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
     create: createBudgetMutation,
     updateRevision: updateRevisionMutation,
     approve: approveBudgetMutation,
+    reject: rejectBudgetMutation,
     remove: removeBudgetMutation,
   } = useBudgets();
 
@@ -153,23 +154,23 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           (s, x) =>
             s +
             Math.max(0, Number(x?.quantity) || 0) *
-              Math.max(0, Number(x?.unit_price) || 0),
+            Math.max(0, Number(x?.unit_price) || 0),
           0,
         );
         const sv = Array.isArray((b as any).services)
           ? (b as any).services.reduce(
-              (s: number, x: any) =>
-                s +
-                Math.max(0, Number(x?.quantity) || 0) *
-                  Math.max(0, Number(x?.unit_price) || 0),
-              0,
-            )
+            (s: number, x: any) =>
+              s +
+              Math.max(0, Number(x?.quantity) || 0) *
+              Math.max(0, Number(x?.unit_price) || 0),
+            0,
+          )
           : 0;
         const l = (b.labor || []).reduce(
           (s, x) =>
             s +
             Math.max(0, Number(x?.hours) || 0) *
-              Math.max(0, Number(x?.hourly_rate) || 0),
+            Math.max(0, Number(x?.hourly_rate) || 0),
           0,
         );
         const gross = p + sv + l;
@@ -181,10 +182,11 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         acc.total += total;
         if (b.status === "approved") acc.approved += 1;
         if (b.status === "draft") acc.drafts += 1;
+        if (b.status === "sent") acc.sent = (acc.sent || 0) + 1;
         if (b.status === "rejected") acc.rejected += 1;
         return acc;
       },
-      { count: 0, total: 0, approved: 0, drafts: 0, rejected: 0 },
+      { count: 0, total: 0, approved: 0, drafts: 0, sent: 0, rejected: 0 },
     );
   }, [items]);
 
@@ -231,6 +233,12 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           if (res?.productionOrder && onOpenOrder) {
             onOpenOrder(res.productionOrder);
           }
+        } else if (b.status === "rejected") {
+          await rejectBudgetMutation.mutateAsync({
+            budgetId: b.id,
+            revisionId: targetRevisionId,
+            reason: b.rejection?.reason || "Orçamento recusado pelo cliente",
+          });
         }
       } else {
         const created = await createBudgetMutation.mutateAsync(payload);
@@ -246,9 +254,15 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           if (res?.productionOrder && onOpenOrder) {
             onOpenOrder(res.productionOrder);
           }
+        } else if (b.status === "rejected" && createdRevId) {
+          await rejectBudgetMutation.mutateAsync({
+            budgetId: createdBudgetId,
+            revisionId: createdRevId,
+            reason: b.rejection?.reason || "Orçamento recusado pelo cliente",
+          });
         }
       }
-      if (b.status === "approved") {
+      if (b.status === "approved" || b.status === "rejected") {
         setEditing(b);
       } else {
         setOpen(false);
@@ -326,23 +340,23 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       (s, x) =>
         s +
         Math.max(0, Number(x?.quantity) || 0) *
-          Math.max(0, Number(x?.unit_price) || 0),
+        Math.max(0, Number(x?.unit_price) || 0),
       0,
     );
     const sv = Array.isArray((b as any).services)
       ? (b as any).services.reduce(
-          (s: number, x: any) =>
-            s +
-            Math.max(0, Number(x?.quantity) || 0) *
-              Math.max(0, Number(x?.unit_price) || 0),
-          0,
-        )
+        (s: number, x: any) =>
+          s +
+          Math.max(0, Number(x?.quantity) || 0) *
+          Math.max(0, Number(x?.unit_price) || 0),
+        0,
+      )
       : 0;
     const l = (b.labor || []).reduce(
       (s, x) =>
         s +
         Math.max(0, Number(x?.hours) || 0) *
-          Math.max(0, Number(x?.hourly_rate) || 0),
+        Math.max(0, Number(x?.hourly_rate) || 0),
       0,
     );
     const gross = p + sv + l;
@@ -386,6 +400,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const filteredItems = useMemo(() => {
     if (!filter || filter === "total") return items;
     if (filter === "draft") return items.filter((b) => b.status === "draft");
+    if (filter === "sent") return items.filter((b) => b.status === "sent");
     if (filter === "approved") return items.filter((b) => b.status === "approved");
     if (filter === "rejected") return items.filter((b) => b.status === "rejected");
     return items;
@@ -405,13 +420,22 @@ export function BudgetPanel({ onOpenOrder }: Props) {
               onClick={() => setFilter(null)}
             />
           ) : null}
-          {totals.drafts > 0 ? (
+          {totals.count > 0 ? (
             <StatBadge
               label="Rascunhos"
               value={String(totals.drafts)}
               tone="bg-slate-500/10 text-slate-700 dark:text-slate-300"
               active={filter === "draft"}
               onClick={() => setFilter(filter === "draft" ? null : "draft")}
+            />
+          ) : null}
+          {totals.sent > 0 ? (
+            <StatBadge
+              label="Enviados"
+              value={String(totals.sent)}
+              tone="bg-blue-500/10 text-blue-700 dark:text-blue-300"
+              active={filter === "sent"}
+              onClick={() => setFilter(filter === "sent" ? null : "sent")}
             />
           ) : null}
           {totals.approved > 0 ? (
@@ -423,7 +447,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
               onClick={() => setFilter(filter === "approved" ? null : "approved")}
             />
           ) : null}
-          {totals.rejected > 0 ? (
+          {totals.count > 0 ? (
             <StatBadge
               label="Rejeitados"
               value={String(totals.rejected)}
@@ -546,11 +570,19 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                             <FileDown className="h-3.5 w-3.5 mr-1" />
                             {langDisplay === "fr" ? "Télécharger" : "Baixar"}
                           </Button>
-                          {b.status !== "rejected" ? (
-                            <Button size="sm" variant="outline" onClick={() => openEdit(b)}>
-                              {b.status === "approved" ? "Revisar" : "Editar"}
-                            </Button>
-                          ) : null}
+                          <Button
+                            size="sm"
+                            variant={b.status === "rejected" ? "secondary" : "outline"}
+                            onClick={() => openEdit(b)}
+                          >
+                            {b.status === "approved"
+                              ? "Revisar"
+                              : b.status === "rejected"
+                                ? "Ver / Reabrir"
+                                : langDisplay === "fr"
+                                  ? "Modifier"
+                                  : "Editar"}
+                          </Button>
                           {b.status === "approved" && !alreadySent && !isClient ? (
                             <Button
                               size="sm"
@@ -627,15 +659,13 @@ function StatBadge({
   return (
     <div
       onClick={onClick}
-      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-all ${
-        clickable
+      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-all ${clickable
           ? "cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-400/30 active:scale-[0.98]"
           : ""
-      } ${
-        active
+        } ${active
           ? "border-slate-900/70 ring-2 ring-offset-1 ring-slate-900/20 dark:border-slate-100/50 dark:ring-slate-100/15 shadow-sm"
           : "border-border/60"
-      } ${tone || ""}`}
+        } ${tone || ""}`}
     >
       {Icon ? <Icon className="h-3.5 w-3.5 text-muted-foreground" /> : null}
       <div className="flex flex-col leading-tight">

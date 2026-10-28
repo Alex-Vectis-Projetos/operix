@@ -802,8 +802,10 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const displayDiagnosis = parsed.diagnosis?.trim() || "—";
   const displayTechnical = parsed.technicalDescription?.trim() || "—";
   const displayBudgetNumber = parsed.budgetNumber?.trim()
-    || order.code || "(sem orçamento atrelado)";
-  const displayOSNumber = order.code || order.id.slice(0, 8).toUpperCase();
+    || order?.code || "(sem orçamento atrelado)";
+  const displayOSNumber = isNew
+    ? (langDisplay === "fr" ? "Nouvel Ordre" : "Nova Ordem")
+    : (order?.code || order?.id?.slice(0, 8).toUpperCase() || "OS");
 
   const set = <K extends keyof ProductionOrder>(k: K, v: ProductionOrder[K]) => {
     if (locked) return;
@@ -822,7 +824,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   };
   const addStep = () => {
     if (locked || serviceDoneLocked) return;
-    const fallbackTech = (form.technician_name ?? order.technician_name ?? null);
+    const fallbackTech = (form.technician_name ?? order?.technician_name ?? null);
     const s = emptyStep("Novo serviço", fallbackTech);
     setExecution((e) => {
       const base = e ?? executionSafe;
@@ -911,7 +913,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     return !acc || s.finished_at > acc ? s.finished_at : acc;
   }, null);
 
-  const authorNameForNotes = (form.technician_name ?? order.technician_name ?? null);
+  const authorNameForNotes = (form.technician_name ?? order?.technician_name ?? null);
 
   const save = async () => {
     try {
@@ -1078,8 +1080,8 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     onClose();
   };
 
-  const currentStatus = (form.status ?? order.status ?? "new_vehicle") as ProductionStatus;
-  const currentPriority = (form.priority ?? order.priority ?? "normal") as ProductionPriority;
+  const currentStatus = (form.status ?? order?.status ?? "new_vehicle") as ProductionStatus;
+  const currentPriority = (form.priority ?? order?.priority ?? "normal") as ProductionPriority;
 
   const canFinalizeStatus = !isNew && !locked && (currentStatus === "in_production" || currentStatus === "paused");
   const preflightMissingClient = !order?.client_id && !form.client_id && !budgetHydrated;
@@ -1496,7 +1498,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
                     <Field label="Responsável">
                       <Select
-                        value={form.technician_user_id ?? order.technician_user_id ?? "__none__"}
+                        value={form.technician_user_id ?? order?.technician_user_id ?? "__none__"}
                         onValueChange={(v) => {
                           if (v === "__none__") {
                             set("technician_user_id", null);
@@ -1520,16 +1522,16 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                           ))}
                         </SelectContent>
                       </Select>
-                      {(form.technician_name ?? order.technician_name) && (
+                      {(form.technician_name ?? order?.technician_name) && (
                         <p className="text-[11px] text-muted-foreground pt-1">
-                          Atual: {form.technician_name ?? order.technician_name}
+                          Atual: {form.technician_name ?? order?.technician_name}
                         </p>
                       )}
                     </Field>
 
                     <Field label="Plataforma / observação rápida">
                       <Input
-                        value={form.platform ?? order.platform ?? ""}
+                        value={form.platform ?? order?.platform ?? ""}
                         onChange={e => set("platform", e.target.value)}
                       />
                     </Field>
@@ -1539,7 +1541,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                     <Field label="Data de entrada">
                       <div className="rounded-md border border-border/70 px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900/40">
                         <span className="text-muted-foreground">
-                          {fmtDatePTBR(form.created_at ?? order.created_at)}
+                          {fmtDatePTBR(form.created_at ?? order?.created_at)}
                         </span>
                       </div>
                       <p className="text-[11px] text-muted-foreground pt-1">
@@ -1550,7 +1552,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                     <Field label="Previsão de conclusão">
                       <Input
                         type="datetime-local"
-                        value={fmtDateInput(form.due_at ?? order.due_at)}
+                        value={fmtDateInput(form.due_at ?? order?.due_at)}
                         onChange={e => set(
                           "due_at",
                           e.target.value ? new Date(e.target.value).toISOString() : null,
@@ -1622,7 +1624,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                         <div className="rounded-md border border-border/60 bg-white p-2.5 dark:bg-slate-900/50">
                           <div className="text-muted-foreground">Previsão conclusão</div>
                           <div className="font-medium">
-                            {fmtDatePTBR(form.due_at ?? order.due_at)}
+                            {fmtDatePTBR(form.due_at ?? order?.due_at)}
                           </div>
                         </div>
                         <div className="rounded-md border border-border/60 bg-white p-2.5 dark:bg-slate-900/50">
@@ -1967,7 +1969,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
             )}
           </TabsContent>
           <TabsContent value="timeline" className="pt-4">
-            <OrderTimeline orderId={effectiveOrderId ?? order.id} />
+            <OrderTimeline orderId={effectiveOrderId ?? order?.id ?? ""} />
           </TabsContent>
         </Tabs>
       </DialogContent>

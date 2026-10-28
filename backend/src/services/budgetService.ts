@@ -64,9 +64,10 @@ export function calculateRevisionTotals(input: {
           const unitPriceValue = unitPriceKeys
             .map((key) => it?.[key])
             .find((value) => value !== undefined && value !== null && value !== "");
+          const isFixed = it?.pricing_mode === "fixed" || it?.pricingMode === "fixed";
           const qty = toDecimal(quantityValue ?? 1);
           const unitPrice = toDecimal(unitPriceValue ?? 0);
-          sum = sum.add(unitPrice.mul(qty));
+          sum = sum.add(isFixed ? unitPrice : unitPrice.mul(qty));
         }
       }
     };
@@ -562,11 +563,12 @@ function buildStructuredProductionServices(
         throw new UnprocessableEntityError(`BUDGET_SERVICE_QUANTITY_INVALID: ${source.category}[${index}]`);
       }
 
+      const isFixed = item.pricing_mode === "fixed" || item.pricingMode === "fixed";
       let unitPrice: Prisma.Decimal;
       let total: Prisma.Decimal;
       if (unitPriceRaw !== undefined) {
         unitPrice = strictDecimal(unitPriceRaw, `BUDGET_SERVICE_VALUE_INVALID: ${source.category}[${index}]`);
-        total = quantity.mul(unitPrice);
+        total = isFixed ? unitPrice : quantity.mul(unitPrice);
         if (totalRaw !== undefined && totalRaw !== null && totalRaw !== "") {
           const declaredTotal = strictDecimal(totalRaw, `BUDGET_SERVICE_TOTAL_INVALID: ${source.category}[${index}]`);
           if (!declaredTotal.equals(total)) {

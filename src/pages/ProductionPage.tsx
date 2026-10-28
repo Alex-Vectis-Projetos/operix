@@ -140,13 +140,14 @@ export default function ProductionPage() {
       </Tabs>
 
       <ErrorBoundary
+        key={open?.id ?? "closed"}
         fallback={
           <div className="hidden" aria-hidden>
             OrderDetailDialog temporarily unavailable
           </div>
         }
       >
-        <OrderDetailDialog order={open} onClose={handleDialogClose} />
+        {open && <OrderDetailDialog order={open} onClose={handleDialogClose} />}
       </ErrorBoundary>
     </div>
     </ErrorBoundary>

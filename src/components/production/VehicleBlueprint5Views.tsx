@@ -1,11 +1,33 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Shield, ShieldAlert, Wrench, Trash2, Plus, CheckCircle2, Eye, Sun, Moon, Maximize2, ZoomIn, Car, AlertTriangle, Camera } from "lucide-react";
+import {
+  Shield,
+  ShieldAlert,
+  Wrench,
+  Trash2,
+  Plus,
+  CheckCircle2,
+  CheckCheck,
+  Eye,
+  Sun,
+  Moon,
+  Maximize2,
+  ZoomIn,
+  Car,
+  AlertTriangle,
+  Camera,
+  Layers,
+  Sparkles,
+  Calculator,
+  Sliders,
+  Check,
+  Upload,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type VehicleViewType = "top" | "front" | "rear" | "left" | "right";
@@ -19,15 +41,35 @@ export interface DamagePointData {
   carPartCode: string;
   damageType: string;
   dentCount?: number | null;
+  dentSize?: string | null; // "1" | "2" | "3" | "4" | "5"
+  partMaterial?: string | null; // "steel" | "aluminum" | "plastic" | "carbon" | "other"
+  pricingMode?: "fixed" | "unit"; // "fixed" = pacote fechado da peça, "unit" = por mossa
+  validated?: boolean;
   contracted: boolean; // true = orçado/reparo contratado; false = dano pré-existente (Checklist de Entrada)
   estimatedAmount?: number | string | null;
   photoStoragePath?: string | null;
   notes?: string | null;
 }
 
+export interface ValidatedPartSummary {
+  carPartCode: string;
+  partLabel: string;
+  damageType: string;
+  dentCount: number;
+  dentSize?: string | null;
+  dentSizeLabel?: string;
+  partMaterial?: string | null;
+  materialTag?: string;
+  materialLabel?: string;
+  pricingMode: "fixed" | "unit";
+  estimatedAmount?: number;
+  notes?: string;
+}
+
 interface VehicleBlueprintProps {
   damagePoints: DamagePointData[];
   onChange?: (points: DamagePointData[]) => void;
+  onValidatePart?: (summary: ValidatedPartSummary) => void;
   readOnly?: boolean;
   className?: string;
   initialBodyType?: VehicleBodyType;
@@ -72,7 +114,32 @@ export const DAMAGE_TYPES: { code: string; label: string }[] = [
   { code: "crease", label: "Vinco" },
   { code: "scratch", label: "Risco / Arranhão" },
   { code: "paint_damage", label: "Dano de Pintura" },
+  { code: "replace", label: "Substituição da Peça" },
   { code: "crack", label: "Trinca / Quebra" },
+];
+
+export interface PartMaterialOption {
+  code: string;
+  label: string;
+  tag: string;
+  badgeClass: string;
+  markupPct?: number;
+}
+
+export const PART_MATERIALS: PartMaterialOption[] = [
+  { code: "steel", label: "Aço (acier)", tag: "ACIER", badgeClass: "bg-slate-700/60 text-slate-200 border-slate-600" },
+  { code: "aluminum", label: "Alumínio (ALU)", tag: "ALU", badgeClass: "bg-cyan-900/60 text-cyan-200 border-cyan-600", markupPct: 25 },
+  { code: "plastic", label: "Plástico (plastique)", tag: "PLASTIQUE", badgeClass: "bg-emerald-900/60 text-emerald-200 border-emerald-600" },
+  { code: "carbon", label: "Fibra de carbono / compósito (carbone)", tag: "CARBONE", badgeClass: "bg-purple-900/60 text-purple-200 border-purple-600" },
+  { code: "other", label: "Outro material (autre)", tag: "AUTRE", badgeClass: "bg-amber-900/60 text-amber-200 border-amber-600" },
+];
+
+export const DENT_SIZES = [
+  { code: "1", label: "Nível 1 (< 2cm / Moeda 10c)", shortLabel: "< 2cm" },
+  { code: "2", label: "Nível 2 (2 - 3cm / Moeda 2€)", shortLabel: "2-3cm" },
+  { code: "3", label: "Nível 3 (3 - 5cm / Bola de Golfe)", shortLabel: "3-5cm" },
+  { code: "4", label: "Nível 4 (5 - 8cm / Bola de Tênis)", shortLabel: "5-8cm" },
+  { code: "5", label: "Nível 5 (> 8cm / Severo)", shortLabel: "> 8cm" },
 ];
 
 const BODY_TYPES: { code: VehicleBodyType; label: string }[] = [
@@ -167,6 +234,7 @@ function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft =
 export function VehicleBlueprint5Views({
   damagePoints,
   onChange,
+  onValidatePart,
   readOnly = false,
   className,
   initialBodyType = "sedan",
@@ -177,6 +245,7 @@ export function VehicleBlueprint5Views({
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [isCadTheme, setIsCadTheme] = useState<boolean>(true); // CAD Dark vs Ficha Clara
   const [hoveredPart, setHoveredPart] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (initialBodyType && initialBodyType !== bodyType) {
@@ -208,7 +277,7 @@ export function VehicleBlueprint5Views({
     setShowBodyTypeConfirm(false);
   };
 
-  // Clique de alta precisão com matriz inversa SVG (independente de aspect ratio da tela)
+  // Clique de alta precisão com matriz inversa SVG
   const handleSvgClick = (
     view: VehicleViewType,
     e: React.MouseEvent<SVGSVGElement>,
@@ -227,7 +296,7 @@ export function VehicleBlueprint5Views({
     pt.y = e.clientY;
     const svgP = pt.matrixTransform(ctm.inverse());
 
-    // Bounding clamp para garantir que permaneça na estampa da peça
+    // Bounding clamp para garantir permanência na estampa da peça
     const clampedX = Math.max(0, Math.min(viewW, svgP.x));
     const clampedY = Math.max(0, Math.min(viewH, svgP.y));
 
@@ -236,6 +305,10 @@ export function VehicleBlueprint5Views({
 
     const detectedCode = detectCarPart(view, coordX, coordY, facingLeft);
 
+    // Herda material já definido para essa mesma peça em outros pontos (Abordagem A: Por Peça)
+    const existingPointForPart = damagePoints.find((p) => p.carPartCode === detectedCode && p.partMaterial);
+    const inheritedMaterial = existingPointForPart?.partMaterial || "steel";
+
     const newPoint: DamagePointData = {
       view,
       coordX,
@@ -243,6 +316,10 @@ export function VehicleBlueprint5Views({
       carPartCode: detectedCode,
       damageType: "hail",
       dentCount: 1,
+      dentSize: "2",
+      partMaterial: inheritedMaterial,
+      pricingMode: "fixed",
+      validated: false,
       contracted: true,
       estimatedAmount: 0,
       notes: "",
@@ -287,8 +364,23 @@ export function VehicleBlueprint5Views({
 
   const updateSelectedPoint = (patch: Partial<DamagePointData>) => {
     if (selectedPointIndex === null || !onChange) return;
-    const nextPoints = [...damagePoints];
-    nextPoints[selectedPointIndex] = { ...nextPoints[selectedPointIndex], ...patch };
+    const current = damagePoints[selectedPointIndex];
+    if (!current) return;
+
+    let nextPoints = [...damagePoints];
+
+    // Se o patch altera o material da peça, atualiza todos os pontos dessa mesma peça (Abordagem A: Por Peça)
+    if (patch.partMaterial && patch.partMaterial !== current.partMaterial) {
+      const targetPart = patch.carPartCode || current.carPartCode;
+      nextPoints = nextPoints.map((p, idx) =>
+        idx === selectedPointIndex || p.carPartCode === targetPart
+          ? { ...p, partMaterial: patch.partMaterial }
+          : p
+      );
+    } else {
+      nextPoints[selectedPointIndex] = { ...current, ...patch };
+    }
+
     onChange(nextPoints);
   };
 
@@ -299,14 +391,141 @@ export function VehicleBlueprint5Views({
     setSelectedPointIndex(null);
   };
 
+  const removePiece = (carPartCode: string) => {
+    if (readOnly || !onChange) return;
+    const nextPoints = damagePoints.filter((p) => p.carPartCode !== carPartCode);
+    onChange(nextPoints);
+    setSelectedPointIndex(null);
+  };
+
   const selectedPoint = selectedPointIndex !== null ? damagePoints[selectedPointIndex] : null;
+
+  // Multiplicador rápido de mossas (ex: para peças divididas em setores como teto)
+  const applyMultiplier = (mult: number) => {
+    if (!selectedPoint || !onChange) return;
+    const base = Number(selectedPoint.dentCount) || 1;
+    const nextCount = Math.max(1, Math.round(base * mult));
+    updateSelectedPoint({ dentCount: nextCount });
+  };
+
+  // Validação da peça e despacho para sincronização com Serviços do orçamento
+  const handleValidatePiece = (partCode?: string) => {
+    if (!onChange) return;
+    const targetCode = partCode || selectedPoint?.carPartCode;
+    if (!targetCode) return;
+
+    const partPoints = damagePoints.filter((p) => p.carPartCode === targetCode);
+    if (partPoints.length === 0) return;
+
+    const totalCount = partPoints.reduce((acc, p) => acc + (Number(p.dentCount) || 1), 0);
+    const referencePoint = partPoints[0];
+    const matCode = referencePoint.partMaterial || "steel";
+    const matObj = PART_MATERIALS.find((m) => m.code === matCode) || PART_MATERIALS[0];
+    const partObj = CAR_PARTS.find((p) => p.code === targetCode);
+    const partLabel = partObj?.label || targetCode;
+    const sizeObj = DENT_SIZES.find((s) => s.code === referencePoint.dentSize);
+
+    // Marca todos os pontos da peça como validados
+    const nextPoints = damagePoints.map((p) =>
+      p.carPartCode === targetCode ? { ...p, validated: true } : p
+    );
+    onChange(nextPoints);
+
+    // Notifica callback de vínculo comercial
+    if (onValidatePart) {
+      onValidatePart({
+        carPartCode: targetCode,
+        partLabel,
+        damageType: referencePoint.damageType,
+        dentCount: totalCount,
+        dentSize: referencePoint.dentSize || "2",
+        dentSizeLabel: sizeObj?.shortLabel,
+        partMaterial: matCode,
+        materialTag: matObj.tag,
+        materialLabel: matObj.label,
+        pricingMode: referencePoint.pricingMode || "fixed",
+        estimatedAmount: Number(referencePoint.estimatedAmount) || 0,
+        notes: referencePoint.notes || undefined,
+      });
+    }
+  };
+
+  // Upload de foto da avaria
+  const handlePhotoUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    updateSelectedPoint({ photoStoragePath: url });
+  };
+
+  // Agrupamento consolidado por peça da carroceria (elimina poluição de dezenas de cards individuais)
+  const piecesSummary = useMemo(() => {
+    const map = new Map<string, {
+      carPartCode: string;
+      partLabel: string;
+      points: (DamagePointData & { originalIndex: number })[];
+      totalDents: number;
+      materialCode: string;
+      materialObj: (typeof PART_MATERIALS)[number];
+      damageTypes: string[];
+      hasContracted: boolean;
+      isValidated: boolean;
+      pricingMode: "fixed" | "unit";
+      estimatedTotal: number;
+      dentSizeLabel?: string;
+    }>();
+
+    damagePoints.forEach((pt, idx) => {
+      const partCode = pt.carPartCode || "general";
+      const partLabel = CAR_PARTS.find((p) => p.code === partCode)?.label || partCode;
+      const count = Number(pt.dentCount || 1);
+      const matCode = pt.partMaterial || "steel";
+      const matObj = PART_MATERIALS.find((m) => m.code === matCode) || PART_MATERIALS[0];
+      const pMode = pt.pricingMode || "fixed";
+      const estAmt = Number(pt.estimatedAmount || 0);
+      const sizeObj = DENT_SIZES.find((s) => s.code === pt.dentSize);
+
+      if (!map.has(partCode)) {
+        map.set(partCode, {
+          carPartCode: partCode,
+          partLabel,
+          points: [{ ...pt, originalIndex: idx }],
+          totalDents: count,
+          materialCode: matCode,
+          materialObj: matObj,
+          damageTypes: [pt.damageType],
+          hasContracted: Boolean(pt.contracted),
+          isValidated: Boolean(pt.validated),
+          pricingMode: pMode,
+          estimatedTotal: estAmt,
+          dentSizeLabel: sizeObj?.shortLabel,
+        });
+      } else {
+        const entry = map.get(partCode)!;
+        entry.points.push({ ...pt, originalIndex: idx });
+        entry.totalDents += count;
+        if (!entry.damageTypes.includes(pt.damageType)) {
+          entry.damageTypes.push(pt.damageType);
+        }
+        if (pt.contracted) entry.hasContracted = true;
+        if (pt.validated) entry.isValidated = true;
+        entry.estimatedTotal += estAmt;
+      }
+    });
+
+    return Array.from(map.values());
+  }, [damagePoints]);
 
   const getAssetPath = (viewName: string) => {
     const themePrefix = isCadTheme ? "cad" : "light";
     return `/blueprints/${bodyType}/${themePrefix}_${viewName}.png`;
   };
 
-  // Renderiza uma vista técnica com dimensões fixas no viewBox, eliminando distorções de escala
+  // Renderiza uma vista técnica com dimensões fixas no viewBox
   const renderTechnicalViewBox = (
     view: VehicleViewType,
     title: string,
@@ -320,7 +539,6 @@ export function VehicleBlueprint5Views({
       .map((p, idx) => ({ ...p, originalIndex: idx }))
       .filter((p) => p.view === view);
 
-    // Raio proporcional compacto para precisão pericial (sem círculos gigantes)
     const baseRadius = Math.max(7, Math.min(viewDims.width, viewDims.height) * 0.032);
 
     return (
@@ -389,12 +607,13 @@ export function VehicleBlueprint5Views({
               }}
             />
 
-            {/* Camada 3: Marcadores Periciais Compactos e Perfeitamente Circulares */}
+            {/* Camada 3: Marcadores Periciais Compactos */}
             {viewPoints.map((pt) => {
               const isSelected = selectedPointIndex === pt.originalIndex;
               const markerX = (pt.coordX / 100) * viewDims.width;
               const markerY = (pt.coordY / 100) * viewDims.height;
               const r = baseRadius;
+              const isAlu = pt.partMaterial === "aluminum";
 
               return (
                 <g
@@ -409,7 +628,7 @@ export function VehicleBlueprint5Views({
                   {/* Anel indicador se selecionado */}
                   {isSelected && (
                     <circle
-                      r={r * 1.5}
+                      r={r * 1.6}
                       fill="none"
                       stroke={pt.contracted ? "#38bdf8" : "#fbbf24"}
                       strokeWidth="2"
@@ -420,12 +639,12 @@ export function VehicleBlueprint5Views({
                   {/* Sombra de contraste */}
                   <circle r={r + 1} fill="rgba(0,0,0,0.7)" />
 
-                  {/* Ponto colorido */}
+                  {/* Ponto colorido (com destaque especial ciano caso seja Alumínio) */}
                   <circle
                     r={r}
-                    fill={pt.contracted ? "#2563eb" : "#d97706"}
-                    stroke={pt.contracted ? "#67e8f9" : "#fde68a"}
-                    strokeWidth="1.5"
+                    fill={pt.contracted ? (isAlu ? "#0284c7" : "#2563eb") : "#d97706"}
+                    stroke={pt.contracted ? (isAlu ? "#38bdf8" : "#93c5fd") : "#fde68a"}
+                    strokeWidth={isAlu ? "2" : "1.5"}
                   />
 
                   {/* Número identificador */}
@@ -448,8 +667,18 @@ export function VehicleBlueprint5Views({
     );
   };
 
+  const selectedMaterialObj = PART_MATERIALS.find((m) => m.code === (selectedPoint?.partMaterial || "steel")) || PART_MATERIALS[0];
+
   return (
     <div className={cn("flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-sm", className)}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handlePhotoFileChange}
+      />
+
       {/* BARRA SUPERIOR DE CONTROLE PERICIAL */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
         {/* Identificação e Contadores */}
@@ -524,11 +753,11 @@ export function VehicleBlueprint5Views({
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-1.5">
             <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-600 border border-cyan-300 text-[9px] font-bold text-white shadow" />
-            <span className="font-medium text-foreground">Serviço Contratado (Orçado / Executar)</span>
+            <span className="font-medium text-foreground">Serviço Contratado (Orçado)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-600 border border-amber-300 text-[9px] font-bold text-white shadow" />
-            <span className="font-medium text-foreground">Dano Pré-existente (Checklist Entrada / Isenção)</span>
+            <span className="font-medium text-foreground">Dano Pré-existente (Checklist Entrada)</span>
           </div>
         </div>
 
@@ -540,34 +769,27 @@ export function VehicleBlueprint5Views({
           </div>
         ) : (
           <div className="text-muted-foreground text-[11px] italic">
-            Clique na imagem para plotar um ponto de avaria com vinculação de peça.
+            Clique na imagem para plotar avaria com detecção pericial de peça.
           </div>
         )}
       </div>
 
-      {/* ÁREA GRÁFICA DO BLUEPRINT: MODO PRANCHA GERAL OU MODO VISTA FOCAL */}
+      {/* ÁREA GRÁFICA DO BLUEPRINT */}
       {activeView === "all" ? (
-        /* PRANCHA COMPLETA 5 VISTAS */
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-          {/* Coluna Esquerda: Frente e Traseira */}
           <div className="md:col-span-4 flex flex-col gap-3">
             {renderTechnicalViewBox("front", "1. Vista Frontal", "front", "h-52 md:h-56", false)}
             {renderTechnicalViewBox("rear", "2. Vista Traseira", "rear", "h-52 md:h-56", false)}
           </div>
-
-          {/* Coluna Central: Vista Superior Verticalizada */}
           <div className="md:col-span-4">
             {renderTechnicalViewBox("top", "3. Vista Superior (Capô, Teto, Tampa)", "top", "h-96 md:h-[464px]", false)}
           </div>
-
-          {/* Coluna Direita: Laterais Esquerda e Direita */}
           <div className="md:col-span-4 flex flex-col gap-3">
             {renderTechnicalViewBox("left", "4. Lateral Esquerda (Motorista)", "left", "h-52 md:h-56", true)}
             {renderTechnicalViewBox("right", "5. Lateral Direita (Passageiro)", "right", "h-52 md:h-56", false)}
           </div>
         </div>
       ) : (
-        /* MODO VISTA FOCAL AMPLIADA (ZOOM PERICIAL) */
         <div className="flex flex-col gap-2">
           {activeView === "front" && renderTechnicalViewBox("front", "Vista Frontal Ampliada", "front", "h-[450px]", false)}
           {activeView === "rear" && renderTechnicalViewBox("rear", "Vista Traseira Ampliada", "rear", "h-[450px]", false)}
@@ -582,10 +804,10 @@ export function VehicleBlueprint5Views({
         </div>
       )}
 
-      {/* PAINEL DE INSPEÇÃO: DETALHES DO PONTO SELECIONADO */}
+      {/* PAINEL DE INSPEÇÃO & EDIÇÃO: DETALHES DO PONTO / PEÇA SELECIONADA */}
       {selectedPoint && !readOnly ? (
-        <div className="rounded-xl border border-cyan-800/80 bg-slate-900/60 p-4 shadow-md backdrop-blur">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+        <div className="rounded-xl border border-cyan-800/80 bg-slate-900/80 p-4 shadow-lg backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-2 mb-3 gap-2">
             <div className="flex items-center gap-2">
               <span
                 className={cn(
@@ -596,29 +818,42 @@ export function VehicleBlueprint5Views({
                 {(selectedPointIndex ?? 0) + 1}
               </span>
               <span className="font-semibold text-sm text-foreground">
-                Editar Ponto de Avaria #{ (selectedPointIndex ?? 0) + 1 }
+                Editar Ponto #{(selectedPointIndex ?? 0) + 1} — {CAR_PARTS.find((p) => p.code === selectedPoint.carPartCode)?.label}
               </span>
-              <Badge variant="outline" className="capitalize text-xs font-mono">
-                Vista: {selectedPoint.view} ({selectedPoint.coordX}%, {selectedPoint.coordY}%)
+              <Badge className={cn("text-[10px] uppercase font-bold", selectedMaterialObj.badgeClass)}>
+                {selectedMaterialObj.tag}
               </Badge>
+              {selectedPoint.validated && (
+                <Badge className="bg-emerald-950/80 text-emerald-300 border-emerald-600 text-[10px] gap-1">
+                  <CheckCheck className="h-3 w-3" /> Validado
+                </Badge>
+              )}
             </div>
-            <Button
-              size="sm"
-              variant="destructive"
-              className="h-7 px-2.5 text-xs gap-1"
-              onClick={removeSelectedPoint}
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Remover Ponto
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-7 px-2.5 text-xs gap-1"
+                onClick={removeSelectedPoint}
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Remover Marcador
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
             {/* Peça Afetada */}
             <div className="space-y-1">
-              <Label className="text-xs">Peça da Carroceria</Label>
+              <Label className="text-xs font-medium">Peça da Carroceria</Label>
               <Select
                 value={selectedPoint.carPartCode}
-                onValueChange={(val) => updateSelectedPoint({ carPartCode: val })}
+                onValueChange={(val) => {
+                  const existingForPart = damagePoints.find((p) => p.carPartCode === val && p.partMaterial);
+                  updateSelectedPoint({
+                    carPartCode: val,
+                    partMaterial: existingForPart?.partMaterial || selectedPoint.partMaterial || "steel",
+                  });
+                }}
               >
                 <SelectTrigger className="h-8">
                   <SelectValue />
@@ -633,9 +868,46 @@ export function VehicleBlueprint5Views({
               </Select>
             </div>
 
+            {/* TIPO DE MATERIAL (Requisito Explícito do Alex) */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-cyan-300 flex items-center gap-1">
+                  <Layers className="h-3.5 w-3.5 text-cyan-400" />
+                  Tipo de Material
+                </Label>
+                {selectedMaterialObj.markupPct && (
+                  <span className="text-[10px] text-amber-400 font-bold">
+                    +{selectedMaterialObj.markupPct}% PDR Sugerido
+                  </span>
+                )}
+              </div>
+              <Select
+                value={selectedPoint.partMaterial || "steel"}
+                onValueChange={(val) => updateSelectedPoint({ partMaterial: val })}
+              >
+                <SelectTrigger className="h-8 border-cyan-800/80 bg-slate-950/60 font-medium">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PART_MATERIALS.map((m) => (
+                    <SelectItem key={m.code} value={m.code}>
+                      <span className="flex items-center justify-between gap-2 w-full">
+                        <span>{m.label}</span>
+                        {m.markupPct ? (
+                          <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-600 text-amber-400">
+                            +{m.markupPct}% Sugestão
+                          </Badge>
+                        ) : null}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Tipo de Dano */}
             <div className="space-y-1">
-              <Label className="text-xs">Tipo de Dano / Avaria</Label>
+              <Label className="text-xs font-medium">Tipo de Dano / Avaria</Label>
               <Select
                 value={selectedPoint.damageType}
                 onValueChange={(val) => updateSelectedPoint({ damageType: val })}
@@ -653,22 +925,108 @@ export function VehicleBlueprint5Views({
               </Select>
             </div>
 
-            {/* Qtd Mossas / Severidade */}
+            {/* Diâmetro / Tamanho da Mossa (PDR) */}
             <div className="space-y-1">
-              <Label className="text-xs">Contagem de Mossas / Intensidade</Label>
+              <Label className="text-xs font-medium">Diâmetro / Tamanho Mossa</Label>
+              <Select
+                value={selectedPoint.dentSize || "2"}
+                onValueChange={(val) => updateSelectedPoint({ dentSize: val })}
+              >
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DENT_SIZES.map((ds) => (
+                    <SelectItem key={ds.code} value={ds.code}>
+                      {ds.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Contagem de Mossas com Multiplicadores Rápidos */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium">Qtd. Mossas</Label>
+                <span className="text-[10px] text-muted-foreground">Multiplicadores:</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Input
+                  type="number"
+                  min={1}
+                  max={5000}
+                  className="h-8 w-20 text-center font-bold"
+                  value={selectedPoint.dentCount ?? 1}
+                  onChange={(e) => updateSelectedPoint({ dentCount: parseInt(e.target.value) || 1 })}
+                />
+                <div className="flex items-center gap-0.5 bg-slate-950/80 p-0.5 rounded border border-slate-800">
+                  {[2, 4, 6, 8, 12].map((m) => (
+                    <Button
+                      key={m}
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-1.5 text-[10px] font-mono text-cyan-400 hover:bg-cyan-950"
+                      onClick={() => applyMultiplier(m)}
+                      title={`Multiplicar por ${m} (peça subdividida)`}
+                    >
+                      x{m}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Modo de Precificação: Fixo vs Unitário */}
+            <div className="space-y-1">
+              <Label className="text-xs font-medium">Modo de Precificação</Label>
+              <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded border border-slate-800 h-8">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedPoint.pricingMode === "fixed" ? "default" : "ghost"}
+                  className={cn(
+                    "h-6 flex-1 text-[11px] font-medium",
+                    selectedPoint.pricingMode === "fixed" && "bg-cyan-600 text-white"
+                  )}
+                  onClick={() => updateSelectedPoint({ pricingMode: "fixed" })}
+                >
+                  Fixo (Peça)
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedPoint.pricingMode === "unit" ? "default" : "ghost"}
+                  className={cn(
+                    "h-6 flex-1 text-[11px] font-medium",
+                    selectedPoint.pricingMode === "unit" && "bg-cyan-600 text-white"
+                  )}
+                  onClick={() => updateSelectedPoint({ pricingMode: "unit" })}
+                >
+                  Por Mossa
+                </Button>
+              </div>
+            </div>
+
+            {/* Valor Estimado / Negociado */}
+            <div className="space-y-1">
+              <Label className="text-xs font-medium">
+                {selectedPoint.pricingMode === "fixed" ? "Valor do Pacote (€)" : "Valor Unitário / Mossa (€)"}
+              </Label>
               <Input
                 type="number"
-                min={1}
-                max={500}
+                step="0.01"
                 className="h-8"
-                value={selectedPoint.dentCount ?? 1}
-                onChange={(e) => updateSelectedPoint({ dentCount: parseInt(e.target.value) || 1 })}
+                placeholder="Ex: 350.00"
+                value={selectedPoint.estimatedAmount ?? ""}
+                onChange={(e) => updateSelectedPoint({ estimatedAmount: e.target.value })}
               />
             </div>
 
-            {/* Classificação Jurídica: Contratado vs Pré-existente */}
+            {/* Enquadramento Pericial */}
             <div className="space-y-1">
-              <Label className="text-xs">Enquadramento Pericial</Label>
+              <Label className="text-xs font-medium">Classificação Pericial</Label>
               <Select
                 value={selectedPoint.contracted ? "contracted" : "pre_existing"}
                 onValueChange={(val) => updateSelectedPoint({ contracted: val === "contracted" })}
@@ -683,89 +1041,169 @@ export function VehicleBlueprint5Views({
               </Select>
             </div>
 
-            {/* Anotação Técnica */}
-            <div className="md:col-span-3 space-y-1">
-              <Label className="text-xs">Parecer Técnico / Anotação da Avaria</Label>
+            {/* Parecer Técnico */}
+            <div className="md:col-span-2 space-y-1">
+              <Label className="text-xs font-medium">Parecer Técnico / Anotação da Peça</Label>
               <Input
                 className="h-8"
-                placeholder="Ex.: Mossas concentradas na nervura central, sem quebra de verniz."
+                placeholder="Ex.: Mossas concentradas na nervura central, sem estiramento."
                 value={selectedPoint.notes ?? ""}
                 onChange={(e) => updateSelectedPoint({ notes: e.target.value })}
               />
             </div>
 
-            {/* Registro de Foto */}
+            {/* Evidência Fotográfica com Câmera Funcional */}
             <div className="space-y-1">
-              <Label className="text-xs">Evidência Fotográfica</Label>
+              <Label className="text-xs font-medium">Evidência Fotográfica</Label>
               <div className="flex items-center gap-1.5">
                 <Input
                   className="h-8 text-xs font-mono"
-                  placeholder="URL ou código da foto..."
+                  placeholder="URL ou arquivo..."
                   value={selectedPoint.photoStoragePath ?? ""}
                   onChange={(e) => updateSelectedPoint({ photoStoragePath: e.target.value })}
                 />
-                <Button size="sm" variant="outline" className="h-8 px-2" title="Anexar Foto">
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  className="h-8 px-2 border-slate-700 hover:text-cyan-400"
+                  title="Tirar foto ou carregar imagem da avaria"
+                  onClick={handlePhotoUploadClick}
+                >
                   <Camera className="h-3.5 w-3.5" />
                 </Button>
               </div>
+            </div>
+
+            {/* BOTÃO VALIDAR PEÇA E VINCULAR AO ORÇAMENTO */}
+            <div className="flex items-end">
+              <Button
+                type="button"
+                className="h-8 w-full gap-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold shadow"
+                onClick={() => handleValidatePiece()}
+              >
+                <CheckCheck className="h-4 w-4" />
+                Validar Peça e Vincular ao Orçamento
+              </Button>
             </div>
           </div>
         </div>
       ) : null}
 
-      {/* TABELA / DOSSIÊ DOS PONTOS DE AVARIA CADASTRADOS */}
-      {damagePoints.length > 0 && (
+      {/* CONSOLIDADO DE DANOS POR PEÇA (Substitui a lista desordenada de 50 cards azuis) */}
+      {piecesSummary.length > 0 && (
         <div className="rounded-lg border bg-muted/20 p-3">
-          <div className="flex items-center justify-between pb-2 mb-2 border-b">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Dossiê de Danos Registrados ({damagePoints.length})
-            </span>
+          <div className="flex flex-wrap items-center justify-between pb-2 mb-2 border-b gap-2">
+            <div className="flex items-center gap-2">
+              <Car className="h-4 w-4 text-cyan-400" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Dossiê Consolidado por Peça ({piecesSummary.length} {piecesSummary.length === 1 ? "peça" : "peças"})
+              </span>
+            </div>
             <span className="text-[11px] text-muted-foreground">
-              Clique em um item para destacar e editar
+              Selecione para ajustar detalhes ou clique em Validar para transferir aos itens financeiros
             </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {damagePoints.map((pt, idx) => {
-              const partName = CAR_PARTS.find((p) => p.code === pt.carPartCode)?.label || pt.carPartCode;
-              const typeName = DAMAGE_TYPES.find((d) => d.code === pt.damageType)?.label || pt.damageType;
-              const isSelected = selectedPointIndex === idx;
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {piecesSummary.map((piece) => {
+              const isSelected = selectedPoint?.carPartCode === piece.carPartCode;
 
               return (
                 <div
-                  key={pt.id || idx}
-                  onClick={() => setSelectedPointIndex(idx)}
+                  key={piece.carPartCode}
+                  onClick={() => {
+                    const firstIdx = piece.points[0]?.originalIndex;
+                    if (firstIdx !== undefined) setSelectedPointIndex(firstIdx);
+                  }}
                   className={cn(
-                    "flex items-center justify-between gap-2 p-2 rounded border text-xs cursor-pointer transition-all",
+                    "flex flex-col gap-2 p-2.5 rounded-lg border text-xs cursor-pointer transition-all",
                     isSelected
-                      ? "bg-cyan-950/40 border-cyan-500 shadow-sm"
-                      : "bg-background/80 hover:bg-muted border-slate-800/60"
+                      ? "bg-cyan-950/40 border-cyan-500 shadow-md ring-1 ring-cyan-500/50"
+                      : "bg-background/80 hover:bg-muted/80 border-slate-800/80"
                   )}
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className={cn(
-                        "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white",
-                        pt.contracted ? "bg-blue-600" : "bg-amber-600"
-                      )}
-                    >
-                      {idx + 1}
-                    </span>
-                    <div className="flex flex-col min-w-0">
-                      <span className="font-medium truncate text-foreground">{partName}</span>
-                      <span className="text-[11px] text-muted-foreground truncate">
-                        {typeName} {pt.dentCount && pt.dentCount > 1 ? `(${pt.dentCount} un.)` : ""}
+                  {/* Topo do Card da Peça */}
+                  <div className="flex items-start justify-between gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-semibold text-foreground text-sm truncate">
+                        {piece.partLabel}
                       </span>
                     </div>
+                    <Badge className={cn("text-[9px] px-1.5 py-0 uppercase font-bold shrink-0", piece.materialObj.badgeClass)}>
+                      {piece.materialObj.tag}
+                    </Badge>
                   </div>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "shrink-0 text-[10px] px-1.5 py-0 h-4",
-                      pt.contracted ? "border-blue-700 text-blue-400" : "border-amber-700 text-amber-400"
+
+                  {/* Detalhes Técnicos e Contagens */}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                    <span className="font-medium text-cyan-300">
+                      {piece.totalDents} {piece.totalDents === 1 ? "mossa" : "mossas"}
+                    </span>
+                    {piece.dentSizeLabel && (
+                      <>
+                        <span className="text-slate-600">•</span>
+                        <span>Tam: {piece.dentSizeLabel}</span>
+                      </>
                     )}
-                  >
-                    {pt.contracted ? "Orçado" : "Checklist"}
-                  </Badge>
+                    <span className="text-slate-600">•</span>
+                    <span className="capitalize">{DAMAGE_TYPES.find((d) => d.code === piece.damageTypes[0])?.label || piece.damageTypes[0]}</span>
+                  </div>
+
+                  {/* Rodapé com Status e Ações */}
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 mt-0.5">
+                    <div className="flex items-center gap-1">
+                      {piece.isValidated ? (
+                        <Badge className="bg-emerald-950/80 text-emerald-300 border-emerald-600 text-[9px] px-1.5 py-0 gap-0.5">
+                          <CheckCheck className="h-2.5 w-2.5" /> Validado
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-amber-400 border-amber-700/60 text-[9px] px-1.5 py-0">
+                          Pendente
+                        </Badge>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[9px] px-1.5 py-0",
+                          piece.hasContracted ? "border-blue-700 text-blue-400" : "border-amber-700 text-amber-400"
+                        )}
+                      >
+                        {piece.hasContracted ? "Orçado" : "Checklist"}
+                      </Badge>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      {!piece.isValidated && (
+                        <Button
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                          className="h-6 px-1.5 text-[10px] text-cyan-400 hover:bg-cyan-950/80 gap-1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleValidatePiece(piece.carPartCode);
+                          }}
+                          title="Validar e sincronizar com itens do orçamento"
+                        >
+                          <CheckCheck className="h-3 w-3" /> Validar
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removePiece(piece.carPartCode);
+                        }}
+                        title="Remover todos os pontos desta peça"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               );
             })}
@@ -785,8 +1223,7 @@ export function VehicleBlueprint5Views({
               Este veículo já possui <strong>{damagePoints.length} marcadores de danos</strong> registrados.
               Ao alterar a carroceria para{" "}
               <strong>{BODY_TYPES.find((b) => b.code === pendingBodyType)?.label}</strong>, o histórico pericial e
-              as peças nominais vinculadas serão preservados, mas as coordenadas gráficas anteriores podem necessitar
-              de reposicionamento no novo diagrama.
+              as peças nominais vinculadas serão preservados.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2 sm:justify-end">

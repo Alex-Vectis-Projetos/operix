@@ -1,8 +1,8 @@
-import { VehicleBlueprint5Views, type DamagePointData } from "./VehicleBlueprint5Views";
+import { VehicleBlueprint5Views, type DamagePointData, type ValidatedPartSummary } from "./VehicleBlueprint5Views";
 import { Eye } from "lucide-react";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto } from "@/lib/apiBudgets";
+import { getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto, markBudgetSent } from "@/lib/apiBudgets";
 import {
   Dialog,
   DialogContent,
@@ -46,7 +46,7 @@ import {
   Wrench, Palette, Hammer, ArrowLeft, Box as BoxIcon, MapPin, ShieldCheck,
   Boxes, ChevronDown, Check as CheckIcon, Search as SearchIcon, Lock as LockIcon,
   CheckCircle2, XCircle, Eraser, HandPlatter, Send, AlertTriangle, Scan as ScanIcon,
-  FileDown, FileText, Users, Loader2,
+  FileDown, FileText, Users, Loader2, RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { COUNTRIES } from "@/lib/countries";
@@ -62,6 +62,7 @@ export type BudgetPartLine = {
   description: string;
   quantity: number;
   unit_price: number;
+  pricing_mode?: "fixed" | "unit";
 };
 
 export type BudgetServiceLine = {
@@ -72,6 +73,7 @@ export type BudgetServiceLine = {
   description: string;
   quantity: number;
   unit_price: number;
+  pricing_mode?: "fixed" | "unit";
 };
 
 export const BUDGET_TYPE_TO_CATEGORIES: Record<string, string[]> = {
@@ -1582,12 +1584,14 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     const parts = form.parts.reduce((sum, p) => {
       const q = Math.max(0, Number(p.quantity) || 0);
       const u = Math.max(0, Number(p.unit_price) || 0);
-      return sum + q * u;
+      const isFixed = (p as any).pricing_mode === "fixed" || (p as any).pricingMode === "fixed";
+      return sum + (isFixed ? u : q * u);
     }, 0);
     const services = form.services.reduce((sum, s) => {
       const q = Math.max(0, Number(s.quantity) || 0);
       const u = Math.max(0, Number(s.unit_price) || 0);
-      return sum + q * u;
+      const isFixed = (s as any).pricing_mode === "fixed" || (s as any).pricingMode === "fixed";
+      return sum + (isFixed ? u : q * u);
     }, 0);
     const labor = form.labor.reduce((sum, l) => {
       const h = Math.max(0, Number(l.hours) || 0);
@@ -2159,17 +2163,128 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     setSendClientDialogOpen(true);
   };
 
-  const triggerBudgetBlobDownload = async (): Promise<boolean> => {
-    if (!form.id || form.id.startsWith("local-")) {
-      toast.warning(langDisplay === "fr" ? "Enregistrez le devis avant de générer le PDF." : "Salve o orçamento antes de gerar o PDF.");
-      return false;
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+
+  const handleValidatePartFromBlueprint = (summary: ValidatedPartSummary) => {
+    const isReplace = summary.damageType === "replace" || summary.damageType === "crack";
+    const isPaint = summary.damageType === "paint_damage" || summary.damageType === "scratch";
+    const materialTag = summary.materialTag ? `[${summary.materialTag}]` : "";
+    const sizeText = summary.dentSizeLabel ? ` (${summary.dentSizeLabel})` : "";
+
+    if (isReplace) {
+      const desc = `Substituição - ${summary.partLabel} ${materialTag}`.trim();
+      setFormSafe((prev) => {
+        const existingIdx = prev.parts.findIndex((p) => p.description.includes(summary.partLabel));
+        const newLine: BudgetPartLine = {
+          id: uid(),
+          description: desc,
+          quantity: 1,
+          unit_price: summary.estimatedAmount || 0,
+          pricing_mode: summary.pricingMode || "fixed",
+        };
+        if (existingIdx >= 0) {
+          const nextParts = [...prev.parts];
+          nextParts[existingIdx] = { ...nextParts[existingIdx], ...newLine, id: nextParts[existingIdx].id };
+          return { ...prev, parts: nextParts, updated_at: new Date().toISOString() };
+        }
+        return {
+          ...prev,
+          parts: prev.parts.some((p) => !p.description && !p.unit_price)
+            ? prev.parts.map((p, idx) => (idx === 0 && !p.description ? newLine : p))
+            : [...prev.parts, newLine],
+          updated_at: new Date().toISOString(),
+        };
+      });
+      toast.success(`Peça "${summary.partLabel}" vinculada à tabela de Peças/Materiais.`);
+    } else {
+      const prefix = isPaint ? "Pintura" : "PDR";
+      const desc = isPaint
+        ? `${prefix} - ${summary.partLabel} ${materialTag}`.trim()
+        : `${prefix} - ${summary.partLabel} ${materialTag} — ${summary.dentCount} ${summary.dentCount === 1 ? "mossa" : "mossas"}${sizeText}`.trim();
+
+      const isFixed = summary.pricingMode === "fixed";
+      const newLine: BudgetServiceLine = {
+        id: uid(),
+        description: desc,
+        quantity: isFixed ? 1 : summary.dentCount,
+        unit_price: summary.estimatedAmount || 0,
+        pricing_mode: summary.pricingMode || "fixed",
+      };
+
+      setFormSafe((prev) => {
+        const existingIdx = prev.services.findIndex((s) => s.description.includes(summary.partLabel));
+        if (existingIdx >= 0) {
+          const nextServices = [...prev.services];
+          nextServices[existingIdx] = { ...nextServices[existingIdx], ...newLine, id: nextServices[existingIdx].id };
+          return { ...prev, services: nextServices, updated_at: new Date().toISOString() };
+        }
+        return {
+          ...prev,
+          services: prev.services.some((s) => !s.description && !s.unit_price)
+            ? prev.services.map((s, idx) => (idx === 0 && !s.description ? newLine : s))
+            : [...prev.services, newLine],
+          updated_at: new Date().toISOString(),
+        };
+      });
+      toast.success(`Serviço de ${prefix} para "${summary.partLabel}" vinculado ao orçamento.`);
     }
+  };
+
+  const persistCurrentState = async (closeOnFinish = false): Promise<string | null> => {
+    if (saving) return null;
+    setSaving(true);
     try {
-      const blob = await getBudgetPdf(form.id);
+      const savedRes: any = await onSave({ ...form, updated_at: new Date().toISOString() });
+      const targetId =
+        savedRes?.budget?.id ||
+        savedRes?.id ||
+        savedRes?.revision?.budgetId ||
+        form.id ||
+        initial?.id;
+
+      if (targetId && !targetId.startsWith("local-")) {
+        setFormSafe((prev) => ({ ...prev, id: targetId }));
+        try {
+          await apiRequest(`/budgets/${targetId}/inspection`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ damage_points: inspectionPoints }),
+          });
+        } catch (e) {
+          console.error("Erro ao salvar pontos de inspeção:", e);
+        }
+      }
+
+      if (closeOnFinish) {
+        toast.success(langDisplay === "fr" ? "Devis enregistré avec succès." : "Orçamento salvo com sucesso.");
+        onOpenChange(false);
+      }
+      return targetId;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao salvar orçamento.");
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const triggerBudgetBlobDownload = async (): Promise<boolean> => {
+    setIsGeneratingPdf(true);
+    try {
+      const targetId = await persistCurrentState(false);
+      if (!targetId || targetId.startsWith("local-")) {
+        toast.error(
+          langDisplay === "fr"
+            ? "Impossible d'enregistrer le devis pour générer le PDF."
+            : "Não foi possível salvar o orçamento para gerar o PDF.",
+        );
+        return false;
+      }
+      const blob = await getBudgetPdf(targetId);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Devis_${form.number || form.id}.pdf`;
+      a.download = `Devis_${form.number || targetId}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -2178,21 +2293,31 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     } catch (error: any) {
       toast.error(error?.message || (langDisplay === "fr" ? "Échec du téléchargement PDF." : "Falha ao baixar o PDF."));
       return false;
+    } finally {
+      setIsGeneratingPdf(false);
     }
   };
 
   const viewBudgetPreview = async () => {
-    if (!form.id || form.id.startsWith("local-")) {
-      toast.warning(langDisplay === "fr" ? "Enregistrez le devis avant l'aperçu." : "Salve o orçamento antes da visualização.");
-      return;
-    }
+    setIsGeneratingPdf(true);
     try {
-      const blob = await getBudgetPdf(form.id);
+      const targetId = await persistCurrentState(false);
+      if (!targetId || targetId.startsWith("local-")) {
+        toast.error(
+          langDisplay === "fr"
+            ? "Impossible d'enregistrer le devis pour l'aperçu."
+            : "Não foi possível salvar o orçamento para visualização.",
+        );
+        return;
+      }
+      const blob = await getBudgetPdf(targetId);
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank", "noopener,noreferrer");
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error: any) {
       toast.error(error?.message || (langDisplay === "fr" ? "Impossible d'ouvrir l'aperçu." : "Não foi possível abrir a visualização."));
+    } finally {
+      setIsGeneratingPdf(false);
     }
   };
 
@@ -2204,17 +2329,47 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     }
     const downloaded = await triggerBudgetBlobDownload();
     if (!downloaded) return;
-    const digits = (form.client_phone ?? "").replace(/\D/g, "");
+
+    let digits = (form.client_phone ?? "").replace(/\D/g, "");
+    if (digits.startsWith("0") && digits.length === 10) {
+      digits = "33" + digits.slice(1);
+    } else if (digits.length === 10 || digits.length === 11) {
+      if (!digits.startsWith("55")) {
+        digits = "55" + digits;
+      }
+    }
+
     const text = encodeURIComponent(
-      (langDisplay === "fr" ? "Devis n° " : "Orçamento nº ") + (form.number || "(sem número)") +
-      (langDisplay === "fr" ? " — valeur finale: " : " — valor final: ") +
+      (langDisplay === "fr" ? "Bonjour,\n\nVeuillez trouver votre devis n° " : "Olá,\n\nSegue seu orçamento nº ") +
+      (form.number || "(sem número)") +
+      (langDisplay === "fr" ? " — Montant total: " : " — Valor total: ") +
       formatMoney(totals.total, form.currency || "EUR") +
       (langDisplay === "fr"
-        ? "\n\nLe document a été téléchargé localement sur l'appareil et est prêt à être joint."
-        : "\n\nO documento foi baixado localmente no aparelho e está pronto para ser anexado."),
+        ? "\n\nLe document PDF a été téléchargé localement et est joint ci-après."
+        : "\n\nO documento PDF foi baixado e está pronto para envio."),
     );
-    const url = `https://wa.me/${digits || "0"}?text=${text}`;
+    const url = `https://wa.me/${digits}?text=${text}`;
     try { window.open(url, "_blank", "noopener,noreferrer"); } catch {}
+
+    try {
+      if (form.id && !form.id.startsWith("local-")) {
+        await markBudgetSent(form.id);
+      }
+      const updatedForm: Budget = {
+        ...form,
+        status: "sent",
+        updated_at: new Date().toISOString(),
+      };
+      setFormSafe(updatedForm);
+      qc.invalidateQueries({ queryKey: ["budgets"] });
+      toast.success(
+        langDisplay === "fr"
+          ? "Statut mis à jour : Devis envoyé via WhatsApp."
+          : "Status atualizado: Orçamento enviado via WhatsApp.",
+      );
+    } catch (e) {
+      console.error("Erro ao atualizar status após WhatsApp:", e);
+    }
   };
 
   const confirmSendByEmail = async () => {
@@ -2223,23 +2378,29 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       toast.error(langDisplay === "fr" ? "E-mail non valide" : "E-mail não cadastrado.");
       return;
     }
-    if (form.id && !form.id.startsWith("local-")) {
-      try {
-        await sendBudgetEmail(form.id, form.client_email || "");
-        toast.success(
-          langDisplay === "fr"
-            ? "Devis envoyé par e-mail avec succès."
-            : "Orçamento enviado por e-mail com sucesso.",
-        );
-        setFormSafe({ ...form, status: "sent", updated_at: new Date().toISOString() });
-        qc.invalidateQueries({ queryKey: ["budgets"] });
-        return;
-      } catch (err: any) {
-        toast.error(err?.message || (langDisplay === "fr" ? "Échec de l'envoi transactionnel." : "Falha no envio transacional do e-mail."));
-        return;
-      }
+
+    const targetId = await persistCurrentState(false);
+    if (!targetId || targetId.startsWith("local-")) {
+      toast.error(
+        langDisplay === "fr"
+          ? "Impossible d'enregistrer le devis avant l'envoi."
+          : "Não foi possível salvar o orçamento antes do envio.",
+      );
+      return;
     }
-    toast.warning(langDisplay === "fr" ? "Enregistrez le devis avant l'envoi." : "Salve o orçamento antes do envio.");
+
+    try {
+      await sendBudgetEmail(targetId, form.client_email || "");
+      toast.success(
+        langDisplay === "fr"
+          ? `Devis envoyé par e-mail avec succès à ${form.client_email}.`
+          : `Orçamento enviado por e-mail com sucesso para ${form.client_email}.`,
+      );
+      setFormSafe({ ...form, id: targetId, status: "sent", updated_at: new Date().toISOString() });
+      qc.invalidateQueries({ queryKey: ["budgets"] });
+    } catch (err: any) {
+      toast.error(err?.message || (langDisplay === "fr" ? "Échec de l'envoi transactionnel." : "Falha no envio transacional do e-mail."));
+    }
   };
 
   const downloadPDF = async () => {
@@ -2280,9 +2441,10 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     return { parts: p, services: sv, labor: l, gross, disc, net, iva, total: net + iva };
   };
 
-  const confirmRejection = () => {
+  const confirmRejection = async () => {
     if (isLocked) return;
     const done = new Date().toISOString();
+    const reasonText = rejectionReason.trim() || "Orçamento rejeitado pelo cliente";
     const next: Budget = {
       ...form,
       status: "rejected",
@@ -2290,16 +2452,20 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         rejected: true,
         rejectedAt: done,
         rejectedBy: rejectionRejectedBy.trim().length ? rejectionRejectedBy.trim() : null,
-        reason: rejectionReason.trim().length ? rejectionReason.trim() : null,
+        reason: reasonText,
       },
       updated_at: done,
     };
     setFormSafe(next);
     setConfirmRejectionOpen(false);
-    try { onSave({ ...next, updated_at: new Date().toISOString() }); } catch {}
-    toast.warning(
-      langDisplay === "fr" ? "Devis rejeté · Bloqué" : "Orçamento rejeitado · Bloqueado.",
-    );
+    try {
+      await onSave({ ...next, updated_at: done });
+      toast.warning(
+        langDisplay === "fr" ? "Devis rejeté · Bloqué" : "Orçamento rejeitado · Bloqueado.",
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "Falha ao rejeitar orçamento.");
+    }
   };
 
   const addPart = () =>
@@ -2372,29 +2538,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     }));
 
   const save = async () => {
-    if (saving) return;
-    setSaving(true);
-    try {
-      const savedRes: any = await onSave({ ...form, updated_at: new Date().toISOString() });
-      const targetId = savedRes?.id || savedRes?.budget?.id || form.id || initial?.id;
-      if (targetId) {
-        try {
-          await apiRequest(`/budgets/${targetId}/inspection`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ damage_points: inspectionPoints }),
-          });
-        } catch (e) {
-          console.error("Erro ao salvar pontos de inspeção:", e);
-        }
-      }
-      toast.success(langDisplay === "fr" ? "Devis enregistré avec succès." : "Orçamento salvo com sucesso.");
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Falha ao salvar orçamento.");
-    } finally {
-      setSaving(false);
-    }
+    await persistCurrentState(true);
   };
 
   const chooseType = (t: BudgetType) => {
@@ -2481,20 +2625,43 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
             )}
           >
             <LockIcon className="h-4 w-4 shrink-0 mt-0.5" />
-            <div className="leading-relaxed">
-              <strong className="font-semibold">
-                {form.status === "rejected"
-                  ? langDisplay === "fr"
-                    ? "Devis rejeté · Bloqué en écriture"
-                    : "Orçamento rejeitado · Bloqueado para edição"
-                  : langDisplay === "fr"
-                    ? "Devis approuvé · Bloqué en écriture"
-                    : "Orçamento aprovado · Bloqueado para edição"}
-              </strong>
+            <div className="leading-relaxed flex-1">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <strong className="font-semibold">
+                  {form.status === "rejected"
+                    ? langDisplay === "fr"
+                      ? "Devis rejeté · Bloqué en écriture"
+                      : "Orçamento rejeitado · Bloqueado para edição"
+                    : langDisplay === "fr"
+                      ? "Devis approuvé · Bloqué en écriture"
+                      : "Orçamento aprovado · Bloqueado para edição"}
+                </strong>
+                {form.status === "rejected" && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                    onClick={() => {
+                      setFormSafe((prev) => ({
+                        ...prev,
+                        status: "draft",
+                        rejection: { rejected: false, rejectedAt: null, rejectedBy: null, reason: null },
+                      }));
+                      toast.info("Orçamento reaberto como rascunho para renegociação. Salve as alterações para registrar uma nova revisão.");
+                    }}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                    {langDisplay === "fr" ? "Rouvrir / Nouvelle révision" : "Reabrir / Nova Revisão"}
+                  </Button>
+                )}
+              </div>
               <span className="block opacity-90 mt-0.5">
-                {langDisplay === "fr"
-                  ? "Aucune modification n'est autorisée. Les valeurs financières sont figées."
-                  : "Nenhuma alteração é permitida. Os valores financeiros estão congelados."}
+                {form.status === "rejected" && form.rejection?.reason
+                  ? `Motivo do descarte: ${form.rejection.reason}`
+                  : langDisplay === "fr"
+                    ? "Aucune modification n'est autorisée. Les valeurs financières sont figées."
+                    : "Nenhuma alteração é permitida. Os valores financeiros estão congelados."}
                 {form.signature.signed && form.signature.finalValueAtMoment != null
                   ? ` ${langDisplay === "fr" ? "Valeur finale approuvée :" : "Valor final aprovado:"} ${formatBRL(form.signature.finalValueAtMoment)}`
                   : ""}
@@ -2967,6 +3134,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                 onBodyTypeChange={(newType) => {
                   set("vehicle_body_type" as any, newType);
                 }}
+                onValidatePart={handleValidatePartFromBlueprint}
                 onChange={async (newPoints) => {
                   setInspectionPoints(newPoints);
                   const currentId = form.id || initial?.id;
@@ -3330,19 +3498,39 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                               />
                             </TableCell>
                             <TableCell className="text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                step={1}
-                                className="tabular-nums"
-                                value={String(p.quantity)}
-                                onChange={(e) =>
-                                  updatePart(p.id, {
-                                    quantity: Math.max(0, Number(e.target.value) || 0),
-                                  })
-                                }
-                                disabled={isLocked}
-                              />
+                              <div className="flex items-center justify-end gap-1">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  className="tabular-nums"
+                                  value={String(p.quantity)}
+                                  onChange={(e) =>
+                                    updatePart(p.id, {
+                                      quantity: Math.max(0, Number(e.target.value) || 0),
+                                    })
+                                  }
+                                  disabled={isLocked}
+                                />
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={(p as any).pricing_mode === "fixed" ? "default" : "outline"}
+                                  className={cn(
+                                    "h-8 px-1.5 text-[10px] font-medium shrink-0",
+                                    (p as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
+                                  )}
+                                  onClick={() =>
+                                    updatePart(p.id, {
+                                      pricing_mode: (p as any).pricing_mode === "fixed" ? "unit" : "fixed",
+                                    } as any)
+                                  }
+                                  title={(p as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
+                                  disabled={isLocked}
+                                >
+                                  {(p as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
+                                </Button>
+                              </div>
                             </TableCell>
                             <TableCell className="text-right">
                               <Input
@@ -3361,8 +3549,9 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                             </TableCell>
                             <TableCell className="text-right tabular-nums font-medium">
                               {formatBRL(
-                                Math.max(0, Number(p.quantity) || 0) *
-                                  Math.max(0, Number(p.unit_price) || 0),
+                                (p as any).pricing_mode === "fixed"
+                                  ? Math.max(0, Number(p.unit_price) || 0)
+                                  : Math.max(0, Number(p.quantity) || 0) * Math.max(0, Number(p.unit_price) || 0),
                               )}
                             </TableCell>
                             <TableCell>
@@ -3466,19 +3655,39 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                               ) : null}
                             </TableCell>
                             <TableCell className="text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                step={1}
-                                className="tabular-nums"
-                                value={String(s.quantity)}
-                                onChange={(e) =>
-                                  updateService(s.id, {
-                                    quantity: Math.max(0, Number(e.target.value) || 0),
-                                  })
-                                }
-                                disabled={isLocked}
-                              />
+                              <div className="flex items-center justify-end gap-1">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  className="tabular-nums"
+                                  value={String(s.quantity)}
+                                  onChange={(e) =>
+                                    updateService(s.id, {
+                                      quantity: Math.max(0, Number(e.target.value) || 0),
+                                    })
+                                  }
+                                  disabled={isLocked}
+                                />
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={(s as any).pricing_mode === "fixed" ? "default" : "outline"}
+                                  className={cn(
+                                    "h-8 px-1.5 text-[10px] font-medium shrink-0",
+                                    (s as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
+                                  )}
+                                  onClick={() =>
+                                    updateService(s.id, {
+                                      pricing_mode: (s as any).pricing_mode === "fixed" ? "unit" : "fixed",
+                                    } as any)
+                                  }
+                                  title={(s as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
+                                  disabled={isLocked}
+                                >
+                                  {(s as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
+                                </Button>
+                              </div>
                             </TableCell>
                             <TableCell className="text-right">
                               <Input
@@ -3497,8 +3706,9 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                             </TableCell>
                             <TableCell className="text-right tabular-nums font-medium">
                               {formatBRL(
-                                Math.max(0, Number(s.quantity) || 0) *
-                                  Math.max(0, Number(s.unit_price) || 0),
+                                (s as any).pricing_mode === "fixed"
+                                  ? Math.max(0, Number(s.unit_price) || 0)
+                                  : Math.max(0, Number(s.quantity) || 0) * Math.max(0, Number(s.unit_price) || 0),
                               )}
                             </TableCell>
                             <TableCell>
@@ -3953,19 +4163,42 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                   variant="outline"
                   size="sm"
                   onClick={viewBudgetPreview}
+                  disabled={isGeneratingPdf}
                   className="h-9"
                 >
-                  <FileText className="h-4 w-4" /> {langDisplay === "fr" ? "Aperçu PDF" : "Visualizar PDF"}
+                  {isGeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}{" "}
+                  {langDisplay === "fr" ? "Aperçu PDF" : "Visualizar PDF"}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={downloadPDF}
+                  disabled={isGeneratingPdf}
                   className="h-9"
                 >
-                  <FileDown className="h-4 w-4" /> {langDisplay === "fr" ? "Télécharger PDF" : "Baixar PDF"}
+                  {isGeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}{" "}
+                  {langDisplay === "fr" ? "Télécharger PDF" : "Baixar PDF"}
                 </Button>
+                {form.status === "rejected" ? (
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    className="h-9 gap-1.5"
+                    onClick={() => {
+                      setFormSafe((prev) => ({
+                        ...prev,
+                        status: "draft",
+                        rejection: { rejected: false, rejectedAt: null, rejectedBy: null, reason: null },
+                      }));
+                      toast.info("Orçamento reaberto como rascunho para renegociação. Salve as alterações para registrar uma nova revisão.");
+                    }}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    {langDisplay === "fr" ? "Rouvrir / Renégocier" : "Reabrir para Renegociar"}
+                  </Button>
+                ) : null}
                 {!isLocked ? (
                   <>
                     <Button
