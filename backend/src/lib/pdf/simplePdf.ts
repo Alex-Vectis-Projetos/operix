@@ -1,3 +1,6 @@
+import { s3 } from "../minio.js";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+
 /**
  * Operix Canonical PDF Engine
  * Generates valid, self-contained PDF 1.4 documents with WinAnsiEncoding
@@ -98,25 +101,154 @@ export function pdfEscapeWinAnsi(text: string): string {
   return out;
 }
 
-function assemblePdf(contentStream: string): Buffer {
+export interface PdfImageObject {
+  buffer: Buffer;
+  width: number;
+  height: number;
+  format: "jpeg" | "png";
+}
+
+export function parseJpegDimensions(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length < 8 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let i = 2;
+  while (i < buf.length - 8) {
+    if (buf[i] !== 0xff) {
+      i++;
+      continue;
+    }
+    const marker = buf[i + 1];
+    if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+      const h = buf.readUInt16BE(i + 5);
+      const w = buf.readUInt16BE(i + 7);
+      return { width: w, height: h };
+    }
+    const len = buf.readUInt16BE(i + 2);
+    i += 2 + len;
+  }
+  return null;
+}
+
+export async function loadWorkspaceLogo(logoUrl: string | null | undefined): Promise<PdfImageObject | null> {
+  if (!logoUrl || typeof logoUrl !== "string") return null;
+  const trimmed = logoUrl.trim();
+  if (!trimmed) return null;
+
+  try {
+    let buf: Buffer | null = null;
+
+    // 1. MinIO retrieval if stored in public logos bucket
+    if (trimmed.includes("/logos/")) {
+      const key = decodeURIComponent(trimmed.split(/\/logos\//)[1]);
+      if (key) {
+        try {
+          const res = await s3.send(new GetObjectCommand({ Bucket: "logos", Key: key }));
+          if (res.Body) {
+            const chunks: Buffer[] = [];
+            for await (const chunk of res.Body as any) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            }
+            buf = Buffer.concat(chunks);
+          }
+        } catch {
+          // ignore fallback
+        }
+      }
+    }
+
+    // 2. Data URL
+    if (!buf && trimmed.startsWith("data:")) {
+      const parts = trimmed.split(",");
+      if (parts.length > 1) {
+        buf = Buffer.from(parts[1], "base64");
+      }
+    }
+
+    // 3. HTTP / HTTPS fallback
+    if (!buf && (trimmed.startsWith("http://") || trimmed.startsWith("https://"))) {
+      const resp = await fetch(trimmed, { signal: AbortSignal.timeout(3000) });
+      if (resp.ok) {
+        buf = Buffer.from(await resp.arrayBuffer());
+      }
+    }
+
+    if (!buf || buf.length < 16) return null;
+
+    const jpegDims = parseJpegDimensions(buf);
+    if (jpegDims && jpegDims.width > 0 && jpegDims.height > 0) {
+      return { buffer: buf, width: jpegDims.width, height: jpegDims.height, format: "jpeg" };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function clipCell(text: string | null | undefined, maxChars: number): string {
+  const s = String(text || "-").trim();
+  if (s.length <= maxChars) return s;
+  return s.slice(0, maxChars - 1).trim() + "...";
+}
+
+function splitTwoLines(
+  text: string | null | undefined,
+  maxLine1Chars: number,
+  maxLine2Chars: number,
+): { line1: string; line2?: string } {
+  const raw = String(text || "-").trim();
+  if (!raw || raw === "-") return { line1: "-" };
+  if (raw.length <= maxLine1Chars) return { line1: raw };
+
+  const words = raw.split(/\s+/);
+  let line1 = "";
+  let i = 0;
+  for (; i < words.length; i++) {
+    const candidate = line1 ? `${line1} ${words[i]}` : words[i];
+    if (candidate.length <= maxLine1Chars) {
+      line1 = candidate;
+    } else {
+      break;
+    }
+  }
+
+  if (!line1) {
+    line1 = raw.slice(0, maxLine1Chars);
+    const rest = raw.slice(maxLine1Chars).trim();
+    return {
+      line1,
+      line2: rest.length > maxLine2Chars ? rest.slice(0, maxLine2Chars - 1).trim() + "..." : rest,
+    };
+  }
+
+  const remainder = words.slice(i).join(" ");
+  if (!remainder) return { line1 };
+
+  const line2 = remainder.length > maxLine2Chars ? remainder.slice(0, maxLine2Chars - 1).trim() + "..." : remainder;
+
+  return { line1, line2 };
+}
+
+function assemblePdf(contentStream: string, image?: PdfImageObject | null): Buffer {
   const pageWidth = 595.28;
   const pageHeight = 841.89;
 
-  const parts: string[] = [];
+  const parts: (string | Buffer)[] = [];
   let offset = 0;
   const objOffsets: number[] = [0];
 
-  const push = (chunk: string, objIndex?: number) => {
+  const push = (chunk: string | Buffer, objIndex?: number) => {
     if (typeof objIndex === "number") objOffsets[objIndex] = offset;
     parts.push(chunk);
-    offset += Buffer.byteLength(chunk, "utf8");
+    offset += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk, "utf8");
   };
 
   push("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
   push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n", 1);
   push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n", 2);
+
+  const xobjectRes = image ? "/XObject << /Im1 7 0 R >>" : "";
   push(
-    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>\nendobj\n`,
+    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> ${xobjectRes} >> /Contents 6 0 R >>\nendobj\n`,
     3,
   );
   push(
@@ -132,18 +264,26 @@ function assemblePdf(contentStream: string): Buffer {
     6,
   );
 
+  let numObjects = 6;
+  if (image) {
+    numObjects = 7;
+    const header = `7 0 obj\n<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.buffer.length} >>\nstream\n`;
+    const footer = "\nendstream\nendobj\n";
+    push(header, 7);
+    push(image.buffer);
+    push(footer);
+  }
+
   const xrefOffset = offset;
-  let xref = "xref\n0 7\n0000000000 65535 f \n";
-  for (let i = 1; i <= 6; i += 1) {
+  let xref = `xref\n0 ${numObjects + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= numObjects; i += 1) {
     xref += String(objOffsets[i]).padStart(10, "0") + " 00000 n \n";
   }
-  const trailer = `trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  const trailer = `trailer\n<< /Size ${numObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  push(xref);
+  push(trailer);
 
-  return Buffer.concat([
-    Buffer.from(parts.join(""), "utf8"),
-    Buffer.from(xref, "utf8"),
-    Buffer.from(trailer, "utf8"),
-  ]);
+  return Buffer.concat(parts.map((p) => (Buffer.isBuffer(p) ? p : Buffer.from(p, "utf8"))));
 }
 
 /**
@@ -453,6 +593,7 @@ export function buildProtocoleDeReparationPdf(
   rev: any,
   workspace?: any,
   inspection?: any,
+  logoImage?: PdfImageObject | null,
 ): Buffer {
   const content: string[] = [];
   const brand = workspace?.brandConfig || {};
@@ -469,8 +610,8 @@ export function buildProtocoleDeReparationPdf(
   const vehiclePlate = String(budget.vehiclePlate || "SANS-PLAQUE").toUpperCase();
   const protocolCode = budget.code || "FR-PFAN";
 
-  // 1. TOP HEADER & TITLE (Y: 805 -> 765)
-  // Dark Banner for Title
+  // 1. TOP HEADER & TITLE (Y: 805 -> 745)
+  // Dark Banner for Title (Right side)
   content.push("0.1 0.12 0.16 rg");
   content.push("310 772 245 28 re f");
 
@@ -481,34 +622,67 @@ export function buildProtocoleDeReparationPdf(
   content.push(`(${pdfEscapeWinAnsi("PROTOCOLE DE REPARATION")}) Tj`);
   content.push("ET");
 
-  // Red plate badge
-  content.push("0.98 0.94 0.94 rg");
-  content.push("465 748 90 20 re f");
-  content.push("0.85 0.15 0.15 RG 1.5 w");
-  content.push("465 748 90 20 re s");
+  // Red plate badge (Dynamic width & centered text so it NEVER overflows borders)
+  const plateText = vehiclePlate || "SANS-PLAQUE";
+  const plateW = plateText.length * 6.2;
+  const badgeW = Math.max(96, plateW + 20);
+  const badgeX = 555 - badgeW;
+  const badgeY = 746;
+  const badgeH = 20;
 
+  content.push("0.98 0.94 0.94 rg");
+  content.push(`${badgeX.toFixed(1)} ${badgeY} ${badgeW.toFixed(1)} ${badgeH} re f`);
+  content.push("0.85 0.15 0.15 RG 1.5 w");
+  content.push(`${badgeX.toFixed(1)} ${badgeY} ${badgeW.toFixed(1)} ${badgeH} re s`);
+
+  const textX = badgeX + (badgeW - plateW) / 2;
   content.push("BT");
   content.push("0.75 0.1 0.1 rg");
-  content.push("/F2 11 Tf");
-  content.push("475 754 Td");
-  content.push(`(${pdfEscapeWinAnsi(vehiclePlate)}) Tj`);
+  content.push("/F2 10 Tf");
+  content.push(`${textX.toFixed(1)} ${badgeY + 6} Td`);
+  content.push(`(${pdfEscapeWinAnsi(plateText)}) Tj`);
   content.push("ET");
 
-  // Company Brand Left
-  content.push("BT");
-  content.push("0.1 0.12 0.16 rg");
-  content.push("/F2 15 Tf");
-  content.push("40 782 Td");
-  content.push(`(${pdfEscapeWinAnsi(companyName)}) Tj`);
-  content.push("/F2 7.5 Tf");
-  content.push("0.4 0.45 0.5 rg");
-  content.push("0 -11 Td");
-  content.push(`(${pdfEscapeWinAnsi(tagline)}) Tj`);
-  content.push("ET");
+  // Company Brand / Logo on Left
+  if (logoImage) {
+    const maxW = 160;
+    const maxH = 40;
+    const aspect = (logoImage.width || 1) / (logoImage.height || 1);
+    let renderW = maxW;
+    let renderH = maxW / aspect;
+    if (renderH > maxH) {
+      renderH = maxH;
+      renderW = maxH * aspect;
+    }
+    const imgX = 40;
+    const imgY = 752 + (maxH - renderH) / 2;
+
+    content.push("q");
+    content.push(`${renderW.toFixed(2)} 0 0 ${renderH.toFixed(2)} ${imgX} ${imgY.toFixed(2)} cm`);
+    content.push("/Im1 Do");
+    content.push("Q");
+
+    // Tagline below logo
+    content.push("BT");
+    content.push("0.4 0.45 0.5 rg /F2 6 Tf");
+    content.push(`40 744 Td (${pdfEscapeWinAnsi(tagline)}) Tj`);
+    content.push("ET");
+  } else {
+    content.push("BT");
+    content.push("0.1 0.12 0.16 rg");
+    content.push("/F2 15 Tf");
+    content.push("40 782 Td");
+    content.push(`(${pdfEscapeWinAnsi(companyName)}) Tj`);
+    content.push("/F2 7.5 Tf");
+    content.push("0.4 0.45 0.5 rg");
+    content.push("0 -11 Td");
+    content.push(`(${pdfEscapeWinAnsi(tagline)}) Tj`);
+    content.push("ET");
+  }
 
   // Divider Line
   content.push("0.1 0.12 0.16 RG 1.5 w");
-  content.push("40 742 m 555 742 l S");
+  content.push("40 740 m 555 740 l S");
 
   // 2. CLIENT & VEHICLE GRID (Y: 736 -> 676)
   content.push("0.75 0.78 0.82 RG 0.5 w");
@@ -519,46 +693,61 @@ export function buildProtocoleDeReparationPdf(
   content.push("40 716 m 555 716 l S");
   content.push("40 696 m 555 696 l S");
 
-  // Row 1
-  content.push("BT");
-  content.push("0.4 0.45 0.5 rg /F2 6 Tf 44 728 Td (NOM CLIENT) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F2 8 Tf 44 720 Td (" + pdfEscapeWinAnsi(budget.clientName || clientSnap.name || "-") + ") Tj ET");
+  // Row 1 (Y: 716 -> 736)
+  const clientName = budget.clientName || clientSnap.name || "-";
+  const nameSplit = splitTwoLines(clientName, 22, 22);
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 44 729 Td (NOM CLIENT) Tj ET");
+  if (nameSplit.line2) {
+    content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 44 722 Td (${pdfEscapeWinAnsi(nameSplit.line1)}) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F2 6 Tf 44 716.5 Td (${pdfEscapeWinAnsi(nameSplit.line2)}) Tj ET`);
+  } else {
+    content.push(`BT 0.1 0.12 0.16 rg /F2 7.5 Tf 44 720 Td (${pdfEscapeWinAnsi(nameSplit.line1)}) Tj ET`);
+  }
 
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 174 728 Td (MARQUE) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F2 8 Tf 174 720 Td (" + pdfEscapeWinAnsi(budget.vehicleBrand || "-") + ") Tj ET");
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 174 729 Td (MARQUE) Tj ET");
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7.5 Tf 174 720 Td (${pdfEscapeWinAnsi(clipCell(budget.vehicleBrand, 18))}) Tj ET`);
 
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 289 728 Td (PLAQUE D'IMMATRICULATION) Tj ET");
-  content.push("BT 0.75 0.1 0.1 rg /F2 8 Tf 289 720 Td (" + pdfEscapeWinAnsi(vehiclePlate) + ") Tj ET");
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 289 729 Td (PLAQUE D'IMMATRICULATION) Tj ET");
+  content.push(`BT 0.75 0.1 0.1 rg /F2 7.5 Tf 289 720 Td (${pdfEscapeWinAnsi(clipCell(vehiclePlate, 18))}) Tj ET`);
 
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 419 728 Td (N' DE PROTOCOLE) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F2 8 Tf 419 720 Td (" + pdfEscapeWinAnsi(protocolCode) + ") Tj ET");
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 419 729 Td (N' DE PROTOCOLE) Tj ET");
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7.5 Tf 419 720 Td (${pdfEscapeWinAnsi(clipCell(protocolCode, 20))}) Tj ET`);
 
-  // Row 2
-  const clientAddr = clientSnap.address?.street ? [clientSnap.address.street, clientSnap.address.postal, clientSnap.address.city].filter(Boolean).join(" ") : "-";
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 44 708 Td (ADRESSE / CODE POSTAL / VILLE) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 44 700 Td (" + pdfEscapeWinAnsi(clientAddr) + ") Tj ET");
+  // Row 2 (Y: 696 -> 716)
+  const clientAddr = clientSnap.address?.street
+    ? [clientSnap.address.street, clientSnap.address.postal, clientSnap.address.city].filter(Boolean).join(" ")
+    : (budget.clientAddress || "-");
+  const addrSplit = splitTwoLines(clientAddr, 25, 25);
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 44 709 Td (ADRESSE / VILLE) Tj ET");
+  if (addrSplit.line2) {
+    content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 44 702 Td (${pdfEscapeWinAnsi(addrSplit.line1)}) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 44 696.5 Td (${pdfEscapeWinAnsi(addrSplit.line2)}) Tj ET`);
+  } else {
+    content.push(`BT 0.1 0.12 0.16 rg /F1 7 Tf 44 700 Td (${pdfEscapeWinAnsi(addrSplit.line1)}) Tj ET`);
+  }
 
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 174 708 Td (MODELE) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F2 8 Tf 174 700 Td (" + pdfEscapeWinAnsi(budget.vehicleModel || "-") + ") Tj ET");
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 174 709 Td (MODELE) Tj ET");
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7.5 Tf 174 700 Td (${pdfEscapeWinAnsi(clipCell(budget.vehicleModel, 18))}) Tj ET`);
 
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 289 708 Td (N' DE CHASSIS (VIN)) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 289 700 Td (" + pdfEscapeWinAnsi(budget.vehicleVin || "-") + ") Tj ET");
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 289 709 Td (N' DE CHASSIS (VIN)) Tj ET");
+  content.push(`BT 0.1 0.12 0.16 rg /F1 7.5 Tf 289 700 Td (${pdfEscapeWinAnsi(clipCell(budget.vehicleVin, 22))}) Tj ET`);
 
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 419 708 Td (DATE DEBUT REPARATION) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 419 700 Td (" + pdfEscapeWinAnsi((budget.createdAt || new Date()).toISOString().slice(0, 10)) + ") Tj ET");
+  const dateDebut = (budget.createdAt || new Date()).toISOString().slice(0, 10);
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 419 709 Td (DATE DEBUT REPARATION) Tj ET");
+  content.push(`BT 0.1 0.12 0.16 rg /F1 7.5 Tf 419 700 Td (${pdfEscapeWinAnsi(clipCell(dateDebut, 18))}) Tj ET`);
 
-  // Row 3
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 44 688 Td (N' TEL.) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F2 7.5 Tf 44 680 Td (" + pdfEscapeWinAnsi(budget.clientPhone || clientSnap.phone || "-") + ") Tj ET");
+  // Row 3 (Y: 676 -> 696)
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 44 689 Td (N' TEL.) Tj ET");
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7.5 Tf 44 680 Td (${pdfEscapeWinAnsi(clipCell(budget.clientPhone || clientSnap.phone, 20))}) Tj ET`);
 
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 174 688 Td (COULEUR) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 174 680 Td (-) Tj ET");
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 174 689 Td (COULEUR) Tj ET");
+  content.push(`BT 0.1 0.12 0.16 rg /F1 7.5 Tf 174 680 Td (${pdfEscapeWinAnsi(clipCell(budget.vehicleColor || "-", 18))}) Tj ET`);
 
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 289 688 Td (KILOMETRAGE) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 289 680 Td (-) Tj ET");
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 289 689 Td (KILOMETRAGE) Tj ET");
+  content.push(`BT 0.1 0.12 0.16 rg /F1 7.5 Tf 289 680 Td (${pdfEscapeWinAnsi(clipCell(budget.vehicleKm || "-", 18))}) Tj ET`);
 
-  content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 419 688 Td (DATE FIN REPARATION) Tj ET");
-  content.push("BT 0.1 0.12 0.16 rg /F1 7.5 Tf 419 680 Td (-) Tj ET");
+  content.push("BT 0.4 0.45 0.5 rg /F2 5.5 Tf 419 689 Td (DATE FIN REPARATION) Tj ET");
+  content.push(`BT 0.1 0.12 0.16 rg /F1 7.5 Tf 419 680 Td (-) Tj ET`);
 
   // 3. TABLE DSP (PDR) HEADER (Y: 668 -> 654)
   content.push("0.22 0.25 0.32 rg");
@@ -804,10 +993,15 @@ export function buildProtocoleDeReparationPdf(
   content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 475 35 Td (Version du:) Tj ET");
   content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 475 27 Td (" + pdfEscapeWinAnsi((new Date()).toISOString().slice(0, 10)) + ") Tj ET");
 
-  return assemblePdf(content.join("\n"));
+  return assemblePdf(content.join("\n"), logoImage);
 }
 
-export function generateBudgetPdfBuffer(budget: any, rev: any, workspace?: any, inspection?: any): Buffer {
+export async function generateBudgetPdfBuffer(
+  budget: any,
+  rev: any,
+  workspace?: any,
+  inspection?: any,
+): Promise<Buffer> {
   const isPdr =
     rev?.budgetType === "pdr" ||
     budget?.budget_type === "pdr" ||
@@ -818,7 +1012,9 @@ export function generateBudgetPdfBuffer(budget: any, rev: any, workspace?: any, 
     }));
 
   if (isPdr) {
-    return buildProtocoleDeReparationPdf(budget, rev, workspace, inspection);
+    const rawLogoUrl = workspace?.logoUrl || (workspace?.brandConfig as any)?.logoUrl;
+    const logoImage = await loadWorkspaceLogo(rawLogoUrl);
+    return buildProtocoleDeReparationPdf(budget, rev, workspace, inspection, logoImage);
   }
 
   const clientSnap = (rev?.clientSnapshot as any) || {};

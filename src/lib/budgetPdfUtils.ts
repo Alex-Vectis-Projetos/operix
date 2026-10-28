@@ -329,7 +329,7 @@ export function buildProtocoleDeReparationHtml(
     .bold { font-weight: bold; }
     .border-all { border: 1px solid #9ca3af; }
     .cell-label { font-size: 8px; color: #4b5563; text-transform: uppercase; font-weight: bold; margin-bottom: 2px; }
-    .cell-val { font-size: 10px; font-weight: bold; color: #111827; min-height: 13px; }
+    .cell-val { font-size: 9.5px; font-weight: bold; color: #111827; min-height: 13px; word-break: break-word; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
     @media print {
       .no-print { display: none !important; }
       body { padding: 0 !important; }
@@ -357,22 +357,24 @@ export function buildProtocoleDeReparationHtml(
   <!-- 1. EN-TÊTE OFFICIEL & WHITELABEL -->
   <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px">
     <div style="display:flex;align-items:center;gap:12px">
-      ${logoUrl ? `<img src="${esc(logoUrl)}" alt="Logo" style="height:46px;max-width:180px;object-fit:contain" />` : `
-        <div style="background:#111827;color:white;padding:6px 12px;border-radius:3px;font-weight:900;font-size:16px;letter-spacing:0.05em">
-          ${esc(companyName)}
+      ${logoUrl ? `
+        <div>
+          <img src="${esc(logoUrl)}" alt="Logo" style="height:44px;max-width:180px;object-fit:contain;display:block" />
+          <div style="font-size:8px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase;margin-top:2px">${esc(tagline)}</div>
+        </div>
+      ` : `
+        <div>
+          <div style="font-size:16px;font-weight:900;letter-spacing:0.04em;color:#111827">${esc(companyName)}</div>
+          <div style="font-size:8px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase">${esc(tagline)}</div>
         </div>
       `}
-      <div>
-        <div style="font-size:15px;font-weight:900;letter-spacing:0.04em;color:#111827">${esc(companyName)}</div>
-        <div style="font-size:8px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase">${esc(tagline)}</div>
-      </div>
     </div>
     <div style="text-align:right">
       <div style="background:#111827;color:white;padding:5px 14px;border-radius:2px;font-size:14px;font-weight:900;letter-spacing:0.12em;display:inline-block">
         PROTOCOLE DE RÉPARATION
       </div>
-      <div style="margin-top:3px">
-        <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:900;color:#b91c1c;border:1.5px solid #dc2626;background:#fef2f2;padding:1px 8px;border-radius:3px">
+      <div style="margin-top:4px">
+        <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:900;color:#b91c1c;border:1.5px solid #dc2626;background:#fef2f2;padding:2px 12px;border-radius:3px;display:inline-block;white-space:nowrap">
           ${esc(b.vehicle_plate || "SANS-PLAQUE")}
         </span>
       </div>
@@ -380,7 +382,7 @@ export function buildProtocoleDeReparationHtml(
   </div>
 
   <!-- 2. FICHE CLIENT & VÉHICULE (GRILLE PERICIALE 4x3) -->
-  <table class="border-all" style="margin-bottom:8px;font-size:9.5px">
+  <table class="border-all" style="margin-bottom:8px;font-size:9.5px;table-layout:fixed;width:100%">
     <colgroup>
       <col style="width:28%" /><col style="width:22%" /><col style="width:25%" /><col style="width:25%" />
     </colgroup>

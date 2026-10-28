@@ -969,7 +969,7 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
       }),
     ]);
 
-    const pdfBuffer = generateBudgetPdfBuffer(budget, rev, workspace, inspection);
+    const pdfBuffer = await generateBudgetPdfBuffer(budget, rev, workspace, inspection);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${budget.code}.pdf"`);
@@ -1040,7 +1040,7 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
           include: { damagePoints: true },
         }),
       ]);
-      pdfBuf = generateBudgetPdfBuffer(budget, rev, workspace, inspection);
+      pdfBuf = await generateBudgetPdfBuffer(budget, rev, workspace, inspection);
     } catch {
       const pdfLines = [
         `Date: ${(rev.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,
