@@ -1,11 +1,11 @@
 {
   "front": {
-    "width": 252,
-    "height": 190
+    "width": 251,
+    "height": 189
   },
   "rear": {
-    "width": 270,
-    "height": 254
+    "width": 258,
+    "height": 203
   },
   "left": {
     "width": 598,
@@ -16,7 +16,7 @@
     "height": 189
   },
   "top": {
-    "width": 288,
-    "height": 631
+    "width": 303,
+    "height": 632
   }
 }
