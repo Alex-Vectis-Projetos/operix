@@ -31,7 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 
 export type VehicleViewType = "top" | "front" | "rear" | "left" | "right";
-export type VehicleBodyType = "sedan" | "hatchback" | "suv" | "pickup";
+export type VehicleBodyType = "sedan" | "hatchback" | "suv" | "pickup" | "van" | "furgao" | "wagon";
 
 export interface DamagePointData {
   id?: string;
@@ -147,6 +147,9 @@ const BODY_TYPES: { code: VehicleBodyType; label: string }[] = [
   { code: "hatchback", label: "Hatchback" },
   { code: "suv", label: "SUV" },
   { code: "pickup", label: "Picape" },
+  { code: "wagon", label: "Wagon / SW" },
+  { code: "furgao", label: "Furgão" },
+  { code: "van", label: "Van" },
 ];
 
 // Dimensões nativas exatas dos cortes (sem resíduos ou sobreposições)
@@ -179,11 +182,40 @@ const BLUEPRINT_DIMENSIONS: Record<VehicleBodyType, Record<VehicleViewType, { wi
     left: { width: 770, height: 295 },
     right: { width: 770, height: 295 },
   },
+  van: {
+    front: { width: 188, height: 198 },
+    rear: { width: 164, height: 197 },
+    top: { width: 115, height: 268 },
+    left: { width: 266, height: 113 },
+    right: { width: 266, height: 113 },
+  },
+  wagon: {
+    front: { width: 252, height: 190 },
+    rear: { width: 270, height: 254 },
+    top: { width: 288, height: 631 },
+    left: { width: 598, height: 189 },
+    right: { width: 598, height: 189 },
+  },
+  furgao: {
+    front: { width: 224, height: 192 },
+    rear: { width: 224, height: 191 },
+    top: { width: 223, height: 420 },
+    left: { width: 419, height: 192 },
+    right: { width: 419, height: 192 },
+  },
 };
 
 // Mapeamento pericial de regiões por coordenadas percentuais (todas as vistas com topo alinhado)
-function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft = false): string {
+function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft = false, bodyType?: VehicleBodyType): string {
   if (view === "top") {
+    // Vãs e Furgões possuem teto muito extenso e frente mais curta
+    if (bodyType === "van" || bodyType === "furgao") {
+      if (y < 20) return x < 25 ? "front_left_fender" : x > 75 ? "front_right_fender" : "hood";
+      if (y < 30) return "windshield";
+      if (y < 86) return x < 15 ? "front_left_door" : x > 85 ? "front_right_door" : "roof";
+      if (y < 93) return "rear_glass";
+      return x < 25 ? "rear_left_quarter" : x > 75 ? "rear_right_quarter" : "trunk";
+    }
     // Orientação uniforme: Capô no topo (y < 35%), Teto no meio, Porta-malas na base
     if (y < 35) return x < 25 ? "front_left_fender" : x > 75 ? "front_right_fender" : "hood";
     if (y < 46) return "windshield";
@@ -214,10 +246,18 @@ function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft =
   }
 
   if (view === "left" || view === "right") {
-    const isFrontSide = facingLeft ? x < 30 : x > 70;
-    const isRearSide = facingLeft ? x > 70 : x < 30;
-    const isMidFront = facingLeft ? x >= 30 && x < 52 : x >= 48 && x < 70;
-    const isMidRear = facingLeft ? x >= 52 && x <= 70 : x >= 30 && x < 48;
+    const isFrontSide = facingLeft
+      ? (bodyType === "van" || bodyType === "furgao" ? x < 22 : x < 30)
+      : (bodyType === "van" || bodyType === "furgao" ? x > 78 : x > 70);
+    const isRearSide = facingLeft
+      ? (bodyType === "van" || bodyType === "furgao" ? x > 78 : x > 70)
+      : (bodyType === "van" || bodyType === "furgao" ? x < 22 : x < 30);
+    const isMidFront = facingLeft
+      ? (bodyType === "van" || bodyType === "furgao" ? x >= 22 && x < 45 : x >= 30 && x < 52)
+      : (bodyType === "van" || bodyType === "furgao" ? x >= 55 && x < 78 : x >= 48 && x < 70);
+    const isMidRear = facingLeft
+      ? (bodyType === "van" || bodyType === "furgao" ? x >= 45 && x <= 78 : x >= 52 && x <= 70)
+      : (bodyType === "van" || bodyType === "furgao" ? x >= 22 && x < 55 : x >= 30 && x < 48);
 
     if (y < 32) return "roof";
     if (y > 78) return view === "left" ? "left_sill" : "right_sill";
@@ -251,7 +291,7 @@ export function VehicleBlueprint5Views({
     if (initialBodyType && initialBodyType !== bodyType) {
       setBodyType(initialBodyType);
     }
-  }, [initialBodyType]);
+  }, [initialBodyType, bodyType]);
 
   // Modal de confirmação para troca de carroceria com histórico preservado
   const [pendingBodyType, setPendingBodyType] = useState<VehicleBodyType | null>(null);
@@ -303,7 +343,7 @@ export function VehicleBlueprint5Views({
     const coordX = Math.round((clampedX / viewW) * 100);
     const coordY = Math.round((clampedY / viewH) * 100);
 
-    const detectedCode = detectCarPart(view, coordX, coordY, facingLeft);
+    const detectedCode = detectCarPart(view, coordX, coordY, facingLeft, bodyType);
 
     // Herda material já definido para essa mesma peça em outros pontos (Abordagem A: Por Peça)
     const existingPointForPart = damagePoints.find((p) => p.carPartCode === detectedCode && p.partMaterial);
@@ -353,7 +393,7 @@ export function VehicleBlueprint5Views({
     const coordX = Math.round((clampedX / viewW) * 100);
     const coordY = Math.round((clampedY / viewH) * 100);
 
-    const partCode = detectCarPart(view, coordX, coordY, facingLeft);
+    const partCode = detectCarPart(view, coordX, coordY, facingLeft, bodyType);
     const partObj = CAR_PARTS.find((p) => p.code === partCode);
     setHoveredPart(partObj ? partObj.label : null);
   };
