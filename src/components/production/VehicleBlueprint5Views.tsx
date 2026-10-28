@@ -190,11 +190,11 @@ const BLUEPRINT_DIMENSIONS: Record<VehicleBodyType, Record<VehicleViewType, { wi
     right: { width: 266, height: 113 },
   },
   wagon: {
-    front: { width: 251, height: 189 },
-    rear: { width: 258, height: 203 },
-    top: { width: 303, height: 632 },
-    left: { width: 598, height: 189 },
-    right: { width: 598, height: 189 },
+    front: { width: 271, height: 218 },
+    rear: { width: 267, height: 198 },
+    top: { width: 270, height: 627 },
+    left: { width: 618, height: 218 },
+    right: { width: 618, height: 218 },
   },
   furgao: {
     front: { width: 224, height: 192 },
