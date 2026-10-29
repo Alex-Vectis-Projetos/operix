@@ -191,6 +191,7 @@ function formatBudget(b: any) {
     id: b.id,
     workspace_id: b.workspaceId,
     workspaceId: b.workspaceId,
+    status: b.currentRevision?.status || b.status || "draft",
     code: b.code,
     client_id: b.clientId,
     clientId: b.clientId,

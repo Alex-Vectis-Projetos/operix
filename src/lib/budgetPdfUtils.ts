@@ -308,6 +308,11 @@ export function buildProtocoleDeReparationHtml(
   const tvaVal = t.iva;
   const totalTtc = t.total;
 
+  const isRejected = Boolean((b as any).rejection?.rejected || b.status === "rejected");
+  const sig = (b as any).signature;
+  const sigImg = sig?.signatureData || sig?.signature_data || sig?.dataUrl || sig?.data_url || (typeof sig === "string" ? sig : null);
+  const sigName = sig?.signerName || sig?.signer_name || b.client_name;
+
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -346,13 +351,32 @@ export function buildProtocoleDeReparationHtml(
   </style>
 </head>
 <body>
-  <div class="print-bar no-print">
+  <div class="print-bar print-actions no-print">
     <div style="font-weight:bold;font-size:12px">Operix Engine — Visualisation "Protocole de Réparation" (Fidélité 100%)</div>
     <div style="display:flex;gap:8px">
       <button onclick="window.print()" style="background:#0284c7;color:white;border:none;padding:5px 12px;border-radius:3px;font-weight:bold;cursor:pointer">Imprimer / PDF</button>
       <button onclick="window.close()" style="background:#4b5563;color:white;border:none;padding:5px 12px;border-radius:3px;cursor:pointer">Fermer</button>
     </div>
   </div>
+
+  ${isRejected ? `
+  <div style="background:#fef2f2;border:1px solid #dc2626;padding:6px 10px;margin-bottom:8px;border-radius:2px;display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <div style="font-weight:900;color:#991b1b;font-size:10px;text-transform:uppercase">
+        ${lang === "fr" ? "DEVIS REJETÉ" : "ORÇAMENTO REJEITADO"}
+      </div>
+      <div style="color:#7f1d1d;font-size:8.5px;margin-top:2px">
+        ${(b as any).rejection?.reason ? `<strong>Motivo:</strong> ${esc((b as any).rejection.reason)}` : "Orçamento recusado pelo cliente ou seguradora."}
+      </div>
+    </div>
+    ${(b as any).rejection?.rejectedAt ? `
+      <div style="color:#991b1b;font-size:8px;text-align:right">
+        Rejeitado em: ${formatDateTime((b as any).rejection.rejectedAt)}<br/>
+        ${(b as any).rejection?.rejectedBy ? `Por: ${esc((b as any).rejection.rejectedBy)}` : ""}
+      </div>
+    ` : ""}
+  </div>
+  ` : ""}
 
   <!-- 1. EN-TÊTE OFFICIEL & WHITELABEL -->
   <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px">
@@ -371,7 +395,7 @@ export function buildProtocoleDeReparationHtml(
     </div>
     <div style="text-align:right">
       <div style="background:#111827;color:white;padding:5px 14px;border-radius:2px;font-size:14px;font-weight:900;letter-spacing:0.12em;display:inline-block">
-        PROTOCOLE DE RÉPARATION
+        ${lang === "pt" ? "PROTOCOLO DE REPARAÇÃO" : "PROTOCOLE DE RÉPARATION"}
       </div>
       <div style="margin-top:4px">
         <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:900;color:#b91c1c;border:1.5px solid #dc2626;background:#fef2f2;padding:2px 12px;border-radius:3px;display:inline-block;white-space:nowrap">
@@ -390,7 +414,7 @@ export function buildProtocoleDeReparationHtml(
       <tr>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af;border-bottom:1px solid #9ca3af">
           <div class="cell-label">Nom Client</div>
-          <div class="cell-val">${esc(b.client_name || "-")}</div>
+          <div class="cell-val">${esc(b.client_name || "-")}${b.client_display_id ? ` <span style="font-size:8px;color:#4b5563;font-weight:normal">(${esc(b.client_display_id)})</span>` : ""}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af;border-bottom:1px solid #9ca3af">
           <div class="cell-label">Marque</div>
@@ -565,7 +589,7 @@ export function buildProtocoleDeReparationHtml(
       <tr>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db;border-bottom:1px solid #d1d5db;width:22%">
           <div class="cell-label">Assurance</div>
-          <div class="cell-val">${esc(b.dossier_insurance_company || "-")}</div>
+          <div class="cell-val">${esc(b.dossier_insurance_company || "-")}${b.dossier_claim_number ? ` (${esc(b.dossier_claim_number)})` : ""}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db;border-bottom:1px solid #d1d5db;width:24%">
           <div class="cell-label">Apporteur d'affaires</div>
@@ -580,8 +604,8 @@ export function buildProtocoleDeReparationHtml(
           <div class="cell-val">${b.dossier_franchise_amount ? `${Number(b.dossier_franchise_amount).toFixed(2)} EUR` : "- EUR"}</div>
         </td>
         <td style="padding:4px 6px;width:18%;text-align:center;vertical-align:bottom" rowspan="2">
-          <div class="cell-label">Signature Expert</div>
-          <div style="height:32px;border-bottom:1px dashed #9ca3af;margin-top:4px"></div>
+          <div class="cell-label">${esc(sigName ? `Signature (${sigName})` : "Signature Expert")}</div>
+          ${sigImg ? `<img src="${esc(sigImg)}" style="max-height:36px;max-width:100%;object-fit:contain" alt="Signature" />` : `<div style="height:32px;border-bottom:1px dashed #9ca3af;margin-top:4px"></div>`}
         </td>
       </tr>
       <tr>

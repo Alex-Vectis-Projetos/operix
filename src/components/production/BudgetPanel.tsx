@@ -262,12 +262,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           });
         }
       }
-      if (b.status === "approved" || b.status === "rejected") {
-        setEditing(b);
-      } else {
-        setOpen(false);
-        setEditing(null);
-      }
+      setEditing(b);
       return savedResult;
     } catch (err: any) {
       toast.error(err?.message || "Erro ao salvar orçamento.");

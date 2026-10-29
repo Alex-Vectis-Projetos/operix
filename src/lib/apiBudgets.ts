@@ -325,7 +325,9 @@ export function markBudgetSent(id: string): Promise<{ ok: boolean; message: stri
 
 export function apiBudgetToLocalBudget(api: ApiBudget): any {
   const rev = api.currentRevision || api.current_revision;
-  const canonicalStatus = rev?.status || "draft";
+  const canonicalStatus = api.status === "rejected" || api.status === "approved"
+    ? api.status
+    : (rev?.status || api.status || "draft");
   const clientSnap = rev?.clientSnapshot || rev?.client_snapshot || {};
   const vehicleSnap = rev?.vehicleSnapshot || rev?.vehicle_snapshot || {};
   const dossierSnap = rev?.dossierSnapshot || rev?.dossier_snapshot || {};

@@ -958,8 +958,15 @@ export async function rejectBudgetRevision(
       },
     });
 
+    const updatedBudget = await tx.budget.update({
+      where: { id: budget.id },
+      data: {
+        currentRevisionId: revision.id,
+      },
+    });
+
     return {
-      budget,
+      budget: updatedBudget,
       revision: rejectedRev,
     };
   });

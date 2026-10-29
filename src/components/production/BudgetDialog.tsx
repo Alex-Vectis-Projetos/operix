@@ -2302,15 +2302,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const viewBudgetPreview = async () => {
     setIsGeneratingPdf(true);
     try {
-      const targetId = await persistCurrentState(false);
-      if (!targetId || targetId.startsWith("local-")) {
-        toast.error(
-          langDisplay === "fr"
-            ? "Impossible d'enregistrer le devis pour l'aperçu."
-            : "Não foi possível salvar o orçamento para visualização.",
-        );
-        return;
-      }
       const isPdr =
         form.budget_type === "pdr" ||
         (form as any).budgetType === "pdr" ||
@@ -2322,12 +2313,24 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         }));
 
       if (isPdr) {
+        // Visualização instantânea em tempo real com os dados correntes do formulário
         openBudgetPreview(form as any, langDisplay, {
           name: workspaceName,
           logoUrl: logoUrl,
           brandConfig: brandConfig,
         });
+        // Salva estado em segundo plano sem interromper a visualização
+        persistCurrentState(false).catch((e) => console.error("Auto-save na visualização:", e));
       } else {
+        const targetId = await persistCurrentState(false);
+        if (!targetId || targetId.startsWith("local-")) {
+          toast.error(
+            langDisplay === "fr"
+              ? "Impossible d'enregistrer le devis pour l'aperçu."
+              : "Não foi possível salvar o orçamento para visualização.",
+          );
+          return;
+        }
         const blob = await getBudgetPdf(targetId);
         const url = URL.createObjectURL(blob);
         window.open(url, "_blank", "noopener,noreferrer");
@@ -2482,6 +2485,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       toast.warning(
         langDisplay === "fr" ? "Devis rejeté · Bloqué" : "Orçamento rejeitado · Bloqueado.",
       );
+      onOpenChange(false);
     } catch (err: any) {
       toast.error(err?.message || "Falha ao rejeitar orçamento.");
     }

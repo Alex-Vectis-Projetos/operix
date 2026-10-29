@@ -112,11 +112,11 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     icon: ClipboardList,
   },
   {
-    key: "disassembly",
-    label: "Desmontagem",
-    shortLabel: "Desmontagem",
+    key: "assembly_disassembly",
+    label: "Montagem / Desmontagem",
+    shortLabel: "Mont./Desm.",
     sectorName: "Montagem / Desmontagem",
-    description: "Desmontagem de peças, forrações e presilhas",
+    description: "Desmontagem inicial de peças/forrações e montagem/reinstalação pós-pintura",
     accent: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
     dot: "bg-amber-500",
     icon: Wrench,
@@ -170,16 +170,6 @@ export const WORKSHOP_STAGES: StageConfig[] = [
     accent: "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30",
     dot: "bg-purple-500",
     icon: Paintbrush,
-  },
-  {
-    key: "assembly",
-    label: "Montagem",
-    shortLabel: "Montagem",
-    sectorName: "Montagem / Desmontagem",
-    description: "Reinstalação de peças, vãos e vidraçaria",
-    accent: "bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/30",
-    dot: "bg-teal-500",
-    icon: Wrench,
   },
   {
     key: "inspection",
@@ -248,7 +238,7 @@ export const SECTOR_FILTERS: SectorFilterConfig[] = [
     description: "Desmontagem inicial e montagem/reinstalação pós-pintura",
     dot: "bg-amber-500",
     icon: Wrench,
-    stageKeys: ["disassembly", "assembly"],
+    stageKeys: ["assembly_disassembly", "disassembly", "assembly"],
   },
   {
     key: "pdr",
@@ -323,6 +313,9 @@ export function getEffectiveStage(o: ProductionOrder): string {
   if (o.status === "paused") return "paused";
   if (o.status === "delivered") return "finished";
   const stage = o.currentStage || (o as any).current_stage;
+  if (stage === "disassembly" || stage === "assembly" || stage === "assembly_disassembly") {
+    return "assembly_disassembly";
+  }
   if (stage && STAGE_MAP.has(stage)) return stage;
   return "awaiting_start";
 }

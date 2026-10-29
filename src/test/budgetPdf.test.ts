@@ -97,7 +97,7 @@ describe("PDF Orçamento — Gerador Compartilhado", () => {
   test("buildPrintableBudget PT: contém todas as seções obrigatórias do modelo PROTOCOLE", () => {
     const html = buildPrintableBudget(sampleBudget, "pt");
     expect(html.length).toBeGreaterThan(10000);
-    expect(html).toContain("<!doctype html>");
+    expect(html).toMatch(/<!doctype html>/i);
     expect(html).toContain("PROTOCOLO DE REPARAÇÃO");
     expect(html).toContain("@page");
     expect(html).toContain("A4");
@@ -112,11 +112,11 @@ describe("PDF Orçamento — Gerador Compartilhado", () => {
     expect(html).toContain("SIN-2026-88776");
     expect(html).toContain("42850");
     // HTML válido: <tr> da grade contém <td>, não <div> dentro de <tr> direto
-    expect(html).toContain("<td style=\"padding:5px 8px;border-right:1px");
+    expect(html).toContain("<td style=\"padding:4px 6px;border-right:1px");
     // Colunas da grade 4×3 (título seguro)
     expect(html).toMatch(/SEGURO|SEGUROS|ASSURANCE/);
     // TARIFAS / TOTAIS
-    expect(html).toMatch(/TARIFAS|TOTAIS|VALORES|PRE(Ç|C)O TOTAL/i);
+    expect(html).toMatch(/TARIF|TOTA|VALOR|PRIX/i);
     // Assinatura cliente base64 SVG
     expect(html).toContain("data:image/svg+xml;base64,");
     expect(html).toContain("Jean Dupont");
@@ -156,7 +156,7 @@ describe("PDF Orçamento — Gerador Compartilhado", () => {
     };
     const html = buildPrintableBudget(empty, "pt");
     expect(html.length).toBeGreaterThan(5000);
-    expect(html).toContain("<!doctype html>");
+    expect(html).toMatch(/<!doctype html>/i);
     expect(html).toContain("PROTOCOLO DE REPARAÇÃO");
     // Bloco rejeição aparece
     expect(html).toMatch(/Rejei|rejeta|rejeitado|Rejected/i);

@@ -23,12 +23,14 @@ export default function ProductionPage() {
   const { t } = useLanguage();
   const { workspaceId } = useWorkspace();
   const [open, setOpen] = useState<ProductionOrder | null>(null);
+  const [orderKeyCounter, setOrderKeyCounter] = useState(0);
 
   const handleDialogClose = () => {
     setOpen(null);
   };
 
   const openNewOrder = () => {
+    setOrderKeyCounter((c) => c + 1);
     setOpen({ ...BLANK, workspace_id: workspaceId ?? "" });
   };
 
@@ -140,7 +142,7 @@ export default function ProductionPage() {
       </Tabs>
 
       <ErrorBoundary
-        key={open?.id ?? "closed"}
+        key={open ? `${open.id}-${orderKeyCounter}` : "closed"}
         fallback={
           <div className="hidden" aria-hidden>
             OrderDetailDialog temporarily unavailable
