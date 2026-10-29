@@ -720,70 +720,86 @@ export function VehicleBlueprint5Views({
       />
 
       {/* BARRA SUPERIOR DE CONTROLE PERICIAL */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
-        {/* Identificação e Contadores */}
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="gap-1.5 px-2.5 py-1 text-xs font-semibold border-cyan-800 text-cyan-400 bg-cyan-950/30">
-            <Eye className="h-3.5 w-3.5 text-cyan-400" />
-            Blueprint de Inspeção (5 Vistas)
-          </Badge>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">{damagePoints.length}</span> marcadores
-            <span className="text-slate-600">|</span>
-            <span className="text-cyan-400 font-medium">{damagePoints.filter((p) => p.contracted).length} orçados</span>
-            <span className="text-slate-600">|</span>
-            <span className="text-amber-400 font-medium">{damagePoints.filter((p) => !p.contracted).length} pré-existentes</span>
-          </div>
-        </div>
-
-        {/* Controles de Carroceria, Vista e Tema */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Seletor de Carroceria */}
-          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg border">
-            {BODY_TYPES.map((bt) => (
-              <Button
-                key={bt.code}
-                size="sm"
-                variant={bodyType === bt.code ? "default" : "ghost"}
-                className={cn(
-                  "h-7 px-2.5 text-xs font-medium",
-                  bodyType === bt.code && "bg-cyan-600 text-white shadow-sm"
-                )}
-                onClick={() => handleSelectBodyType(bt.code)}
-              >
-                {bt.label}
-              </Button>
-            ))}
+      <div className="space-y-2.5 border-b pb-3">
+        {/* Linha 1: Identificação, Contadores e Modo de Visualização */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="gap-1.5 px-2.5 py-1 text-xs font-semibold border-cyan-800 text-cyan-400 bg-cyan-950/40">
+              <Eye className="h-3.5 w-3.5 text-cyan-400" />
+              Blueprint de Inspeção (5 Vistas)
+            </Badge>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 font-medium text-foreground">
+                <strong className="text-cyan-400">{damagePoints.length}</strong> {damagePoints.length === 1 ? "marcador" : "marcadores"}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-md bg-blue-950/50 border border-blue-800/60 px-2 py-0.5 text-cyan-300 font-medium">
+                {damagePoints.filter((p) => p.contracted).length} orçados
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-md bg-amber-950/50 border border-amber-800/60 px-2 py-0.5 text-amber-300 font-medium">
+                {damagePoints.filter((p) => !p.contracted).length} pré-existentes
+              </span>
+            </div>
           </div>
 
           {/* Alternância CAD Dark vs Ficha Impressa */}
           <Button
             size="sm"
             variant="outline"
-            className="h-8 px-2.5 text-xs gap-1.5 border-slate-700"
+            className="h-7 px-3 text-xs gap-1.5 border-slate-700 bg-card hover:bg-muted"
             onClick={() => setIsCadTheme(!isCadTheme)}
             title={isCadTheme ? "Mudar para Ficha Técnica Clara" : "Mudar para CAD Blueprint Dark"}
           >
             {isCadTheme ? <Sun className="h-3.5 w-3.5 text-amber-400" /> : <Moon className="h-3.5 w-3.5 text-cyan-400" />}
-            <span className="hidden md:inline">{isCadTheme ? "Modo Impresso" : "CAD Dark"}</span>
+            <span className="font-medium">{isCadTheme ? "Modo Impresso" : "CAD Dark"}</span>
           </Button>
+        </div>
+
+        {/* Linha 2: Toolbar Unificada e Organizada de Carroceria e Vistas */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-muted/40 p-1.5 rounded-lg border">
+          {/* Seletor de Carroceria */}
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1 shrink-0">
+              Carroceria:
+            </span>
+            <div className="flex items-center gap-1 bg-background/80 p-0.5 rounded-md border shrink-0">
+              {BODY_TYPES.map((bt) => (
+                <Button
+                  key={bt.code}
+                  size="sm"
+                  variant={bodyType === bt.code ? "default" : "ghost"}
+                  className={cn(
+                    "h-6 px-2.5 text-xs font-medium transition-all",
+                    bodyType === bt.code && "bg-cyan-600 text-white shadow-sm font-semibold"
+                  )}
+                  onClick={() => handleSelectBodyType(bt.code)}
+                >
+                  {bt.label}
+                </Button>
+              ))}
+            </div>
+          </div>
 
           {/* Filtro / Navegação de Vistas */}
-          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg border">
-            {(["all", "top", "front", "rear", "left", "right"] as const).map((v) => (
-              <Button
-                key={v}
-                size="sm"
-                variant={activeView === v ? "default" : "ghost"}
-                className={cn(
-                  "h-7 px-2 text-xs",
-                  activeView === v && "bg-primary text-primary-foreground font-semibold"
-                )}
-                onClick={() => setActiveView(v)}
-              >
-                {v === "all" ? "Prancha Completa" : v === "top" ? "Superior" : v === "front" ? "Frente" : v === "rear" ? "Traseira" : v === "left" ? "Lat. Esq." : "Lat. Dir."}
-              </Button>
-            ))}
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1 shrink-0">
+              Vista:
+            </span>
+            <div className="flex items-center gap-1 bg-background/80 p-0.5 rounded-md border shrink-0">
+              {(["all", "top", "front", "rear", "left", "right"] as const).map((v) => (
+                <Button
+                  key={v}
+                  size="sm"
+                  variant={activeView === v ? "default" : "ghost"}
+                  className={cn(
+                    "h-6 px-2 text-xs transition-all",
+                    activeView === v && "bg-primary text-primary-foreground font-semibold shadow-sm"
+                  )}
+                  onClick={() => setActiveView(v)}
+                >
+                  {v === "all" ? "Prancha 5V" : v === "top" ? "Superior" : v === "front" ? "Frente" : v === "rear" ? "Traseira" : v === "left" ? "Lat. Esq." : "Lat. Dir."}
+                </Button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -1093,12 +1109,12 @@ export function VehicleBlueprint5Views({
             </div>
 
             {/* Evidência Fotográfica com Câmera Funcional */}
-            <div className="space-y-1">
+            <div className="md:col-span-2 space-y-1">
               <Label className="text-xs font-medium">Evidência Fotográfica</Label>
               <div className="flex items-center gap-1.5">
                 <Input
-                  className="h-8 text-xs font-mono"
-                  placeholder="URL ou arquivo..."
+                  className="h-8 text-xs font-mono flex-1"
+                  placeholder="URL ou arquivo de imagem..."
                   value={selectedPoint.photoStoragePath ?? ""}
                   onChange={(e) => updateSelectedPoint({ photoStoragePath: e.target.value })}
                 />
@@ -1106,20 +1122,27 @@ export function VehicleBlueprint5Views({
                   size="sm"
                   type="button"
                   variant="outline"
-                  className="h-8 px-2 border-slate-700 hover:text-cyan-400"
+                  className="h-8 px-2.5 border-slate-700 hover:text-cyan-400 gap-1 shrink-0"
                   title="Tirar foto ou carregar imagem da avaria"
                   onClick={handlePhotoUploadClick}
                 >
                   <Camera className="h-3.5 w-3.5" />
+                  <span className="text-[11px] hidden sm:inline">Foto</span>
                 </Button>
               </div>
             </div>
 
-            {/* BOTÃO VALIDAR PEÇA E VINCULAR AO ORÇAMENTO */}
-            <div className="flex items-end">
+            {/* BARRA DE AÇÃO: VALIDAR PEÇA E VINCULAR AO ORÇAMENTO */}
+            <div className="md:col-span-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t border-slate-800/80 mt-1">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <CheckCircle2 className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                <span>
+                  Ao validar, os dados desta peça são consolidados e vinculados automaticamente às tabelas financeiras de serviços/peças.
+                </span>
+              </div>
               <Button
                 type="button"
-                className="h-8 w-full gap-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold shadow"
+                className="h-9 px-5 gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow shrink-0"
                 onClick={() => handleValidatePiece()}
               >
                 <CheckCheck className="h-4 w-4" />
