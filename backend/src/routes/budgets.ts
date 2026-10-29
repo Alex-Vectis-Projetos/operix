@@ -32,10 +32,201 @@ import {
 import { buildSimplePdf, generateBudgetPdfBuffer } from "../lib/pdf/simplePdf.js";
 import { sendEmail } from "../lib/email/resend.js";
 import { notifyBudgetApproved } from "../services/notificationService.js";
+import { signBudgetApprovalToken, verifyBudgetApprovalToken } from "../lib/jwt.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 export const budgetsRouter = Router();
+
+// ============================================================================
+// ROTAS PÚBLICAS DE ASSINATURA REMOTA (WhatsApp / E-mail / Link Tokenizado)
+// ============================================================================
+
+/**
+ * GET /api/budgets/public-sign/:token
+ * Retorna dados higienizados do orçamento para visualização pública pelo cliente.
+ */
+budgetsRouter.get("/public-sign/:token", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const token = String(req.params.token);
+    const { budgetId, revisionId, workspaceId } = verifyBudgetApprovalToken(token);
+
+    const budget = await prisma.budget.findFirst({
+      where: { id: budgetId, workspaceId, deletedAt: null },
+      include: {
+        workspace: {
+          select: { id: true, name: true, logoUrl: true },
+        },
+        revisions: {
+          where: { id: revisionId },
+          take: 1,
+        },
+      },
+    });
+
+    if (!budget || budget.revisions.length === 0) {
+      return res.status(404).json({ message: "Orçamento ou revisão não encontrado." });
+    }
+
+    const rev = budget.revisions[0];
+    return res.status(200).json({
+      budgetId: budget.id,
+      budgetCode: budget.code,
+      revisionId: rev.id,
+      revisionNumber: rev.revisionNumber,
+      status: rev.status,
+      isApproved: rev.status === "approved",
+      isRejected: rev.status === "rejected",
+      approvedAt: rev.approvedAt,
+      createdAt: rev.createdAt,
+      currencyCode: rev.currencyCode,
+      grossTotal: Number(rev.grossTotal),
+      discountTotal: Number(rev.discountTotal),
+      taxTotal: Number(rev.taxTotal),
+      finalTotal: Number(rev.finalTotal),
+      client: rev.clientSnapshot,
+      vehicle: rev.vehicleSnapshot,
+      services: rev.services,
+      parts: rev.parts,
+      labor: rev.labor,
+      signature: rev.signature,
+      workspace: budget.workspace,
+    });
+  } catch (err: any) {
+    if (
+      err.message?.includes("TOKEN_INVALID") ||
+      err.name === "JsonWebTokenError" ||
+      err.name === "TokenExpiredError"
+    ) {
+      return res.status(401).json({ message: "O link de assinatura é inválido ou expirou." });
+    }
+    return next(err);
+  }
+});
+
+/**
+ * POST /api/budgets/public-sign/:token/approve
+ * Aprova o orçamento remotamente colhendo a assinatura digital do cliente final.
+ */
+budgetsRouter.post("/public-sign/:token/approve", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const token = String(req.params.token);
+    const { budgetId, revisionId, workspaceId } = verifyBudgetApprovalToken(token);
+
+    const { signerName, signatureData, signerType } = req.body;
+    if (!signerName?.trim()) {
+      return res.status(400).json({ message: "Nome do signatário é obrigatório." });
+    }
+    if (!signatureData) {
+      return res.status(400).json({ message: "Assinatura gráfica é obrigatória." });
+    }
+
+    const budget = await prisma.budget.findFirst({
+      where: { id: budgetId, workspaceId, deletedAt: null },
+      include: {
+        revisions: { where: { id: revisionId } },
+      },
+    });
+
+    if (!budget || budget.revisions.length === 0) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+
+    const rev = budget.revisions[0];
+    if (rev.status === "approved") {
+      return res.status(200).json({
+        success: true,
+        message: "Orçamento já foi aprovado anteriormente.",
+        budgetCode: budget.code,
+      });
+    }
+    if (rev.status === "rejected") {
+      return res.status(400).json({
+        message: "Este orçamento foi marcado como recusado e não pode ser aprovado.",
+      });
+    }
+
+    const signaturePayload = {
+      signed: true,
+      signerName: signerName.trim(),
+      signerType: signerType || "client",
+      signedAt: new Date().toISOString(),
+      signatureData,
+      confirmationMethod: "DRAWN_SIGNATURE",
+      channel: "REMOTE_PUBLIC_LINK",
+    };
+
+    const result = await approveBudgetRevision(workspaceId, budgetId, revisionId, null, {
+      signature: signaturePayload,
+      notes: `Aprovado remotamente pelo cliente via link público por ${signerName.trim()}`,
+    });
+
+    const notifyTarget = (result.budget as any).userId || (result.budget as any).technicianUserId;
+    if (notifyTarget) {
+      await notifyBudgetApproved(notifyTarget, (result.budget as any).code, (result.budget as any).clientName);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Orçamento aprovado com sucesso!",
+      budgetCode: budget.code,
+    });
+  } catch (err: any) {
+    if (
+      err.message?.includes("TOKEN_INVALID") ||
+      err.name === "JsonWebTokenError" ||
+      err.name === "TokenExpiredError"
+    ) {
+      return res.status(401).json({ message: "O link de assinatura é inválido ou expirou." });
+    }
+    return next(err);
+  }
+});
+
+/**
+ * GET /api/budgets/public-sign/:token/pdf
+ * Permite que o cliente final visualize/baixe o PDF oficial do orçamento sem login.
+ */
+budgetsRouter.get("/public-sign/:token/pdf", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const token = String(req.params.token);
+    const { budgetId, revisionId, workspaceId } = verifyBudgetApprovalToken(token);
+
+    const budget = await prisma.budget.findFirst({
+      where: { id: budgetId, workspaceId, deletedAt: null },
+      include: {
+        workspace: { include: { billingProfile: true } },
+        revisions: { where: { id: revisionId } },
+      },
+    });
+
+    if (!budget || budget.revisions.length === 0) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+
+    const revision = budget.revisions[0];
+    const inspection = await prisma.vehicleInspection.findFirst({
+      where: { budgetId: budget.id, workspaceId },
+      include: { damagePoints: true },
+    });
+
+    const pdfBuffer = await generateBudgetPdfBuffer(budget, revision, budget.workspace, inspection);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="Orcamento-${budget.code}.pdf"`);
+    res.setHeader("Cache-Control", "no-cache");
+    return res.status(200).send(pdfBuffer);
+  } catch (err: any) {
+    if (
+      err.message?.includes("TOKEN_INVALID") ||
+      err.name === "JsonWebTokenError" ||
+      err.name === "TokenExpiredError"
+    ) {
+      return res.status(401).json({ message: "O link de assinatura é inválido ou expirou." });
+    }
+    return next(err);
+  }
+});
 
 budgetsRouter.use(requireAuth);
 budgetsRouter.use(resolveRequestContext);
@@ -344,6 +535,56 @@ budgetsRouter.get("/:id", async (req: Request, res: Response, next: NextFunction
     }
 
     return res.status(200).json({ budget: formatBudget(budget) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * GET /api/budgets/:id/sign-link
+ * Gera token assinado e link compartilhável para o cliente assinar remotamente via WhatsApp / E-mail.
+ */
+budgetsRouter.get("/:id/sign-link", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const ctx = req.ctx;
+    const workspaceId = ctx?.activeWorkspaceId;
+
+    if (!workspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const budget = await prisma.budget.findUnique({
+      where: { id },
+      include: {
+        currentRevision: true,
+        approvedRevision: true,
+      },
+    });
+
+    if (!budget || budget.deletedAt || budget.workspaceId !== workspaceId) {
+      return res.status(404).json({ message: "Orçamento não encontrado." });
+    }
+
+    assertTenantAccess(ctx, budget.workspaceId);
+    assertObjectAccess(ctx, budget);
+
+    const revisionId = budget.currentRevisionId || budget.approvedRevisionId;
+    if (!revisionId) {
+      return res.status(400).json({ message: "Orçamento não possui revisão ativa para assinatura." });
+    }
+
+    const token = signBudgetApprovalToken({
+      budgetId: budget.id,
+      revisionId,
+      workspaceId: budget.workspaceId,
+    });
+
+    return res.status(200).json({
+      token,
+      path: `/orcamento/assinar/${token}`,
+      budgetCode: budget.code,
+    });
   } catch (error) {
     return next(error);
   }

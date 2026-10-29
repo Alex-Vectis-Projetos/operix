@@ -323,6 +323,12 @@ export function markBudgetSent(id: string): Promise<{ ok: boolean; message: stri
   });
 }
 
+export function getBudgetSignLink(id: string): Promise<{ token: string; path: string; budgetCode: string }> {
+  return apiRequest(`/budgets/${id}/sign-link`, {
+    method: "GET",
+  });
+}
+
 export function apiBudgetToLocalBudget(api: ApiBudget): any {
   const rev = api.currentRevision || api.current_revision;
   const canonicalStatus = api.status === "rejected" || api.status === "approved"

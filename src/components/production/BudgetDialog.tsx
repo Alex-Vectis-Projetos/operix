@@ -2,7 +2,7 @@ import { VehicleBlueprint5Views, type DamagePointData, type ValidatedPartSummary
 import { Eye } from "lucide-react";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto, markBudgetSent } from "@/lib/apiBudgets";
+import { getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto, markBudgetSent, getBudgetSignLink } from "@/lib/apiBudgets";
 import {
   Dialog,
   DialogContent,
@@ -47,7 +47,7 @@ import {
   Wrench, Palette, Hammer, ArrowLeft, Box as BoxIcon, MapPin, ShieldCheck,
   Boxes, ChevronDown, Check as CheckIcon, Search as SearchIcon, Lock as LockIcon,
   CheckCircle2, XCircle, Eraser, HandPlatter, Send, AlertTriangle, Scan as ScanIcon,
-  FileDown, FileText, Users, Loader2, RotateCcw,
+  FileDown, FileText, Users, Loader2, RotateCcw, Copy, Share2, Link as LinkIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { COUNTRIES } from "@/lib/countries";
@@ -1969,8 +1969,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     const ctx = cvs.getContext("2d");
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
-    const cssW = cvs.clientWidth;
-    const cssH = cvs.clientHeight;
+    const cssW = cvs.clientWidth || cvs.getBoundingClientRect().width || 500;
+    const cssH = cvs.clientHeight || 160;
     cvs.width = Math.max(1, Math.floor(cssW * dpr));
     cvs.height = Math.max(1, Math.floor(cssH * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1978,39 +1978,60 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, cssW, cssH);
     ctx.strokeStyle = "#0f172a";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     canvasDrawingRef.current.hasStroke = false;
   };
 
-  const canvasPointerDown = (clientX: number, clientY: number) => {
+  const canvasPointerDown = (x: number, y: number) => {
     if (isLocked) return;
     const cvs = canvasRef.current;
     if (!cvs) return;
-    const rect = cvs.getBoundingClientRect();
+    const ctx = cvs.getContext("2d");
+    if (!ctx) return;
+
+    if (cvs.width <= 1 || cvs.height <= 1) {
+      clearSignatureCanvas();
+    }
+
     canvasDrawingRef.current.drawing = true;
-    canvasDrawingRef.current.lastX = clientX - rect.left;
-    canvasDrawingRef.current.lastY = clientY - rect.top;
+    canvasDrawingRef.current.lastX = x;
+    canvasDrawingRef.current.lastY = y;
+
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.arc(x, y, 1.25, 0, Math.PI * 2);
+    ctx.fillStyle = "#0f172a";
+    ctx.fill();
+    canvasDrawingRef.current.hasStroke = true;
   };
-  const canvasPointerMove = (clientX: number, clientY: number) => {
+
+  const canvasPointerMove = (x: number, y: number) => {
     if (isLocked) return;
     if (!canvasDrawingRef.current.drawing) return;
     const cvs = canvasRef.current;
     if (!cvs) return;
     const ctx = cvs.getContext("2d");
     if (!ctx) return;
-    const rect = cvs.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
     ctx.moveTo(canvasDrawingRef.current.lastX, canvasDrawingRef.current.lastY);
     ctx.lineTo(x, y);
     ctx.stroke();
+
     canvasDrawingRef.current.lastX = x;
     canvasDrawingRef.current.lastY = y;
     canvasDrawingRef.current.hasStroke = true;
   };
+
   const canvasPointerUp = () => {
     canvasDrawingRef.current.drawing = false;
   };
@@ -2363,11 +2384,35 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       }
     }
 
+    let signLink = "";
+    try {
+      let targetId = form.id;
+      if (!targetId || targetId.startsWith("local-")) {
+        const savedId = await persistCurrentState(false);
+        if (savedId) targetId = savedId;
+      }
+      if (targetId && !targetId.startsWith("local-")) {
+        const linkRes = await getBudgetSignLink(targetId);
+        if (linkRes?.path) {
+          signLink = `${window.location.origin}${linkRes.path}`;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not generate sign link for WhatsApp:", e);
+    }
+
+    const signPart = signLink
+      ? (langDisplay === "fr"
+          ? `\n\n✍️ Vous pouvez consulter les détails et signer directement sur votre smartphone via ce lien sécurisé :\n${signLink}`
+          : `\n\n✍️ Você pode visualizar os detalhes e assinar diretamente pelo celular no link abaixo:\n${signLink}`)
+      : "";
+
     const text = encodeURIComponent(
       (langDisplay === "fr" ? "Bonjour,\n\nVeuillez trouver votre devis n° " : "Olá,\n\nSegue seu orçamento nº ") +
       (form.number || "(sem número)") +
       (langDisplay === "fr" ? " — Montant total: " : " — Valor total: ") +
       formatMoney(totals.total, form.currency || "EUR") +
+      signPart +
       (langDisplay === "fr"
         ? "\n\nLe document PDF a été téléchargé localement et est joint ci-après."
         : "\n\nO documento PDF foi baixado e está pronto para envio."),
@@ -2424,6 +2469,32 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       qc.invalidateQueries({ queryKey: ["budgets"] });
     } catch (err: any) {
       toast.error(err?.message || (langDisplay === "fr" ? "Échec de l'envoi transactionnel." : "Falha no envio transacional do e-mail."));
+    }
+  };
+
+  const copySignLink = async () => {
+    try {
+      let targetId = form.id;
+      if (!targetId || targetId.startsWith("local-")) {
+        const savedId = await persistCurrentState(false);
+        if (savedId) targetId = savedId;
+      }
+      if (!targetId || targetId.startsWith("local-")) {
+        toast.error(langDisplay === "fr" ? "Veuillez enregistrer le devis d'abord." : "Salve o orçamento primeiro.");
+        return;
+      }
+      const res = await getBudgetSignLink(targetId);
+      if (res?.path) {
+        const fullUrl = `${window.location.origin}${res.path}`;
+        await navigator.clipboard.writeText(fullUrl);
+        toast.success(
+          langDisplay === "fr"
+            ? "Lien de signature copié dans le presse-papier !"
+            : "Link de assinatura copiado com sucesso! Você pode colá-lo no WhatsApp ou e-mail."
+        );
+      }
+    } catch (e: any) {
+      toast.error(e?.message || (langDisplay === "fr" ? "Erreur lors de la génération du lien" : "Erro ao gerar link de assinatura"));
     }
   };
 
@@ -4071,34 +4142,35 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                       <p className="mb-1.5 text-xs font-medium text-muted-foreground">
                         {langDisplay === "fr" ? "Zone de signature (dessiner)" : "Área para assinatura (desenhar)"}
                       </p>
-                      <div className="rounded-lg border border-border bg-white p-1 shadow-sm">
+                      <div className="relative rounded-lg border border-border bg-white p-1 shadow-sm">
                         <canvas
                           ref={canvasRef}
-                          onMouseDown={(e) => {
+                          onPointerDown={(e) => {
+                            if (isLocked) return;
+                            try {
+                              e.currentTarget.setPointerCapture(e.pointerId);
+                            } catch {
+                              // ignore
+                            }
                             const rect = e.currentTarget.getBoundingClientRect();
                             canvasPointerDown(e.clientX - rect.left, e.clientY - rect.top);
                           }}
-                          onMouseMove={(e) => {
+                          onPointerMove={(e) => {
+                            if (isLocked) return;
                             const rect = e.currentTarget.getBoundingClientRect();
                             canvasPointerMove(e.clientX - rect.left, e.clientY - rect.top);
                           }}
-                          onMouseUp={canvasPointerUp}
-                          onMouseLeave={canvasPointerUp}
-                          onTouchStart={(e) => {
-                            e.preventDefault();
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            const t = e.touches[0];
-                            canvasPointerDown(t.clientX - rect.left, t.clientY - rect.top);
+                          onPointerUp={(e) => {
+                            try {
+                              e.currentTarget.releasePointerCapture(e.pointerId);
+                            } catch {
+                              // ignore
+                            }
+                            canvasPointerUp();
                           }}
-                          onTouchMove={(e) => {
-                            e.preventDefault();
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            const t = e.touches[0];
-                            canvasPointerMove(t.clientX - rect.left, t.clientY - rect.top);
-                          }}
-                          onTouchEnd={(e) => { e.preventDefault(); canvasPointerUp(); }}
+                          onPointerCancel={canvasPointerUp}
                           className={cn(
-                            "block w-full cursor-crosshair touch-none rounded-md",
+                            "block w-full cursor-crosshair touch-none select-none rounded-md",
                             isLocked ? "pointer-events-none opacity-60" : "",
                           )}
                           style={{ height: "160px" }}
@@ -4243,6 +4315,15 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                       {form.status === "sent"
                         ? (langDisplay === "fr" ? "Déjà envoyé" : "Já enviado")
                         : (langDisplay === "fr" ? "Envoyer au client" : "Enviar ao cliente")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={copySignLink}
+                      className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+                    >
+                      <Share2 className="h-4 w-4" />{" "}
+                      {langDisplay === "fr" ? "Lien signature" : "Link p/ Assinar"}
                     </Button>
                     <Button type="button" onClick={save} disabled={saving}>
                       {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{" "}
@@ -4825,6 +4906,31 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                     className="h-8"
                   >
                     {langDisplay === "fr" ? "Envoyer" : "Enviar"}
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                      <LinkIcon className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        {langDisplay === "fr" ? "Lien de signature (Smartphone / Client)" : "Link de Assinatura Online (Celular)"}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {langDisplay === "fr" ? "Lien sécurisé pour signer directement avec le doigt" : "Link seguro para o cliente assinar na tela sem login"}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    onClick={copySignLink}
+                    className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    {langDisplay === "fr" ? "Copier" : "Copiar"}
                   </Button>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-dashed border-border/70 bg-muted/30 px-3 py-2.5 opacity-80">

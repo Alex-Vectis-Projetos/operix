@@ -485,6 +485,7 @@ export interface ApproveRevisionOptions {
   notes?: string;
   dueAt?: Date | string | null;
   operationalSiteKey?: string | null;
+  signature?: any;
 }
 
 type StructuredProductionService = {
@@ -634,7 +635,7 @@ export async function approveBudgetRevision(
   workspaceId: string,
   budgetId: string,
   revisionId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   options?: ApproveRevisionOptions
 ): Promise<{
   budget: Budget;
@@ -806,7 +807,7 @@ export async function approveBudgetRevision(
           status: "in_production",
           priority: "medium",
           notes: options?.notes || `Orçamento ${budget.code} (Rev ${revision.revisionNumber})`,
-          createdBy: actorUserId,
+          createdBy: actorUserId || budget.createdById,
           dueAt: options?.dueAt ? new Date(options.dueAt) : null,
           operationalSiteKey: canonicalSiteKey,
           currencyCode: canonicalCurrency,
@@ -878,7 +879,8 @@ export async function approveBudgetRevision(
       data: {
         status: "approved",
         approvedAt: new Date(),
-        approvedById: actorUserId,
+        approvedById: actorUserId || null,
+        ...(options?.signature ? { signature: options.signature } : {}),
       },
     });
 

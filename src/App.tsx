@@ -60,6 +60,7 @@ const ClientsScreenBilling = lazy(() => import("./components/billing/ClientsScre
 const PeoplePage = lazy(() => import("./pages/PeoplePage"));
 const LocationsPage = lazy(() => import("./pages/LocationsPage"));
 const CountryDocumentRequirementsPage = lazy(() => import("./pages/CountryDocumentRequirementsPage"));
+const PublicBudgetSignPage = lazy(() => import("./pages/PublicBudgetSignPage"));
 
 /** Subtle, layout-stable fallback used while a route chunk is loading. */
 function RouteFallback() {
@@ -107,6 +108,8 @@ const App = () => {
                   <Route path="/legal/gdpr" element={<GdprPage />} />
                   <Route path="/legal/cookies" element={<CookiesPage />} />
                   <Route path="/legal/data-processing" element={<DataProcessingPage />} />
+                  <Route path="/orcamento/assinar/:token" element={<PublicBudgetSignPage />} />
+                  <Route path="/budget-sign/:token" element={<PublicBudgetSignPage />} />
                   <Route path="/change-password" element={<ProtectedRoute><ChangePasswordPage /></ProtectedRoute>} />
                   <Route
                     path="/*"

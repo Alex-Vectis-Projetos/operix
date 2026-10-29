@@ -25,3 +25,48 @@ export function signAccessToken(user: Pick<User, "id" | "email" | "role">) {
 export function verifyAccessToken(token: string) {
   return jwt.verify(token, env.JWT_SECRET) as AuthTokenPayload;
 }
+
+export interface BudgetSigningTokenPayload {
+  budgetId: string;
+  revisionId: string;
+  workspaceId: string;
+  purpose: "budget_public_sign";
+}
+
+export function signBudgetApprovalToken(
+  payload: { budgetId: string; revisionId: string; workspaceId: string },
+  expiresIn = "30d"
+): string {
+  return jwt.sign(
+    {
+      budgetId: payload.budgetId,
+      revisionId: payload.revisionId,
+      workspaceId: payload.workspaceId,
+      purpose: "budget_public_sign",
+    },
+    env.JWT_SECRET,
+    { expiresIn: expiresIn as any }
+  );
+}
+
+export function verifyBudgetApprovalToken(token: string): {
+  budgetId: string;
+  revisionId: string;
+  workspaceId: string;
+} {
+  const decoded = jwt.verify(token, env.JWT_SECRET) as any;
+  if (
+    !decoded ||
+    decoded.purpose !== "budget_public_sign" ||
+    !decoded.budgetId ||
+    !decoded.revisionId ||
+    !decoded.workspaceId
+  ) {
+    throw new Error("TOKEN_INVALID: Token de assinatura inválido ou expirado.");
+  }
+  return {
+    budgetId: decoded.budgetId,
+    revisionId: decoded.revisionId,
+    workspaceId: decoded.workspaceId,
+  };
+}
