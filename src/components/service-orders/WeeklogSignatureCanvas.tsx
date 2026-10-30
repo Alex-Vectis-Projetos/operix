@@ -4,23 +4,37 @@ import { Eraser, PenTool } from "lucide-react";
 
 export interface WeeklogSignatureCanvasRef {
   getPngBlob: () => Promise<Blob | null>;
+  getDataUrl: () => string | null;
   clear: () => void;
   isEmpty: () => boolean;
 }
 
 interface WeeklogSignatureCanvasProps {
   disabled?: boolean;
+  height?: number;
+  placeholder?: string;
+  hideControls?: boolean;
   onStrokeChange?: (hasStrokes: boolean) => void;
 }
 
 export const WeeklogSignatureCanvas = forwardRef<
   WeeklogSignatureCanvasRef,
   WeeklogSignatureCanvasProps
->(function WeeklogSignatureCanvas({ disabled = false, onStrokeChange }, ref) {
+>(function WeeklogSignatureCanvas(
+  {
+    disabled = false,
+    height = 180,
+    placeholder,
+    hideControls = false,
+    onStrokeChange,
+  },
+  ref
+) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasDrawn, setHasDrawn] = useState(false);
+  const lastCoordRef = useRef<{ x: number; y: number } | null>(null);
 
   // Resize canvas according to display width and devicePixelRatio
   const setupCanvas = useCallback(() => {
@@ -30,7 +44,6 @@ export const WeeklogSignatureCanvas = forwardRef<
 
     const rect = container.getBoundingClientRect();
     const width = Math.max(280, Math.floor(rect.width));
-    const height = 180;
     const dpr = window.devicePixelRatio || 1;
 
     // Preserve existing image data if re-scaling
@@ -58,7 +71,7 @@ export const WeeklogSignatureCanvas = forwardRef<
       ctx.strokeStyle = "#0f172a"; // dark slate for contrast
       ctx.lineWidth = 2.5;
 
-      if (tempCanvas) {
+      if (tempCanvas && hasDrawn) {
         ctx.drawImage(
           tempCanvas,
           0,
@@ -72,7 +85,7 @@ export const WeeklogSignatureCanvas = forwardRef<
         );
       }
     }
-  }, []);
+  }, [height, hasDrawn]);
 
   useEffect(() => {
     setupCanvas();
@@ -101,11 +114,10 @@ export const WeeklogSignatureCanvas = forwardRef<
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (disabled) return;
+    if (disabled || e.button !== 0) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Capture pointer for smooth drawing across boundaries
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {
@@ -117,7 +129,14 @@ export const WeeklogSignatureCanvas = forwardRef<
     if (!ctx) return;
 
     ctx.beginPath();
+    ctx.arc(x, y, 1.25, 0, Math.PI * 2);
+    ctx.fillStyle = "#0f172a";
+    ctx.fill();
+
+    ctx.beginPath();
     ctx.moveTo(x, y);
+    lastCoordRef.current = { x, y };
+
     setIsDrawing(true);
     setHasDrawn(true);
     onStrokeChange?.(true);
@@ -132,13 +151,20 @@ export const WeeklogSignatureCanvas = forwardRef<
     if (!ctx) return;
 
     const { x, y } = getCoordinates(e);
+    const last = lastCoordRef.current || { x, y };
+
+    ctx.beginPath();
+    ctx.moveTo(last.x, last.y);
     ctx.lineTo(x, y);
     ctx.stroke();
+
+    lastCoordRef.current = { x, y };
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
     setIsDrawing(false);
+    lastCoordRef.current = null;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -159,6 +185,7 @@ export const WeeklogSignatureCanvas = forwardRef<
     const dpr = window.devicePixelRatio || 1;
     ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
     setHasDrawn(false);
+    lastCoordRef.current = null;
     onStrokeChange?.(false);
   }, [onStrokeChange]);
 
@@ -166,12 +193,40 @@ export const WeeklogSignatureCanvas = forwardRef<
     return !hasDrawn;
   }, [hasDrawn]);
 
+  const getDataUrl = useCallback((): string | null => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasDrawn) return null;
+
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = canvas.width;
+    exportCanvas.height = canvas.height;
+    const expCtx = exportCanvas.getContext("2d");
+    if (!expCtx) return canvas.toDataURL("image/png");
+
+    expCtx.fillStyle = "#ffffff";
+    expCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+    expCtx.drawImage(canvas, 0, 0);
+
+    return exportCanvas.toDataURL("image/png");
+  }, [hasDrawn]);
+
   const getPngBlob = useCallback(async (): Promise<Blob | null> => {
     const canvas = canvasRef.current;
     if (!canvas || !hasDrawn) return null;
 
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = canvas.width;
+    exportCanvas.height = canvas.height;
+    const expCtx = exportCanvas.getContext("2d");
+    const targetCanvas = expCtx ? exportCanvas : canvas;
+    if (expCtx) {
+      expCtx.fillStyle = "#ffffff";
+      expCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+      expCtx.drawImage(canvas, 0, 0);
+    }
+
     return new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(
+      targetCanvas.toBlob(
         (blob) => {
           if (!blob) {
             resolve(null);
@@ -193,15 +248,19 @@ export const WeeklogSignatureCanvas = forwardRef<
     ref,
     () => ({
       getPngBlob,
+      getDataUrl,
       clear,
       isEmpty,
     }),
-    [getPngBlob, clear, isEmpty]
+    [getPngBlob, getDataUrl, clear, isEmpty]
   );
 
   return (
     <div className="w-full space-y-2" ref={containerRef}>
-      <div className="relative w-full rounded-lg border border-border/80 bg-white dark:bg-slate-950/40 p-1 shadow-sm overflow-hidden touch-none">
+      <div
+        className="relative w-full rounded-lg border border-border/80 bg-white p-1 shadow-sm overflow-hidden"
+        style={{ touchAction: "none" }}
+      >
         <canvas
           ref={canvasRef}
           onPointerDown={handlePointerDown}
@@ -209,7 +268,7 @@ export const WeeklogSignatureCanvas = forwardRef<
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
           className={`block w-full cursor-crosshair rounded select-none ${
-            disabled ? "opacity-50 cursor-not-allowed" : ""
+            disabled ? "opacity-50 cursor-not-allowed pointer-events-none" : ""
           }`}
           style={{ touchAction: "none" }}
           aria-label="Área de assinatura manuscrita"
@@ -217,28 +276,30 @@ export const WeeklogSignatureCanvas = forwardRef<
         {!hasDrawn && !disabled && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground/60 select-none">
             <PenTool className="mr-1.5 h-3.5 w-3.5" />
-            Desenhe a assinatura aqui (toque ou mouse)
+            {placeholder || "Desenhe a assinatura aqui (toque ou mouse)"}
           </div>
         )}
       </div>
 
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-muted-foreground">
-          Formato: PNG autêntico (&le; 1 MB). Salvo sob governança no servidor.
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={clear}
-          disabled={disabled || !hasDrawn}
-          className="min-h-[44px] min-w-[44px] gap-1.5 text-xs"
-          aria-label="Limpar assinatura"
-        >
-          <Eraser className="h-3.5 w-3.5" />
-          Limpar
-        </Button>
-      </div>
+      {!hideControls && (
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-muted-foreground">
+            Formato: PNG autêntico (&le; 1 MB). Salvo sob governança no servidor.
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={clear}
+            disabled={disabled || !hasDrawn}
+            className="min-h-[44px] min-w-[44px] gap-1.5 text-xs"
+            aria-label="Limpar assinatura"
+          >
+            <Eraser className="h-3.5 w-3.5" />
+            Limpar
+          </Button>
+        </div>
+      )}
     </div>
   );
 });

@@ -56,6 +56,7 @@ import { useLanguage } from "@/hooks/useLanguage";
 import { useRole } from "@/hooks/useRole";
 import { useExtractProductionOrder, type FieldConfidence } from "@/hooks/useExtractProductionOrder";
 import { FileUploadZone } from "@/components/service-orders/FileUploadZone";
+import { WeeklogSignatureCanvas, type WeeklogSignatureCanvasRef } from "@/components/service-orders/WeeklogSignatureCanvas";
 import { useServiceCatalogItems } from "@/hooks/useServiceCatalog";
 
 export type BudgetPartLine = {
@@ -1905,13 +1906,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   // Estados para interação (tela de assinatura, rejeição, confirmação explícita)
   const [signatureSignerName, setSignatureSignerName] = useState<string>("");
   const [signatureSignerType, setSignatureSignerType] = useState<BudgetSignerType | "">("client");
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const canvasDrawingRef = useRef<{ drawing: boolean; lastX: number; lastY: number; hasStroke: boolean }>({
-    drawing: false,
-    lastX: 0,
-    lastY: 0,
-    hasStroke: false,
-  });
+  const signatureCanvasRef = useRef<WeeklogSignatureCanvasRef | null>(null);
   const [confirmNoSignatureOpen, setConfirmNoSignatureOpen] = useState(false);
   const [confirmNoSignatureName, setConfirmNoSignatureName] = useState("");
   const [confirmNoSignatureType, setConfirmNoSignatureType] = useState<BudgetSignerType | "">("client");
@@ -1970,92 +1965,11 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       setConfirmNoSignatureChecked(false);
       setRejectionReason("");
       setRejectionRejectedBy("");
-      setTimeout(() => clearSignatureCanvas(), 0);
+      signatureCanvasRef.current?.clear();
     }
   }, [open, initial?.id, form.client_name, form.dossier_insurance_company]);
 
-  useEffect(() => {
-    if (!open) return;
-    if (step !== "form") return;
-    const raf = window.requestAnimationFrame(() => {
-      clearSignatureCanvas();
-      setTimeout(() => clearSignatureCanvas(), 30);
-    });
-    return () => window.cancelAnimationFrame(raf);
-  }, [open, step]);
 
-  const clearSignatureCanvas = () => {
-    const cvs = canvasRef.current;
-    if (!cvs) return;
-    const ctx = cvs.getContext("2d");
-    if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = cvs.clientWidth || cvs.getBoundingClientRect().width || 500;
-    const cssH = cvs.clientHeight || 160;
-    cvs.width = Math.max(1, Math.floor(cssW * dpr));
-    cvs.height = Math.max(1, Math.floor(cssH * dpr));
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssW, cssH);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, cssW, cssH);
-    ctx.strokeStyle = "#0f172a";
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    canvasDrawingRef.current.hasStroke = false;
-  };
-
-  const canvasPointerDown = (x: number, y: number) => {
-    if (isLocked) return;
-    const cvs = canvasRef.current;
-    if (!cvs) return;
-    const ctx = cvs.getContext("2d");
-    if (!ctx) return;
-
-    if (cvs.width <= 1 || cvs.height <= 1) {
-      clearSignatureCanvas();
-    }
-
-    canvasDrawingRef.current.drawing = true;
-    canvasDrawingRef.current.lastX = x;
-    canvasDrawingRef.current.lastY = y;
-
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = "#0f172a";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.arc(x, y, 1.25, 0, Math.PI * 2);
-    ctx.fillStyle = "#0f172a";
-    ctx.fill();
-    canvasDrawingRef.current.hasStroke = true;
-  };
-
-  const canvasPointerMove = (x: number, y: number) => {
-    if (isLocked) return;
-    if (!canvasDrawingRef.current.drawing) return;
-    const cvs = canvasRef.current;
-    if (!cvs) return;
-    const ctx = cvs.getContext("2d");
-    if (!ctx) return;
-
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = "#0f172a";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(canvasDrawingRef.current.lastX, canvasDrawingRef.current.lastY);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-
-    canvasDrawingRef.current.lastX = x;
-    canvasDrawingRef.current.lastY = y;
-    canvasDrawingRef.current.hasStroke = true;
-  };
-
-  const canvasPointerUp = () => {
-    canvasDrawingRef.current.drawing = false;
-  };
 
   const approveWithSignature = async () => {
     if (isLocked) return;
@@ -2065,16 +1979,13 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       return;
     }
     const resolvedSignerType = signatureSignerType || "client";
-    const cvs = canvasRef.current;
-    let dataUrl: string | null = null;
-    if (cvs) {
-      try {
-        dataUrl = cvs.toDataURL("image/png");
-      } catch {
-        dataUrl = null;
-      }
+    const sigCanvas = signatureCanvasRef.current;
+    if (!sigCanvas || sigCanvas.isEmpty()) {
+      toast.warning(langDisplay === "fr" ? "Dessinez la signature avant d'approuver" : "Desenhe a assinatura antes de aprovar.");
+      return;
     }
-    if (!canvasDrawingRef.current.hasStroke || !dataUrl) {
+    const dataUrl = sigCanvas.getDataUrl();
+    if (!dataUrl) {
       toast.warning(langDisplay === "fr" ? "Dessinez la signature avant d'approuver" : "Desenhe a assinatura antes de aprovar.");
       return;
     }
@@ -4224,46 +4135,19 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                       <p className="mb-1.5 text-xs font-medium text-muted-foreground">
                         {langDisplay === "fr" ? "Zone de signature (dessiner)" : "Área para assinatura (desenhar)"}
                       </p>
-                      <div className="relative rounded-lg border border-border bg-white p-1 shadow-sm">
-                        <canvas
-                          ref={canvasRef}
-                          onPointerDown={(e) => {
-                            if (isLocked) return;
-                            try {
-                              e.currentTarget.setPointerCapture(e.pointerId);
-                            } catch {
-                              // ignore
-                            }
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            canvasPointerDown(e.clientX - rect.left, e.clientY - rect.top);
-                          }}
-                          onPointerMove={(e) => {
-                            if (isLocked) return;
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            canvasPointerMove(e.clientX - rect.left, e.clientY - rect.top);
-                          }}
-                          onPointerUp={(e) => {
-                            try {
-                              e.currentTarget.releasePointerCapture(e.pointerId);
-                            } catch {
-                              // ignore
-                            }
-                            canvasPointerUp();
-                          }}
-                          onPointerCancel={canvasPointerUp}
-                          className={cn(
-                            "block w-full cursor-crosshair touch-none select-none rounded-md",
-                            isLocked ? "pointer-events-none opacity-60" : "",
-                          )}
-                          style={{ height: "160px" }}
-                        />
-                      </div>
+                      <WeeklogSignatureCanvas
+                        ref={signatureCanvasRef}
+                        disabled={isLocked}
+                        height={160}
+                        hideControls={true}
+                        placeholder={langDisplay === "fr" ? "Dessinez la signature ici (tactile ou souris)" : "Desenhe a assinatura aqui (toque ou mouse)"}
+                      />
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={clearSignatureCanvas}
+                          onClick={() => signatureCanvasRef.current?.clear()}
                           disabled={isLocked}
                           className="h-8"
                         >
