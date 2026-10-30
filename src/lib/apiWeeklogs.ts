@@ -6,7 +6,14 @@ export type WeeklogEntryValidationStatus = "pending" | "approved" | "rejected" |
 export interface WeeklogEntry {
   id: string;
   weeklogId: string;
-  productionOrderId: string;
+  productionOrderId?: string | null;
+  externalImportItemId?: string | null;
+  sourceType?: string;
+  brand?: string | null;
+  model?: string | null;
+  color?: string | null;
+  licensePlate?: string | null;
+  vin?: string | null;
   executionSequence: number;
   technicianUserId: string;
   technicianName?: string | null;
@@ -29,7 +36,6 @@ export interface WeeklogEntry {
   createdAt: string;
   updatedAt: string;
 }
-
 export interface WeeklogValidationSummary {
   id: string;
   weeklogId: string;

@@ -60,6 +60,8 @@ import {
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { formatDistanceToNow } from "date-fns";
+import { useClients } from "@/hooks/useServiceOrders";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import {
@@ -360,6 +362,7 @@ interface BlockedTaskItem {
 }
 
 export function ProductionBoard({ onOpen }: Props) {
+  const { data: clients = [] } = useClients();
   const {
     data: ordersRaw = [],
     isLoading,
@@ -390,7 +393,8 @@ export function ProductionBoard({ onOpen }: Props) {
   const [finalizeModal, setFinalizeModal] = useState<{
     open: boolean;
     order: ProductionOrder | null;
-  }>({ open: false, order: null });
+    responsibleClientId?: string;
+  }>({ open: false, order: null, responsibleClientId: "" });
 
   // Modal de Bloqueio por Tarefas Incompletas (Regra Canônica)
   const [blockedModal, setBlockedModal] = useState<{
@@ -437,6 +441,18 @@ export function ProductionBoard({ onOpen }: Props) {
 
     filteredOrders.forEach((o) => {
       const stageKey = getEffectiveStage(o);
+      // PRD-02: Itens com mais de 7 dias são arquivados para a aba Histórico
+      if (stageKey === "finished") {
+        const finishedDate =
+          o.finished_at ||
+          (o as any).finishedAt ||
+          o.delivered_at ||
+          o.updated_at;
+        const ageMs = finishedDate ? Date.now() - new Date(finishedDate).getTime() : 0;
+        if (ageMs > 7 * 24 * 60 * 60 * 1000) {
+          return;
+        }
+      }
       const list = map.get(stageKey) || [];
       list.push(o);
       map.set(stageKey, list);
@@ -468,13 +484,13 @@ export function ProductionBoard({ onOpen }: Props) {
   }, [filteredOrders, sectorFilter]);
 
   // Ação de transição para Finalizado
-  const handleFinalizeRequest = async (order: ProductionOrder) => {
+  const handleFinalizeRequest = async (order: ProductionOrder, responsibleClientId?: string) => {
     try {
-      await finalize.mutateAsync(order.id);
-      setFinalizeModal({ open: false, order: null });
+      await finalize.mutateAsync({ id: order.id, responsibleClientId });
+      setFinalizeModal({ open: false, order: null, responsibleClientId: "" });
       toast.success(`Ordem ${order.code} finalizada e integrada à WEEKLOG!`);
     } catch (err: any) {
-      setFinalizeModal({ open: false, order: null });
+      setFinalizeModal({ open: false, order: null, responsibleClientId: "" });
       const apiErr = err as ApiError;
       if (
         apiErr.status === 422 ||
@@ -510,7 +526,11 @@ export function ProductionBoard({ onOpen }: Props) {
     if (currentStageKey === targetStage) return;
 
     if (targetStage === "finished") {
-      setFinalizeModal({ open: true, order });
+      setFinalizeModal({
+        open: true,
+        order,
+        responsibleClientId: order.client_id || (order as any).clientId || "",
+      });
       return;
     }
 
@@ -843,27 +863,52 @@ export function ProductionBoard({ onOpen }: Props) {
             </DialogDescription>
           </DialogHeader>
           {finalizeModal.order ? (
-            <div className="rounded-lg border border-border/70 bg-muted/40 p-3 space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Código OS:</span>
-                <span className="font-semibold">{finalizeModal.order.code}</span>
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border/70 bg-muted/40 p-3 space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Código OS:</span>
+                  <span className="font-semibold">{finalizeModal.order.code}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Proprietário / Segurado:</span>
+                  <span className="font-medium">{finalizeModal.order.client_name || finalizeModal.order.clientName || "—"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Veículo:</span>
+                  <span className="font-medium">{[finalizeModal.order.brand, finalizeModal.order.model].filter(Boolean).join(" ") || "—"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Valor:</span>
+                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                    {formatCanonicalCurrency(
+                      finalizeModal.order.total ?? finalizeModal.order.total_amount ?? finalizeModal.order.recognized_total,
+                      finalizeModal.order.currency || finalizeModal.order.currency_code || "EUR"
+                    )}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Cliente:</span>
-                <span className="font-medium">{finalizeModal.order.client_name || finalizeModal.order.clientName || "—"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Veículo:</span>
-                <span className="font-medium">{[finalizeModal.order.brand, finalizeModal.order.model].filter(Boolean).join(" ") || "—"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Valor:</span>
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                  {formatCanonicalCurrency(
-                    finalizeModal.order.total ?? finalizeModal.order.total_amount ?? finalizeModal.order.recognized_total,
-                    finalizeModal.order.currency || finalizeModal.order.currency_code || "EUR"
-                  )}
-                </span>
+
+              {/* WL-07: Seletor de Empresa Responsável */}
+              <div className="space-y-1">
+                <Label className="text-xs font-medium">Empresa Responsável (Faturamento B2B / WEEKLOG)</Label>
+                <Select
+                  value={finalizeModal.responsibleClientId || ""}
+                  onValueChange={(val) => setFinalizeModal((prev) => ({ ...prev, responsibleClientId: val }))}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Selecione a empresa responsável..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clients.map((c: any) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} {c.corporate_name ? `(${c.corporate_name})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Define a entidade corporativa que receberá o faturamento deste lote no WEEKLOG, preservando o cliente do veículo na OS.
+                </p>
               </div>
             </div>
           ) : null}
@@ -872,7 +917,7 @@ export function ProductionBoard({ onOpen }: Props) {
               variant="outline"
               size="sm"
               disabled={finalize.isPending}
-              onClick={() => setFinalizeModal({ open: false, order: null })}
+              onClick={() => setFinalizeModal({ open: false, order: null, responsibleClientId: "" })}
             >
               Cancelar
             </Button>
@@ -880,7 +925,7 @@ export function ProductionBoard({ onOpen }: Props) {
               size="sm"
               className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
               disabled={finalize.isPending}
-              onClick={() => finalizeModal.order && handleFinalizeRequest(finalizeModal.order)}
+              onClick={() => finalizeModal.order && handleFinalizeRequest(finalizeModal.order, finalizeModal.responsibleClientId)}
             >
               {finalize.isPending ? (
                 <>

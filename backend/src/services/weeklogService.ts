@@ -24,6 +24,7 @@ export interface FinalizeProductionOrderOptions {
    * NEVER exposed to public HTTP callers or client payloads.
    */
   _serverTime?: Date;
+  responsibleClientId?: string;
 }
 
 export interface FinalizeProductionOrderResult {
@@ -1180,7 +1181,7 @@ export async function reviewWeeklogEntry(
       }
 
       // 2. Validação de grant ativo para o cliente
-      await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId, weeklog.siteKey);
+await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId, weeklog.siteKey);
 
       // 3. Carregar entrada com lock
       const entries: any[] = await tx.$queryRaw`
@@ -1291,7 +1292,7 @@ export async function uploadWeeklogSignature(
 
   // 3. Validação de grant ativo do validador
   await prisma.$transaction(async (tx) => {
-    await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId, weeklog.siteKey);
+await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId, weeklog.siteKey);
   });
 
   // 4. Salvar arquivo no storage sob caminho de staging governado
@@ -1427,7 +1428,7 @@ export async function validateWeeklogBatch(
       }
 
       // 3. Validar e travar o ClientAccessGrant ativo (evita race de revogação)
-      await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId, weeklog.siteKey);
+await assertActiveClientAccessGrant(tx, ctx, weeklog.clientId, weeklog.siteKey);
 
       // 4. Localizar a MESMA Validation Round em estado 'pending'
       let activeRound = await tx.weeklogValidation.findFirst({

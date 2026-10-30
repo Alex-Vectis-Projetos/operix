@@ -193,7 +193,11 @@ export function useProductionOrders(filters?: { technicianOnly?: boolean; status
   });
 
   const finalize = useMutation({
-    mutationFn: (id: string) => finalizeProductionOrder(id),
+    mutationFn: (args: string | { id: string; responsibleClientId?: string }) => {
+      const id = typeof args === "string" ? args : args.id;
+      const payload = typeof args === "object" && args.responsibleClientId ? { responsibleClientId: args.responsibleClientId } : undefined;
+      return finalizeProductionOrder(id, payload);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["production_orders"] });
       qc.invalidateQueries({ queryKey: ["production_kpis"] });

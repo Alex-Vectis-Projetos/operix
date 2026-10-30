@@ -38,10 +38,101 @@ import { getCurrentUser } from "@/lib/authUser";
 import { apiRequest } from "@/lib/api";
 import { useContextualWorkspace } from "@/hooks/useContextualWorkspace";
 import { ContextualWorkspacePicker } from "@/components/workspace/ContextualWorkspacePicker";
-import { useWeeklogs, type WeeklogStatus } from "@/hooks/useWeeklogs";
+import { useWeeklogs, useWeeklogEntries, type WeeklogStatus } from "@/hooks/useWeeklogs";
+import { formatFinanceMoney } from "@/lib/financeFormatters";
 import { WeeklogValidationDialog } from "@/components/service-orders/WeeklogValidationDialog";
 import { Badge } from "@/components/ui/badge";
-import { ShieldCheck, Archive, Loader2, ArrowRight } from "lucide-react";
+import { ShieldCheck, Archive, Loader2, ArrowRight, ChevronDown, ChevronRight, Car, ListTree } from "lucide-react";
+
+function WeeklogBatchDetails({ weeklogId }: { weeklogId: string }) {
+  const { data: entries = [], isLoading } = useWeeklogEntries(weeklogId);
+
+  if (isLoading) {
+    return (
+      <div className="py-4 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando veículos e serviços deste lote...
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="py-3 text-center text-xs text-muted-foreground bg-muted/20 rounded">
+        Nenhum veículo individual vinculado a este lote semanal.
+      </div>
+    );
+  }
+
+  const batchTotal = entries.reduce((acc, e) => acc + (Number(e.totalAmount) || 0), 0);
+  const currency = entries[0]?.currencyCode || "EUR";
+
+  return (
+    <div className="rounded-lg border bg-background/90 p-3 space-y-2.5 text-xs shadow-inner">
+      <div className="flex flex-wrap items-center justify-between pb-1.5 border-b gap-2 text-muted-foreground">
+        <span className="font-semibold text-foreground uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+          <Car className="h-3.5 w-3.5 text-cyan-500" />
+          Veículos e Ordens do Lote ({entries.length} {entries.length === 1 ? "veículo" : "veículos"})
+        </span>
+        <span className="text-xs">
+          Valor Consolidado:{" "}
+          <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
+            {formatFinanceMoney(batchTotal, currency)}
+          </strong>
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+        {entries.map((entry) => {
+          const veh = [entry.brand, entry.model].filter(Boolean).join(" ") || "Veículo";
+          const plate = entry.licensePlate || "—";
+          const tech = entry.technicianName || "—";
+          const amount = Number(entry.totalAmount) || 0;
+
+          return (
+            <div
+              key={entry.id}
+              className="p-2.5 rounded-md border bg-card/80 flex flex-col justify-between space-y-2 hover:border-slate-400 dark:hover:border-slate-600 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-1.5">
+                <div className="min-w-0">
+                  <div className="font-medium text-foreground truncate" title={veh}>
+                    {veh}
+                  </div>
+                  <div className="text-[11px] font-mono text-muted-foreground">{plate}</div>
+                </div>
+                <Badge
+                  variant={
+                    entry.validationStatus === "approved"
+                      ? "default"
+                      : entry.validationStatus === "rejected"
+                      ? "destructive"
+                      : "secondary"
+                  }
+                  className="text-[10px] shrink-0"
+                >
+                  {entry.validationStatus === "approved"
+                    ? "Aprovado"
+                    : entry.validationStatus === "rejected"
+                    ? "Rejeitado"
+                    : "Pendente"}
+                </Badge>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-border/60 text-muted-foreground">
+                <span className="truncate max-w-[130px]" title={tech}>
+                  Técnico: {tech}
+                </span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  {formatFinanceMoney(amount, entry.currencyCode || "EUR")}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function ServiceOrdersPage() {
   const { t, formatCurrency } = useLanguage();
@@ -66,6 +157,24 @@ export default function ServiceOrdersPage() {
   const [selectedWeeklogId, setSelectedWeeklogId] = useState<string | null>(null);
   const [isWeeklogDialogOpen, setIsWeeklogDialogOpen] = useState(false);
   const { data: weeklogs = [], isLoading: isWeeklogsLoading } = useWeeklogs();
+  const [expandedWeeklogs, setExpandedWeeklogs] = useState<Set<string>>(new Set());
+
+  const toggleExpandWeeklog = (id: string) => {
+    setExpandedWeeklogs((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleExpandAll = () => {
+    if (expandedWeeklogs.size === weeklogs.length) {
+      setExpandedWeeklogs(new Set());
+    } else {
+      setExpandedWeeklogs(new Set(weeklogs.map((w) => w.id)));
+    }
+  };
 
   const [hCtx, setHCtx] = useState<HierarchyContext>(() =>
     loadHierarchyContext("hierarchy.service_orders"),

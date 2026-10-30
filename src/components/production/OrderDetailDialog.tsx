@@ -1199,7 +1199,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
     setIsFinalizing(true);
     try {
-      await finalize.mutateAsync(order.id);
+      await finalize.mutateAsync({ id: order.id, responsibleClientId: form.client_id || order.client_id || undefined });
       clearDraft();
       onClose();
     } catch (err: any) {

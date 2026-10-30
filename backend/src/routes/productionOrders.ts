@@ -1169,7 +1169,8 @@ productionOrdersRouter.post("/:id/finalize", async (req: Request, res: Response,
     }
 
     const existing = await prisma.productionOrder.findUnique({ where: { id } });
-    const result = await finalizeProductionOrder(ctx, id);
+    const responsibleClientId = typeof req.body?.responsibleClientId === "string" ? req.body.responsibleClientId : (typeof req.body?.partnerCompanyId === "string" ? req.body.partnerCompanyId : undefined);
+    const result = await finalizeProductionOrder(ctx, id, { responsibleClientId });
 
     if (existing) {
       try {

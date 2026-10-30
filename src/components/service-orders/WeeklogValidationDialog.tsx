@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -448,7 +450,7 @@ export function WeeklogValidationDialog({
                               Seq #{entry.executionSequence}
                             </span>
                             <span className="text-muted-foreground truncate">
-                              OP: {entry.productionOrderId.slice(0, 8)}
+                              {entry.productionOrderId ? `OP: ${entry.productionOrderId.slice(0, 8)}` : (entry.externalImportItemId ? `IMP: ${entry.externalImportItemId.slice(0, 8)}` : "Importação")}
                             </span>
                             {entry.vehicleSnapshot && (
                               <Badge variant="outline" className="gap-1 font-normal text-[10px]">
@@ -598,7 +600,7 @@ export function WeeklogValidationDialog({
                   </TabsContent>
 
                   <TabsContent value="drawn_signature" className="mt-3 space-y-3">
-                    <WeeklogSignatureCanvas ref={canvasRef} disabled={unreviewedCount > 0 || isValidating} />
+                    <WeeklogSignatureCanvas ref={canvasRef} disabled={isImmutable || isValidating} />
                   </TabsContent>
                 </Tabs>
 

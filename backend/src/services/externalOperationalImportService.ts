@@ -16,6 +16,7 @@ import {
 import { ImportPipelineError, parseReviewedDecimal } from "./externalListImportService.js";
 import { operationalWeekOf } from "../lib/weekUtils.js";
 import { createAutoDraftPaymentListInTransaction } from "./paymentListService.js";
+import { syncLegacyServiceOrderProjection } from "./weeklogService.js";
 
 type ServiceDependencies = { storage?: ImportDocumentStorage; extraction?: ImportExtractionProvider };
 
@@ -490,6 +491,21 @@ export async function commitReviewedExternalOperationalImport(ctx: RequestContex
 
       const createdEntries = [] as Array<{ id: string; weeklogId: string; sourceType: string; productionOrderId: string | null; externalImportItemId: string | null; executionSequence: number; validationStatus: string; deliveredAt: Date }>;
       for (const row of rows.sort((left, right) => left.reviewedDeliveredAt!.getTime() - right.reviewedDeliveredAt!.getTime() || left.id.localeCompare(right.id))) {
+        const legacyServiceOrder = await syncLegacyServiceOrderProjection(tx, {
+          workspaceId: ws,
+          technicianUserId: row.reviewedTechnicianUserId!,
+          technicianName: row.technicianName || "",
+          clientId: row.reviewedClientId!,
+          clientName: row.clientName || "",
+          brand: null,
+          model: row.reviewedCarName,
+          licensePlate: row.reviewedLicensePlate,
+          week: first.weekInfo.week,
+          yearReference: first.weekInfo.yearReference,
+          total: row.reviewedTotal!,
+          services: row.reviewedServices as any[],
+        });
+
         const entry = await tx.weeklogEntry.create({
           data: {
             weeklogId: weeklog.id,
@@ -500,7 +516,7 @@ export async function commitReviewedExternalOperationalImport(ctx: RequestContex
             executionSequence: 1,
             budgetId: null,
             budgetRevisionId: null,
-            legacyServiceOrderId: null,
+            legacyServiceOrderId: legacyServiceOrder.id,
             technicianUserId: row.reviewedTechnicianUserId!,
             technicianName: row.technicianName,
             clientId: row.reviewedClientId!,
@@ -534,34 +550,27 @@ export async function commitReviewedExternalOperationalImport(ctx: RequestContex
           .sort((left, right) => left.deliveredAt.getTime() - right.deliveredAt.getTime() || left.id.localeCompare(right.id))
           .map((entry) => ({ entryId: entry.id, externalImportItemId: entry.externalImportItemId, executionSequence: 1, sourceType: "external_import" })),
       };
+      // WL-01: Manual imports start in pending_validation (Aguardando Validação)
       const validation = await tx.weeklogValidation.create({
         data: {
           weeklogId: weeklog.id,
           workspaceId: ws,
           validationSequence: (latestValidation?.validationSequence ?? 0) + 1,
-          status: "validated",
+          status: "pending",
           submittedAt: now,
           submittedBy: ctx.actorUserId,
-          validatorUserId: ctx.actorUserId,
           validationMethod: "external_import_review",
           coverageSnapshot,
-          auditTrail: [{ action: "external_import_review_committed", actorUserId: ctx.actorUserId, sourceImportId: imported.id, timestamp: now.toISOString() }],
-          validatedAt: now,
+          auditTrail: [{ action: "external_import_submitted", actorUserId: ctx.actorUserId, sourceImportId: imported.id, timestamp: now.toISOString() }],
         },
       });
-      await tx.weeklogEntry.updateMany({
-        where: { id: { in: createdEntries.map((entry) => entry.id) }, workspaceId: ws, validationStatus: "pending" },
-        data: { validationStatus: "approved", reviewedAt: now, reviewerUserId: ctx.actorUserId },
-      });
-      const finalizedWeeklog = await tx.weeklog.update({ where: { id: weeklog.id }, data: { status: "validated" }, select: { id: true, startsOn: true, endsOn: true, clientId: true, siteKey: true, status: true } });
-      await createAutoDraftPaymentListInTransaction(tx, {
-        workspaceId: ws,
-        weeklogId: weeklog.id,
-        validationId: validation.id,
-        actorUserId: ctx.actorUserId,
+      const finalizedWeeklog = await tx.weeklog.update({
+        where: { id: weeklog.id },
+        data: { status: "pending_validation" },
+        select: { id: true, startsOn: true, endsOn: true, clientId: true, siteKey: true, status: true },
       });
       materializedWeeklogs.push(finalizedWeeklog);
-      materializedEntries.push(...createdEntries.map((entry) => externalEntryDto({ ...entry, validationStatus: "approved" })));
+      materializedEntries.push(...createdEntries.map((entry) => externalEntryDto(entry)));
       materializedValidations.push(externalValidationDto(validation));
     }
 

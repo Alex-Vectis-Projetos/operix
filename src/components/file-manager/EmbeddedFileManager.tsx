@@ -181,7 +181,19 @@ export function EmbeddedFileManager({ entityType, module: moduleName = "orders",
 
   const yearFiltered = year && /^\d{4}$/.test(year)
     ? docs.filter((d: any) => {
-        if (d.type === "folder") return true;
+        // DOC-01: Isolate folder and document tree strictly by operational Year
+        if (d.type === "folder") {
+          const nameText = `${d.displayName || ""} ${d.name || ""}`;
+          const match = nameText.match(/\b(20\d{2})\b/);
+          if (match && match[1] !== year) {
+            return false;
+          }
+          if (!parentId && d.created_at) {
+            const fy = new Date(d.created_at).getFullYear();
+            if (String(fy) !== year && !match) return false;
+          }
+          return true;
+        }
         if (!d.created_at) return false;
         const dy = new Date(d.created_at).getFullYear();
         return String(dy) === year;

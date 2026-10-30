@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, LayoutGrid, Calculator, RefreshCw, AlertTriangle } from "lucide-react";
+import { Plus, LayoutGrid, Calculator, RefreshCw, AlertTriangle, Archive } from "lucide-react";
+import { ProductionHistoryTable } from "@/components/production/ProductionHistoryTable";
 import { ProductionBoard } from "@/components/production/ProductionBoard";
 import { OrderDetailDialog } from "@/components/production/OrderDetailDialog";
 import { BudgetPanel } from "@/components/production/BudgetPanel";
@@ -94,7 +95,7 @@ export default function ProductionPage() {
       </div>
 
       <Tabs defaultValue="budgets" className="min-w-0 max-w-full">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 p-1 md:inline-flex md:w-auto">
+        <TabsList className="grid h-auto w-full grid-cols-3 gap-1 p-1 md:inline-flex md:w-auto">
           <TabsTrigger value="budgets" className="min-h-10 gap-1.5 px-2 text-xs md:text-sm">
             <Calculator className="h-4 w-4" />
             <span className="truncate">Orçamentos</span>
@@ -102,6 +103,10 @@ export default function ProductionPage() {
           <TabsTrigger value="board" className="min-h-10 gap-1.5 px-2 text-xs md:text-sm">
             <LayoutGrid className="h-4 w-4" />
             <span className="truncate">Em Produção</span>
+          </TabsTrigger>
+          <TabsTrigger value="history" className="min-h-10 gap-1.5 px-2 text-xs md:text-sm">
+            <Archive className="h-4 w-4" />
+            <span className="truncate">Histórico</span>
           </TabsTrigger>
         </TabsList>
         <TabsContent value="budgets" className="mt-4">
@@ -139,6 +144,9 @@ export default function ProductionPage() {
             <ProductionBoard onOpen={setOpen} />
           </TabsContent>
         </ErrorBoundary>
+        <TabsContent value="history" className="mt-4">
+          <ProductionHistoryTable onOpenOrder={setOpen} />
+        </TabsContent>
       </Tabs>
 
       <ErrorBoundary

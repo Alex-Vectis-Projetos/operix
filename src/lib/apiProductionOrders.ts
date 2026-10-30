@@ -43,14 +43,17 @@ export interface FinalizeProductionOrderResult {
   idempotent?: boolean;
 }
 
-export function finalizeProductionOrder(id: string): Promise<FinalizeProductionOrderResult> {
+export function finalizeProductionOrder(
+  id: string,
+  payload?: { responsibleClientId?: string }
+): Promise<FinalizeProductionOrderResult> {
   return apiRequest<FinalizeProductionOrderResult>(`/production-orders/${id}/finalize`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: payload ? JSON.stringify(payload) : undefined,
     timeoutMs: 15000,
   });
 }
-
 export function updateProductionOrderService(
   orderId: string,
   serviceId: string,
