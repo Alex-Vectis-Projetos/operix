@@ -92,6 +92,35 @@ async function syncPhotosToWeeklogFolders(
   actorUserId: string
 ): Promise<void> {
   try {
+    const yearName = String(weekInfo.yearReference);
+    let yearFolder = await tx.document.findFirst({
+      where: {
+        workspaceId: po.workspaceId,
+        entityType: DOC_ENTITY_TYPE_WEEKLOG,
+        module: DOC_MODULE_WEEKLOG,
+        type: "folder",
+        parentId: null,
+        name: yearName,
+      },
+      select: { id: true },
+    });
+
+    if (!yearFolder) {
+      yearFolder = await tx.document.create({
+        data: {
+          workspaceId: po.workspaceId,
+          entityType: DOC_ENTITY_TYPE_WEEKLOG,
+          module: DOC_MODULE_WEEKLOG,
+          type: "folder",
+          parentId: null,
+          name: yearName,
+          displayName: yearName,
+          uploadedBy: actorUserId || null,
+        },
+        select: { id: true },
+      });
+    }
+
     const weekName = `Week ${String(weekInfo.weekNumber).padStart(2, "0")}`;
     let weekFolder = await tx.document.findFirst({
       where: {
@@ -99,7 +128,7 @@ async function syncPhotosToWeeklogFolders(
         entityType: DOC_ENTITY_TYPE_WEEKLOG,
         module: DOC_MODULE_WEEKLOG,
         type: "folder",
-        parentId: null,
+        parentId: yearFolder.id,
         name: weekName,
       },
       select: { id: true },
@@ -112,7 +141,7 @@ async function syncPhotosToWeeklogFolders(
           entityType: DOC_ENTITY_TYPE_WEEKLOG,
           module: DOC_MODULE_WEEKLOG,
           type: "folder",
-          parentId: null,
+          parentId: yearFolder.id,
           name: weekName,
           displayName: `${weekName} · ${weekInfo.yearReference}`,
           uploadedBy: actorUserId || null,

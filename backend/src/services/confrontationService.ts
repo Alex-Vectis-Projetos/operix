@@ -260,7 +260,7 @@ export async function runConfrontation(
       await lockList(tx, listId, workspace);
       const list = await tx.paymentList.findFirst({ where: { id: listId, workspaceId: workspace }, include: { items: true } });
       if (!list) throw new NotFoundError("LIST_NOT_FOUND");
-      if (!["under_review", "confronted"].includes(list.status)) throw new ConflictError("CONFRONTATION_LIST_STATE_LOCKED");
+      if (!["draft", "under_review", "confronted", "pending"].includes(list.status)) throw new ConflictError("CONFRONTATION_LIST_STATE_LOCKED");
       const latest = await tx.paymentListConfrontationRun.findFirst({ where: { paymentListId: list.id, workspaceId: workspace }, orderBy: { sequence: "desc" }, include: { results: { orderBy: { createdAt: "asc" } } } });
       const plan = await buildPlan(tx, list, workspace);
       if (mode === "current" && latest) {

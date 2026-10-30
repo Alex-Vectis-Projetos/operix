@@ -98,6 +98,10 @@ export function usePaymentListImport(importId?: string | null) {
     queryKey: paymentListQueryKeys.import(workspaceId, importId),
     enabled: Boolean(workspaceId && importId),
     queryFn: () => getPaymentListImport(importId!),
+    refetchInterval: (query) => {
+      const status = query.state.data?.import?.status;
+      return (status === "uploaded" || status === "extracting") ? 1000 : false;
+    },
   });
 }
 

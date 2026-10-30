@@ -23,6 +23,7 @@ import {
   transitionPaymentList,
 } from "../services/paymentListService.js";
 import { decideConfrontationResult, getConfrontation, runConfrontation } from "../services/confrontationService.js";
+import { sendEmail } from "../lib/email/resend.js";
 import {
   previewConfrontationFile,
   executeConfrontationHub,
@@ -248,6 +249,76 @@ paymentListsRouter.post("/confrontation/runs/:runId/decisions", async (req: Requ
       notes,
     });
     return res.json(updated);
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+paymentListsRouter.post("/confrontation/notify-discrepancy", async (req: Request, res: Response) => {
+  try {
+    const {
+      runId,
+      itemResultId,
+      clientEmail,
+      clientName,
+      licensePlate,
+      carName,
+      serviceDescription,
+      internalAmount,
+      externalAmount,
+      differenceAmount,
+      notes,
+    } = req.body || {};
+
+    if (!clientEmail || !licensePlate) {
+      return res.status(400).json({ message: "clientEmail e licensePlate são obrigatórios." });
+    }
+
+    const emailSubject = `Divergência de Valores — OS Operix vs. Lista do Cliente (Placa: ${licensePlate})`;
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1e293b;">
+        <h2 style="color: #0f172a; margin-bottom: 8px;">Notificação de Divergência Operacional</h2>
+        <p>Prezada equipe <strong>${clientName || "Parceiro"}</strong>,</p>
+        <p>Identificamos uma divergência de valores durante o confronto da lista de pagamento com a ordem de serviço validada na Operix:</p>
+        <table style="border-collapse: collapse; width: 100%; max-width: 600px; margin: 16px 0; font-size: 14px;">
+          <tr style="background-color: #f1f5f9;"><td style="padding: 8px 12px; font-weight: bold; border: 1px solid #cbd5e1;">Veículo</td><td style="padding: 8px 12px; border: 1px solid #cbd5e1;">${carName || "—"}</td></tr>
+          <tr><td style="padding: 8px 12px; font-weight: bold; border: 1px solid #cbd5e1;">Matrícula / Placa</td><td style="padding: 8px 12px; border: 1px solid #cbd5e1;"><strong>${licensePlate}</strong></td></tr>
+          <tr style="background-color: #f1f5f9;"><td style="padding: 8px 12px; font-weight: bold; border: 1px solid #cbd5e1;">Serviço Realizado</td><td style="padding: 8px 12px; border: 1px solid #cbd5e1;">${serviceDescription || "DSP / Reparação"}</td></tr>
+          <tr><td style="padding: 8px 12px; font-weight: bold; border: 1px solid #cbd5e1;">Valor na OS (WEEKLOG)</td><td style="padding: 8px 12px; border: 1px solid #cbd5e1; color: #047857; font-weight: bold;">€${internalAmount}</td></tr>
+          <tr style="background-color: #f1f5f9;"><td style="padding: 8px 12px; font-weight: bold; border: 1px solid #cbd5e1;">Valor na Lista Enviada</td><td style="padding: 8px 12px; border: 1px solid #cbd5e1; color: #b45309; font-weight: bold;">€${externalAmount}</td></tr>
+          <tr><td style="padding: 8px 12px; font-weight: bold; border: 1px solid #cbd5e1;">Diferença a Ajustar</td><td style="padding: 8px 12px; border: 1px solid #cbd5e1; color: #dc2626; font-weight: bold;">€${differenceAmount}</td></tr>
+        </table>
+        ${notes ? `<p><strong>Observações adicionais:</strong><br/>${notes}</p>` : ""}
+        <p>Solicitamos a verificação e emissão da lista corrigida para o alinhamento e faturamento.</p>
+        <p style="margin-top: 24px; font-size: 12px; color: #64748b;">Enviado automaticamente pelo módulo de Confronto Comercial — Operix Platform.</p>
+      </div>
+    `;
+
+    const sendRes = await sendEmail({
+      to: clientEmail,
+      subject: emailSubject,
+      html: emailHtml,
+    });
+
+    if (runId && itemResultId) {
+      try {
+        await recordConfrontationDecision(req.ctx!, {
+          runId,
+          itemId: itemResultId,
+          decision: "contest",
+          notes: `Notificação enviada por e-mail para ${clientEmail}: ${notes || "Contestação de valor"}`,
+        });
+      } catch (err) {
+        console.warn("Aviso ao registrar decisão de contestação:", err);
+      }
+    }
+
+    return res.status(200).json({
+      ok: true,
+      sent: sendRes.ok,
+      messageId: sendRes.ok ? sendRes.id : null,
+      error: !sendRes.ok ? sendRes.error : null,
+    });
   } catch (error) {
     return sendError(res, error);
   }

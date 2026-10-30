@@ -202,7 +202,8 @@ function buildPlaceholderTree(year: string): TreeNode[] {
 
 function buildTree(records: HierarchyRecord[], weekIcon?: LucideIcon, extraYears: string[] = []): TreeNode[] {
   const byYear = groupBy(records, getYear);
-  const allYears = new Set<string>([...byYear.keys(), ...extraYears]);
+  const currentCalendarYear = String(new Date().getFullYear());
+  const allYears = new Set<string>([...byYear.keys(), ...extraYears, currentCalendarYear]);
   return sortKeys([...allYears], { numericAsc: true }).map((year) => {
     const yearRows = byYear.get(year) ?? [];
     const byClient = groupBy(yearRows, getClient);

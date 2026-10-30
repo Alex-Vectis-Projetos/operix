@@ -14,6 +14,7 @@ import { ExtractedDataTable } from "@/components/service-orders/ExtractedDataTab
 import { ServiceOrdersTable } from "@/components/service-orders/ServiceOrdersTable";
 import { EmbeddedFileManager, persistDocumentVisualState, storeFileInDocuments } from "@/components/file-manager/EmbeddedFileManager";
 import { SectionPlaceholder } from "@/components/shared/SectionPlaceholder";
+import { AnnualOperationalReport } from "@/components/service-orders/AnnualOperationalReport";
 import { ActiveDocumentBand } from "@/components/shared/ActiveDocumentBand";
 import { formatLicensePlate } from "@/lib/formatPlate";
 import { fileForCurrentVisualState, type DocumentVisualState } from "@/lib/documentVisualState";
@@ -158,6 +159,16 @@ export default function ServiceOrdersPage() {
   const [isWeeklogDialogOpen, setIsWeeklogDialogOpen] = useState(false);
   const { data: weeklogs = [], isLoading: isWeeklogsLoading } = useWeeklogs();
   const [expandedWeeklogs, setExpandedWeeklogs] = useState<Set<string>>(new Set());
+  const [showValidatedBatches, setShowValidatedBatches] = useState(false);
+
+  const pendingWeeklogs = useMemo(() => {
+    return weeklogs.filter((wl) => wl.status !== "validated");
+  }, [weeklogs]);
+
+  const displayedWeeklogs = useMemo(() => {
+    if (showValidatedBatches) return weeklogs;
+    return pendingWeeklogs;
+  }, [weeklogs, pendingWeeklogs, showValidatedBatches]);
 
   const toggleExpandWeeklog = (id: string) => {
     setExpandedWeeklogs((prev) => {
@@ -515,11 +526,11 @@ export default function ServiceOrdersPage() {
                 </section>
               </div>
             ) : hCtx.section === "relatorios" ? (
-              <SectionPlaceholder
-                icon="chart"
-                title="Relatórios"
-                subtitle={hCtx.year ? `Ano ${hCtx.year}` : undefined}
-                hint="Relatórios automáticos serão disponibilizados em breve."
+              <AnnualOperationalReport
+                year={hCtx.year || String(new Date().getFullYear())}
+                weeklogs={weeklogs}
+                orders={orders as any}
+                onBack={() => setHCtx({ ...hCtx, section: undefined })}
               />
             ) : (
               <div className="space-y-4">
@@ -539,7 +550,7 @@ export default function ServiceOrdersPage() {
                       <ShieldCheck className="h-3.5 w-3.5" />
                       Lotes Semanais (WEEKLOG Canônico)
                       <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0 h-4">
-                        {weeklogs.length}
+                        {pendingWeeklogs.length}
                       </Badge>
                     </Button>
 
@@ -553,6 +564,18 @@ export default function ServiceOrdersPage() {
                       Arquivo Histórico (Legado - Leitura)
                     </Button>
                   </div>
+
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showValidatedBatches}
+                        onChange={(e) => setShowValidatedBatches(e.target.checked)}
+                        className="rounded border-border h-3.5 w-3.5 text-indigo-600 focus:ring-0"
+                      />
+                      <span>Exibir lotes já validados ({weeklogs.length - pendingWeeklogs.length})</span>
+                    </label>
+                  </div>
                 </div>
 
                 {activeTab === "canonical_weeklogs" ? (
@@ -561,7 +584,7 @@ export default function ServiceOrdersPage() {
                       <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                         <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Carregando lotes semanais...
                       </div>
-                    ) : weeklogs.length === 0 ? (
+                    ) : displayedWeeklogs.length === 0 ? (
                       <div className="rounded-xl border border-dashed p-8 text-center space-y-2">
                         <ShieldCheck className="mx-auto h-8 w-8 text-muted-foreground/60" />
                         <h3 className="text-sm font-semibold text-foreground">Nenhum lote semanal ativo</h3>
@@ -583,7 +606,7 @@ export default function ServiceOrdersPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y">
-                              {weeklogs.map((wl) => (
+                              {displayedWeeklogs.map((wl) => (
                                 <tr key={wl.id} className="hover:bg-muted/30 transition-colors">
                                   <td className="p-3 font-semibold text-foreground">
                                     <div className="flex items-center gap-1.5">

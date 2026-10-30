@@ -1,4 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
+import { apiRequest } from "@/lib/api";
 import {
   Upload,
   AlertTriangle,
@@ -16,6 +18,10 @@ import {
   Eye,
   ExternalLink,
   Loader2,
+  Mail,
+  Send,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,7 +64,16 @@ import {
   type ConfrontationEvidenceResponse,
 } from "@/lib/apiConfrontationHub";
 
+export interface EditableReviewRow {
+  _id: string;
+  licensePlate: string;
+  vin: string;
+  serviceDescription: string;
+  amount: string;
+}
+
 export function ConfrontationHub() {
+  const [searchParams] = useSearchParams();
   const { data: clients = [] } = useClients();
   const { data: paymentLists = [] } = usePaymentLists();
 
@@ -67,9 +82,23 @@ export function ConfrontationHub() {
   const [selectedPeriod, setSelectedPeriod] = useState<string>("");
   const [selectedPaymentListId, setSelectedPaymentListId] = useState<string>("");
 
+  // Auto-select list from searchParams if navigated from PaymentLists tab
+  useEffect(() => {
+    const listParam = searchParams.get("list");
+    if (listParam && paymentLists.length > 0) {
+      const found = paymentLists.find((l) => l.id === listParam);
+      if (found) {
+        setSelectedClientId(found.clientId);
+        setSelectedPaymentListId(found.id);
+      }
+    }
+  }, [searchParams, paymentLists]);
+
   // File & Preview state
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [preview, setPreview] = useState<ConfrontationFilePreview | null>(null);
   const [mapping, setMapping] = useState<ConfrontationColumnMapping>({
     plateColumn: "",
@@ -79,7 +108,15 @@ export function ConfrontationHub() {
     taxType: "HT",
     granularity: "auto",
   });
+  const [editableRows, setEditableRows] = useState<EditableReviewRow[]>([]);
   const [mappingModalOpen, setMappingModalOpen] = useState(false);
+
+  // Discrepancy Email Notification Modal state
+  const [discrepancyModalOpen, setDiscrepancyModalOpen] = useState(false);
+  const [activeDiscrepancyItem, setActiveDiscrepancyItem] = useState<ConfrontationItemResult | null>(null);
+  const [clientEmailInput, setClientEmailInput] = useState("");
+  const [discrepancyEmailNotes, setDiscrepancyEmailNotes] = useState("");
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   // Confrontation Execution State
   const [isExecuting, setIsExecuting] = useState(false);
@@ -110,22 +147,32 @@ export function ConfrontationHub() {
     return paymentLists.filter((l) => l.clientId === selectedClientId);
   }, [paymentLists, selectedClientId]);
 
-  // Handle file drop/change
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files?.[0];
-    if (!selected) return;
-    if (!selectedClientId) {
-      toast.error("Selecione primeiro o cliente antes de importar a lista externa.");
-      return;
-    }
+  // Process selected file (via input click or drag-and-drop)
+  const processSelectedFile = async (selected: File) => {
     setFile(selected);
     setIsUploading(true);
     try {
       const p = await previewConfrontationFile(selected);
       setPreview(p);
       setMapping(p.suggestedMapping);
+
+      const plateCol = p.suggestedMapping.plateColumn;
+      const vinCol = p.suggestedMapping.vinColumn || "";
+      const serviceCol = p.suggestedMapping.serviceColumn || "";
+      const amountCol = p.suggestedMapping.amountColumn;
+      const allRows = p.rawRows && p.rawRows.length > 0 ? p.rawRows : p.sampleRows;
+
+      const initialEditable: EditableReviewRow[] = allRows.map((r, idx) => ({
+        _id: `row-${idx}`,
+        licensePlate: plateCol ? String(r[plateCol] || "") : "",
+        vin: vinCol ? String(r[vinCol] || "") : "",
+        serviceDescription: serviceCol ? String(r[serviceCol] || "") : "",
+        amount: String(r[amountCol] || "0").replace(/[^0-9,.-]/g, "").replace(",", "."),
+      }));
+
+      setEditableRows(initialEditable);
       setMappingModalOpen(true);
-      toast.success("Documento lido com sucesso. Confirme o mapeamento de colunas.");
+      toast.success("Documento lido com sucesso. Revise as informações na tabela antes de confrontar.");
     } catch (err: any) {
       toast.error(err?.message || "Falha ao ler o arquivo para confronto.");
       setFile(null);
@@ -134,12 +181,21 @@ export function ConfrontationHub() {
     }
   };
 
-  // Confirm mapping and run confrontation
-  const handleConfirmMappingAndExecute = async () => {
-    if (!preview || !file) return;
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0];
+    if (!selected) return;
+    await processSelectedFile(selected);
+  };
 
-    if (!mapping.plateColumn || !mapping.amountColumn) {
-      toast.error("Campos essenciais obrigatórios: selecione a Coluna da Placa e a Coluna do Valor.");
+  // Confirm review and run confrontation
+  const handleConfirmMappingAndExecute = async () => {
+    if (!file || editableRows.length === 0) {
+      toast.error("Nenhuma linha válida para executar o confronto.");
+      return;
+    }
+
+    if (!selectedClientId) {
+      toast.error("Por favor, selecione o Cliente Comercial antes de executar o confronto.");
       return;
     }
 
@@ -147,18 +203,12 @@ export function ConfrontationHub() {
     setIsExecuting(true);
 
     try {
-      const plateCol = mapping.plateColumn;
-      const vinCol = mapping.vinColumn || "";
-      const serviceCol = mapping.serviceColumn || "";
-      const amountCol = mapping.amountColumn;
-
-      const allRows = preview.rawRows && preview.rawRows.length > 0 ? preview.rawRows : preview.sampleRows;
-      const rows = allRows.map((r) => {
-        let amtStr = String(r[amountCol] || "0").replace(/[^0-9,.-]/g, "").replace(",", ".");
+      const rows = editableRows.map((r) => {
+        let amtStr = String(r.amount || "0").replace(/[^0-9,.-]/g, "").replace(",", ".");
         return {
-          licensePlate: plateCol ? String(r[plateCol] || "") : null,
-          vin: vinCol ? String(r[vinCol] || "") : null,
-          serviceDescription: serviceCol ? String(r[serviceCol] || "") : null,
+          licensePlate: r.licensePlate?.trim() || null,
+          vin: r.vin?.trim() || null,
+          serviceDescription: r.serviceDescription?.trim() || null,
           amount: parseFloat(amtStr) || 0,
           taxType: mapping.taxType,
         };
@@ -194,6 +244,52 @@ export function ConfrontationHub() {
       toast.error(err?.message || "Erro ao executar confronto.");
     } finally {
       setIsExecuting(false);
+    }
+  };
+
+  // Open discrepancy notification modal
+  const handleOpenDiscrepancyEmail = (item: ConfrontationItemResult) => {
+    setActiveDiscrepancyItem(item);
+    const client = clients.find((c: any) => c.id === selectedClientId);
+    setClientEmailInput((client as any)?.email || "");
+    setDiscrepancyEmailNotes(
+      `Identificamos divergência no veículo de placa ${item.licensePlate} (${item.serviceDescription}): valor na OS da Operix é €${item.internalAmount}, enquanto na lista recebida consta €${item.externalAmount} (diferença de €${item.differenceAmount}). Favor providenciar a regularização.`
+    );
+    setDiscrepancyModalOpen(true);
+  };
+
+  // Send discrepancy notification email
+  const handleSendDiscrepancyEmail = async () => {
+    if (!activeDiscrepancyItem || !clientEmailInput.trim()) {
+      toast.warning("Informe o e-mail do cliente destinatário.");
+      return;
+    }
+    setIsSendingEmail(true);
+    try {
+      const client = clients.find((c: any) => c.id === selectedClientId);
+      await apiRequest("/api/payment-lists/confrontation/notify-discrepancy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: confrontationResult?.runId,
+          itemResultId: activeDiscrepancyItem.id,
+          clientEmail: clientEmailInput.trim(),
+          clientName: client?.name || "Parceiro Comercial",
+          licensePlate: activeDiscrepancyItem.licensePlate,
+          carName: activeDiscrepancyItem.carName,
+          serviceDescription: activeDiscrepancyItem.serviceDescription,
+          internalAmount: activeDiscrepancyItem.internalAmount,
+          externalAmount: activeDiscrepancyItem.externalAmount,
+          differenceAmount: activeDiscrepancyItem.differenceAmount,
+          notes: discrepancyEmailNotes,
+        }),
+      });
+      toast.success(`Relatório de divergência enviado por e-mail para ${clientEmailInput}!`);
+      setDiscrepancyModalOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao enviar e-mail de divergência.");
+    } finally {
+      setIsSendingEmail(false);
     }
   };
 
@@ -438,32 +534,53 @@ export function ConfrontationHub() {
               </div>
             </div>
 
-            {/* Dropzone de Upload */}
-            <div className="rounded-lg border-2 border-dashed border-border/80 hover:border-emerald-500/60 transition-colors p-6 text-center">
+            {/* Dropzone de Upload com suporte robusto a clique e arrastar */}
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                const dropped = e.dataTransfer.files?.[0];
+                if (dropped) void processSelectedFile(dropped);
+              }}
+              className={`rounded-lg border-2 border-dashed p-6 text-center cursor-pointer transition-all ${
+                isDragging
+                  ? "border-emerald-500 bg-emerald-500/10 scale-[1.01]"
+                  : "border-border/80 hover:border-emerald-500/60 hover:bg-muted/30"
+              }`}
+            >
               <input
+                ref={fileInputRef}
                 type="file"
                 id="confrontation-file-input"
                 className="hidden"
                 accept=".xlsx,.xls,.csv,.pdf"
                 onChange={handleFileSelect}
-                disabled={isUploading || isExecuting || !selectedClientId}
+                disabled={isUploading || isExecuting}
               />
-              <label
-                htmlFor="confrontation-file-input"
-                className={`flex flex-col items-center justify-center cursor-pointer ${
-                  !selectedClientId ? "opacity-50 cursor-not-allowed" : ""
-                }`}
-              >
+              <div className="flex flex-col items-center justify-center select-none pointer-events-none">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 mb-3">
                   <Upload className="h-6 w-6" />
                 </div>
-                <p className="text-sm font-medium">
-                  {isUploading ? "Processando e detectando colunas..." : "Clique ou arraste a lista externa do cliente aqui"}
+                <p className="text-sm font-medium text-foreground">
+                  {isUploading
+                    ? "Processando documento e extraindo registros..."
+                    : "Clique ou arraste a lista externa do cliente aqui"}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Formatos aceitos: Planilhas Excel (.xlsx, .xls), CSV delimitado (.csv) ou Relatórios em PDF
+                  Formatos aceitos: Planilhas Excel (.xlsx, .xls), CSV (.csv) ou Relatórios em PDF
                 </p>
-              </label>
+                {!selectedClientId && (
+                  <span className="text-[11px] text-amber-600 dark:text-amber-400 mt-2 bg-amber-500/10 px-2 py-0.5 rounded">
+                    Dica: Você pode selecionar o cliente agora ou logo após abrir o documento.
+                  </span>
+                )}
+              </div>
             </div>
           </CardContent>
         )}
@@ -728,22 +845,34 @@ export function ConfrontationHub() {
                               Resolvido
                             </Badge>
                           ) : isDiff || isOmitted ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/20"
-                              onClick={() => {
-                                setActiveItemForDecision(item);
-                                setDecisionType("contest");
-                                setDecisionNotes(
-                                  item.weeklogSignatureRef
-                                    ? `Contestação formal fundamentada na WEEKLOG assinada (${item.weeklogSignatureRef}) pelo chefe da oficina.`
-                                    : "Contestação de valor divergente conforme registros operacionais internos."
-                                );
-                              }}
-                            >
-                              Tomar Decisão
-                            </Button>
+                            <div className="flex items-center justify-center gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/20"
+                                onClick={() => {
+                                  setActiveItemForDecision(item);
+                                  setDecisionType("contest");
+                                  setDecisionNotes(
+                                    item.weeklogSignatureRef
+                                      ? `Contestação formal fundamentada na WEEKLOG assinada (${item.weeklogSignatureRef}) pelo chefe da oficina.`
+                                      : "Contestação de valor divergente conforme registros operacionais internos."
+                                  );
+                                }}
+                              >
+                                Decisão
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs border-amber-400 text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 font-medium gap-1"
+                                onClick={() => handleOpenDiscrepancyEmail(item)}
+                                title="Solicitar Correção / Enviar ao Cliente"
+                              >
+                                <Mail className="h-3 w-3" />
+                                Enviar ao Cliente
+                              </Button>
+                            </div>
                           ) : (
                             <span className="text-[11px] text-muted-foreground">—</span>
                           )}
@@ -758,41 +887,33 @@ export function ConfrontationHub() {
         </div>
       )}
 
-      {/* 3. Column Mapping Confirmation Modal */}
+      {/* 3. Tabela de Revisão e Edição da Lista do Cliente */}
       <Dialog open={mappingModalOpen} onOpenChange={setMappingModalOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-base font-semibold">
-              Confirmar Mapeamento de Colunas da Lista Externa
+            <DialogTitle className="text-base font-semibold flex items-center gap-2">
+              <FileCheck2 className="h-5 w-5 text-emerald-600" />
+              Revisão e Edição da Lista de Pagamento do Cliente
             </DialogTitle>
             <DialogDescription className="text-xs">
-              O Operix identificou automaticamente as colunas da planilha. Verifique a correspondência dos campos antes de iniciar o confronto.
+              Revise e edite diretamente as informações extraídas (placas, serviços e valores) antes de confirmar o confronto.
             </DialogDescription>
           </DialogHeader>
 
           {preview && (
             <div className="space-y-4 py-2">
-              {(!mapping.plateColumn || !mapping.amountColumn) && (
-                <div className="flex items-center gap-2 p-2.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs">
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                  <span>Para executar o confronto, é obrigatório selecionar a Coluna da Placa e a Coluna do Valor.</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3 text-xs">
+              {/* Header de Configuração do Confronto */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 rounded-lg border bg-muted/20">
                 <div className="space-y-1">
-                  <Label className="text-xs">Coluna da Placa *</Label>
-                  <Select
-                    value={mapping.plateColumn}
-                    onValueChange={(val) => setMapping({ ...mapping, plateColumn: val })}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="Selecione a coluna" />
+                  <Label className="text-xs font-semibold">Cliente Comercial *</Label>
+                  <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+                    <SelectTrigger className="h-8 text-xs bg-card">
+                      <SelectValue placeholder="Selecione o cliente" />
                     </SelectTrigger>
                     <SelectContent>
-                      {preview.columns.map((c) => (
-                        <SelectItem key={c} value={c} className="text-xs">
-                          {c}
+                      {clients.map((c: any) => (
+                        <SelectItem key={c.id} value={c.id} className="text-xs">
+                          {c.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -800,58 +921,27 @@ export function ConfrontationHub() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-xs">Coluna do Valor *</Label>
-                  <Select
-                    value={mapping.amountColumn}
-                    onValueChange={(val) => setMapping({ ...mapping, amountColumn: val })}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="Selecione a coluna" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {preview.columns.map((c) => (
-                        <SelectItem key={c} value={c} className="text-xs">
-                          {c}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label className="text-xs font-semibold">Semana / Período Operacional</Label>
+                  <Input
+                    placeholder="Ex: 2026-W42 ou Semana 42"
+                    value={selectedPeriod}
+                    onChange={(e) => setSelectedPeriod(e.target.value)}
+                    className="h-8 text-xs bg-card"
+                  />
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-xs">Coluna de Serviço (Opcional)</Label>
-                  <Select
-                    value={mapping.serviceColumn || "none"}
-                    onValueChange={(val) => setMapping({ ...mapping, serviceColumn: val === "none" ? "" : val })}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="Selecione ou deixe em branco" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none" className="text-xs">
-                        Não aplicável (Sintético)
-                      </SelectItem>
-                      {preview.columns.map((c) => (
-                        <SelectItem key={c} value={c} className="text-xs">
-                          {c}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs">Base Fiscal de Comparação</Label>
+                  <Label className="text-xs font-semibold">Base Fiscal</Label>
                   <Select
                     value={mapping.taxType}
                     onValueChange={(val: "HT" | "TTC") => setMapping({ ...mapping, taxType: val })}
                   >
-                    <SelectTrigger className="h-8 text-xs">
+                    <SelectTrigger className="h-8 text-xs bg-card">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="HT" className="text-xs">
-                        HT (Sem impostos / Net)
+                        HT (Sem impostos / Líquido)
                       </SelectItem>
                       <SelectItem value="TTC" className="text-xs">
                         TTC (Com impostos / Bruto)
@@ -861,50 +951,125 @@ export function ConfrontationHub() {
                 </div>
               </div>
 
-              {/* Granularity Toggle */}
-              <div className="rounded-md border p-3 bg-muted/20 space-y-1.5">
+              {/* Tabela de Edição de Linhas */}
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium">Granularidade da Comparação</span>
-                  <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                    {mapping.granularity}
-                  </Badge>
+                  <span className="text-xs font-medium text-foreground">
+                    Linhas do Documento ({editableRows.length} linhas detectadas):
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    onClick={() =>
+                      setEditableRows([
+                        ...editableRows,
+                        {
+                          _id: `row-${Date.now()}`,
+                          licensePlate: "",
+                          vin: "",
+                          serviceDescription: "DSP / Reparação",
+                          amount: "0",
+                        },
+                      ])
+                    }
+                  >
+                    <Plus className="h-3 w-3" /> Adicionar Linha
+                  </Button>
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                  {mapping.granularity === "synthetic"
-                    ? "Detectado formato sintético: o cliente informou um valor consolidado por veículo. Os serviços internos serão somados para comparar o total do carro."
-                    : "Detectado formato analítico: linhas discriminadas por tipo de intervenção."}
-                </p>
-              </div>
 
-              {/* Sample Rows Preview */}
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">
-                  Amostra das Primeiras Linhas Extraídas ({preview.totalRows} linhas no total):
-                </span>
-                <div className="rounded border overflow-x-auto max-h-36 text-[11px]">
-                  <Table>
-                    <TableHeader className="bg-muted/40">
+                <div className="rounded-lg border overflow-x-auto max-h-[380px] bg-card">
+                  <Table className="text-xs">
+                    <TableHeader className="bg-muted/40 sticky top-0 z-10">
                       <TableRow>
-                        {preview.columns.slice(0, 5).map((col) => (
-                          <TableHead key={col} className="h-7 text-[10px] py-1">
-                            {col}
-                          </TableHead>
-                        ))}
+                        <TableHead className="w-[20%] font-semibold">Matrícula / Placa</TableHead>
+                        <TableHead className="w-[22%] font-semibold">VIN (Chassi)</TableHead>
+                        <TableHead className="w-[38%] font-semibold">Descrição do Serviço</TableHead>
+                        <TableHead className="w-[15%] text-right font-semibold">Valor (€)</TableHead>
+                        <TableHead className="w-[5%] text-center"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {preview.sampleRows.map((row, idx) => (
-                        <TableRow key={idx} className="h-6">
-                          {preview.columns.slice(0, 5).map((col) => (
-                            <TableCell key={col} className="py-1 font-mono text-[10px]">
-                              {String(row[col] ?? "—")}
-                            </TableCell>
-                          ))}
+                      {editableRows.map((row, idx) => (
+                        <TableRow key={row._id} className="hover:bg-muted/20">
+                          <TableCell className="p-1.5">
+                            <Input
+                              value={row.licensePlate}
+                              onChange={(e) => {
+                                const next = [...editableRows];
+                                next[idx].licensePlate = e.target.value.toUpperCase();
+                                setEditableRows(next);
+                              }}
+                              placeholder="Ex: AA-12-BB"
+                              className="h-7 text-xs font-mono font-bold"
+                            />
+                          </TableCell>
+                          <TableCell className="p-1.5">
+                            <Input
+                              value={row.vin}
+                              onChange={(e) => {
+                                const next = [...editableRows];
+                                next[idx].vin = e.target.value.toUpperCase();
+                                setEditableRows(next);
+                              }}
+                              placeholder="VIN opcional"
+                              className="h-7 text-[11px] font-mono text-muted-foreground"
+                            />
+                          </TableCell>
+                          <TableCell className="p-1.5">
+                            <Input
+                              value={row.serviceDescription}
+                              onChange={(e) => {
+                                const next = [...editableRows];
+                                next[idx].serviceDescription = e.target.value;
+                                setEditableRows(next);
+                              }}
+                              placeholder="Ex: DSP, Montagem, Pintura..."
+                              className="h-7 text-xs"
+                            />
+                          </TableCell>
+                          <TableCell className="p-1.5 text-right">
+                            <Input
+                              value={row.amount}
+                              onChange={(e) => {
+                                const next = [...editableRows];
+                                next[idx].amount = e.target.value;
+                                setEditableRows(next);
+                              }}
+                              placeholder="0.00"
+                              className="h-7 text-xs text-right font-semibold font-mono"
+                            />
+                          </TableCell>
+                          <TableCell className="p-1.5 text-center">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                              onClick={() => {
+                                setEditableRows(editableRows.filter((_, i) => i !== idx));
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </div>
+              </div>
+
+              {/* Totalizador */}
+              <div className="flex items-center justify-between text-xs p-2.5 rounded-lg border bg-muted/20">
+                <span>Arquivo: <strong>{preview.fileName}</strong></span>
+                <span className="font-semibold text-foreground">
+                  Total da Lista: €
+                  {editableRows
+                    .reduce((sum, r) => sum + (parseFloat(r.amount.replace(",", ".")) || 0), 0)
+                    .toFixed(2)}
+                </span>
               </div>
             </div>
           )}
@@ -915,17 +1080,109 @@ export function ConfrontationHub() {
             </Button>
             <Button
               size="sm"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5"
               onClick={handleConfirmMappingAndExecute}
-              disabled={isExecuting || !mapping.plateColumn || !mapping.amountColumn}
+              disabled={isExecuting || editableRows.length === 0 || !selectedClientId}
             >
               {isExecuting ? (
                 <>
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  Processando...
+                  Cruzando dados...
                 </>
               ) : (
-                "Confirmar e Executar Confronto"
+                <>
+                  <FileCheck2 className="h-4 w-4" />
+                  Confirmar e Executar Confronto
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Solicitar Correção / Enviar ao Cliente */}
+      <Dialog open={discrepancyModalOpen} onOpenChange={setDiscrepancyModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+              <Mail className="h-5 w-5 text-amber-500" />
+              Solicitar Correção de Divergência ao Cliente
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Dispara uma notificação formal por e-mail para a empresa parceira corrigir a divergência identificada no confronto.
+            </DialogDescription>
+          </DialogHeader>
+
+          {activeDiscrepancyItem && (
+            <div className="space-y-3.5 py-1 text-xs">
+              {/* Quadro comparativo */}
+              <div className="rounded-lg border p-3 bg-amber-500/5 border-amber-500/20 space-y-1.5">
+                <div className="flex justify-between font-bold text-sm">
+                  <span>Placa: {activeDiscrepancyItem.licensePlate}</span>
+                  <span className="text-amber-600 dark:text-amber-400">
+                    Diferença: €{activeDiscrepancyItem.differenceAmount}
+                  </span>
+                </div>
+                <div className="text-muted-foreground">{activeDiscrepancyItem.serviceDescription}</div>
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t text-[11px]">
+                  <div>
+                    <span className="text-muted-foreground block">Valor na OS (WEEKLOG):</span>
+                    <strong className="text-emerald-600 dark:text-emerald-400 font-mono">
+                      €{activeDiscrepancyItem.internalAmount}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Valor na Lista do Cliente:</span>
+                    <strong className="text-amber-600 dark:text-amber-400 font-mono">
+                      €{activeDiscrepancyItem.externalAmount}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">E-mail do Destinatário (Cliente Parceiro) *</Label>
+                <Input
+                  type="email"
+                  value={clientEmailInput}
+                  onChange={(e) => setClientEmailInput(e.target.value)}
+                  placeholder="exemplo@empresa-cliente.com"
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">Mensagem / Justificativa</Label>
+                <Textarea
+                  value={discrepancyEmailNotes}
+                  onChange={(e) => setDiscrepancyEmailNotes(e.target.value)}
+                  rows={4}
+                  className="text-xs leading-relaxed"
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setDiscrepancyModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white font-medium gap-1.5"
+              onClick={handleSendDiscrepancyEmail}
+              disabled={isSendingEmail || !clientEmailInput.trim()}
+            >
+              {isSendingEmail ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                <>
+                  <Send className="h-3.5 w-3.5" />
+                  Enviar Notificação por E-mail
+                </>
               )}
             </Button>
           </DialogFooter>
