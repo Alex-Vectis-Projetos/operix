@@ -1262,17 +1262,21 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const { workspaceId, workspaceName, logoUrl, brandConfig } = useWorkspace();
   const qc = useQueryClient();
   const { data: clientsData, refetch: refetchClients } = useQuery({
-    queryKey: ["ops-billing-clients"],
+    queryKey: ["budget-client-selector", workspaceId],
     staleTime: 0,
     queryFn: async () => {
       let list: any[] = [];
       try {
         const billingData = await apiRequest<{ clients?: any[] } | any[]>("/billing/admin/ops/clients?active_only=false");
-        list = Array.isArray(billingData) ? billingData : (billingData.clients ?? []);
+        list = Array.isArray(billingData)
+          ? billingData
+          : (Array.isArray(billingData?.clients) ? billingData.clients : []);
       } catch {
         try {
           const data = await apiRequest<{ clients?: any[] } | any[]>("/clients");
-          list = Array.isArray(data) ? data : (data.clients ?? []);
+          list = Array.isArray(data)
+            ? data
+            : (Array.isArray(data?.clients) ? data.clients : []);
         } catch {
           list = [];
         }
@@ -1290,8 +1294,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         customer_display_num:
           typeof c.customer_display_num === "number"
             ? c.customer_display_num
-            : null,
-        customer_display_id: c.display_code || c.displayCode || null,
+            : (typeof c.customerDisplayNum === "number" ? c.customerDisplayNum : null),
+        customer_display_id: c.customer_display_id || c.customerDisplayId || c.display_code || c.displayCode || null,
         siren: c.siren || c.document || null,
         siret: c.siret || null,
         tva_intracom: c.tva_number || c.tva_intracom || null,
@@ -2903,21 +2907,45 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                         <ChevronDown className="h-3.5 w-3.5 ml-auto shrink-0 text-muted-foreground" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[calc(100vw-48px)] sm:w-[640px] p-0" align="start">
-                      <Command shouldFilter={false}>
-                        <CommandInput
+                    <PopoverContent
+                      className="w-[calc(100vw-48px)] sm:w-[640px] p-0 shadow-2xl border border-slate-700 bg-slate-900 z-[100]"
+                      align="start"
+                      onWheel={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center border-b border-slate-800 px-3 py-2 gap-2">
+                        <SearchIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <Input
+                          className="h-9 border-0 bg-transparent focus-visible:ring-0 text-sm placeholder:text-muted-foreground p-0 flex-1"
                           placeholder={
                             langDisplay === "fr"
                               ? "Rechercher par ID, nom, SIREN, SIRET, téléphone, document…"
                               : "Pesquisar por ID, nome, SIREN, SIRET, telefone, documento…"
                           }
                           value={clientSearchQuery}
-                          onValueChange={setClientSearchQuery}
+                          onChange={(e) => setClientSearchQuery(e.target.value)}
                           autoFocus
                         />
-                        <CommandList className="max-h-[360px] overflow-y-auto">
-                          <CommandEmpty className="p-4 text-center">
-                            <p className="text-xs text-muted-foreground mb-2">
+                        {clientSearchQuery && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                            onClick={() => setClientSearchQuery("")}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+
+                      <div
+                        className="max-h-[340px] overflow-y-auto overflow-x-hidden p-1 space-y-0.5"
+                        onWheel={(e) => e.stopPropagation()}
+                        style={{ overscrollBehavior: "contain" }}
+                      >
+                        {filteredClients.length === 0 ? (
+                          <div className="p-6 text-center text-xs text-muted-foreground space-y-3">
+                            <p>
                               {langDisplay === "fr"
                                 ? "Aucun client trouvé."
                                 : "Nenhum cliente encontrado."}
@@ -2936,54 +2964,55 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                                   : `Cadastrar cliente "${clientSearchQuery.trim()}"`}
                               </Button>
                             ) : null}
-                          </CommandEmpty>
-                          <CommandGroup>
-                            {filteredClients.length === 0 && clientSearchQuery.trim().length === 0 ? (
-                              <div className="py-6 text-center text-xs text-muted-foreground">
-                                {langDisplay === "fr"
-                                  ? "Aucun client cadastré."
-                                  : "Nenhum cliente cadastrado."}
-                              </div>
-                            ) : (
-                              filteredClients.map((c) => (
-                                <CommandItem
-                                  key={c.id}
-                                  value={c.id}
-                                  onSelect={() => applyClientToBudget(c)}
-                                  className="py-2.5 cursor-pointer"
-                                >
-                                  <div className="flex w-full flex-col gap-0.5">
-                                    <div className="flex items-center gap-2">
-                                      <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/30 bg-primary/10">
-                                        {c.customer_display_id ?? (
-                                          <span className="text-muted-foreground/70 font-normal">—</span>
-                                        )}
-                                      </Badge>
-                                      <span className="font-medium text-sm">{c.name}</span>
-                                      <Badge variant="outline" className="text-[10px] ml-auto">
-                                        {c.kind === "professional"
-                                          ? (langDisplay === "fr" ? "Professionnel" : "Profissional")
-                                          : (langDisplay === "fr" ? "Particulier" : "Particular")}
-                                      </Badge>
-                                    </div>
-                                    <div className="text-[11px] text-muted-foreground truncate">
-                                      {[c.siret, c.siren, c.tva_intracom, c.tax_id, c.phone, c.email, c.city]
-                                        .filter(Boolean)
-                                        .join(" · ")}
-                                    </div>
+                          </div>
+                        ) : (
+                          filteredClients.map((c) => {
+                            const isSelected = form.client_id === c.id;
+                            return (
+                              <div
+                                key={c.id}
+                                onClick={() => {
+                                  applyClientToBudget(c);
+                                  setClientSearchOpen(false);
+                                }}
+                                className={cn(
+                                  "flex items-center justify-between p-2.5 rounded-md cursor-pointer transition-colors text-left select-none",
+                                  isSelected
+                                    ? "bg-primary/20 text-primary border border-primary/40"
+                                    : "hover:bg-slate-800/80 text-foreground"
+                                )}
+                              >
+                                <div className="flex w-full flex-col gap-0.5 min-w-0 pr-2">
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/30 bg-primary/10 shrink-0">
+                                      {c.customer_display_id ?? (
+                                        <span className="text-muted-foreground/70 font-normal">—</span>
+                                      )}
+                                    </Badge>
+                                    <span className="font-medium text-sm truncate">{c.name}</span>
+                                    <Badge variant="outline" className="text-[10px] ml-auto shrink-0">
+                                      {c.kind === "professional"
+                                        ? (langDisplay === "fr" ? "Professionnel" : "Profissional")
+                                        : (langDisplay === "fr" ? "Particulier" : "Particular")}
+                                    </Badge>
                                   </div>
-                                  <CheckIcon
-                                    className={cn(
-                                      "ml-auto h-4 w-4 shrink-0",
-                                      form.client_id === c.id ? "opacity-100 text-primary" : "opacity-0",
-                                    )}
-                                  />
-                                </CommandItem>
-                              ))
-                            )}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
+                                  <div className="text-[11px] text-muted-foreground truncate">
+                                    {[c.siret, c.siren, c.tva_intracom, c.tax_id, c.phone, c.email, c.city]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </div>
+                                </div>
+                                <CheckIcon
+                                  className={cn(
+                                    "ml-auto h-4 w-4 shrink-0 transition-opacity",
+                                    isSelected ? "opacity-100 text-primary" : "opacity-0"
+                                  )}
+                                />
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     </PopoverContent>
                   </Popover>
                 </div>
