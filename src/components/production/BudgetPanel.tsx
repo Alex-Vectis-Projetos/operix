@@ -11,7 +11,28 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Calculator, Calendar, Car, User, FileText, ArrowRightLeft, AlertTriangle, FileDown } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Plus,
+  Calculator,
+  Calendar,
+  Car,
+  User,
+  FileText,
+  ArrowRightLeft,
+  AlertTriangle,
+  FileDown,
+  Eye,
+  Pencil,
+  Trash2,
+  MoreHorizontal,
+} from "lucide-react";
 import {
   BudgetDialog,
   emptyBudget,
@@ -469,13 +490,15 @@ export function BudgetPanel({ onOpenOrder }: Props) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[14%]">Nº Orçamento</TableHead>
-                  <TableHead className="w-[9%]">Data</TableHead>
-                  <TableHead className="w-[21%]">Cliente</TableHead>
-                  <TableHead className="w-[21%]">Veículo</TableHead>
-                  <TableHead className="w-[10%]">Status</TableHead>
-                  <TableHead className="w-[11%] text-right">Total</TableHead>
-                  <TableHead className="w-[14%] text-right">Ação</TableHead>
+                  <TableHead className="w-[130px]">Nº Orçamento</TableHead>
+                  <TableHead className="w-[100px]">Data</TableHead>
+                  <TableHead className="min-w-[160px]">Cliente</TableHead>
+                  <TableHead className="min-w-[160px]">Veículo</TableHead>
+                  <TableHead className="w-[100px]">Status</TableHead>
+                  <TableHead className="w-[110px] text-right">Total</TableHead>
+                  <TableHead className="w-[180px] text-right sticky right-0 z-20 bg-card/95 backdrop-blur border-l border-border/50 shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.3)]">
+                    Ação
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -485,7 +508,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                   );
                   const alreadySent = Boolean(linkedOrder || (b as any).productionOrder || (b as any).production_order || mapping[b.id]);
                   return (
-                    <TableRow key={b.id}>
+                    <TableRow key={b.id} className="group hover:bg-muted/40 transition-colors">
                       <TableCell
                         className="cursor-pointer font-medium tabular-nums"
                         onClick={() => openPreview(b)}
@@ -553,21 +576,33 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                       >
                         {formatBRL(computeTotalsFor(b).total, b.currency || "EUR")}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <Button size="sm" variant="ghost" onClick={() => openPreview(b)}>
-                            <FileText className="h-3.5 w-3.5 mr-1" />
-                            {langDisplay === "fr" ? "Aperçu" : "Visualizar"}
+                      <TableCell className="text-right sticky right-0 z-10 bg-card/95 group-hover:bg-muted/90 backdrop-blur border-l border-border/50 shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.3)] transition-colors">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            title={langDisplay === "fr" ? "Aperçu PDF" : "Visualizar PDF"}
+                            onClick={() => openPreview(b)}
+                          >
+                            <Eye className="h-4 w-4" />
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => downloadBudgetFile(b)}>
-                            <FileDown className="h-3.5 w-3.5 mr-1" />
-                            {langDisplay === "fr" ? "Télécharger" : "Baixar"}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            title={langDisplay === "fr" ? "Télécharger PDF" : "Baixar PDF"}
+                            onClick={() => downloadBudgetFile(b)}
+                          >
+                            <FileDown className="h-4 w-4" />
                           </Button>
                           <Button
                             size="sm"
-                            variant={b.status === "rejected" ? "secondary" : "outline"}
+                            variant={b.status === "rejected" ? "secondary" : "default"}
+                            className="h-8 px-2.5 text-xs font-medium"
                             onClick={() => openEdit(b)}
                           >
+                            <Pencil className="h-3 w-3 mr-1" />
                             {b.status === "approved"
                               ? "Revisar"
                               : b.status === "rejected"
@@ -576,28 +611,57 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                                   ? "Modifier"
                                   : "Editar"}
                           </Button>
-                          {b.status === "approved" && !alreadySent && !isClient ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="gap-1.5 text-indigo-700 border-indigo-500/40 hover:bg-indigo-500/10 dark:text-indigo-400"
-                              onClick={() => sendToProduction(b)}
-                              disabled={approveBudgetMutation.isPending}
-                            >
-                              <ArrowRightLeft className="h-3.5 w-3.5" />
-                              {langDisplay === "fr" ? "Envoyer en Production" : "Enviar p/ Produção"}
-                            </Button>
-                          ) : null}
-                          {canDeleteBudget && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-destructive hover:text-destructive"
-                              onClick={() => removeBudget(b.id)}
-                            >
-                              {langDisplay === "fr" ? "Supprimer" : "Apagar"}
-                            </Button>
-                          )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                title="Mais ações"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem onClick={() => openPreview(b)}>
+                                <FileText className="h-4 w-4 mr-2" />
+                                {langDisplay === "fr" ? "Aperçu" : "Visualizar"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => downloadBudgetFile(b)}>
+                                <FileDown className="h-4 w-4 mr-2" />
+                                {langDisplay === "fr" ? "Télécharger PDF" : "Baixar PDF"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openEdit(b)}>
+                                <Pencil className="h-4 w-4 mr-2" />
+                                {langDisplay === "fr" ? "Modifier" : "Editar"}
+                              </DropdownMenuItem>
+                              {b.status === "approved" && !alreadySent && !isClient && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => sendToProduction(b)}
+                                    disabled={approveBudgetMutation.isPending}
+                                    className="text-indigo-600 dark:text-indigo-400 font-medium"
+                                  >
+                                    <ArrowRightLeft className="h-4 w-4 mr-2" />
+                                    {langDisplay === "fr" ? "Envoyer en Production" : "Enviar p/ Produção"}
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                              {canDeleteBudget && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => removeBudget(b.id)}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    {langDisplay === "fr" ? "Supprimer" : "Apagar orçamento"}
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </TableCell>
                     </TableRow>
