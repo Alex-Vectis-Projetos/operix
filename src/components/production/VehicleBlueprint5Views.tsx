@@ -644,11 +644,11 @@ export function VehicleBlueprint5Views({
         {/* Cabeçalho da Vista */}
         <div
           className={cn(
-            "flex items-center justify-between px-3 py-1.5 text-xs font-semibold border-b select-none w-full min-w-0",
+            "flex items-center justify-between px-2.5 py-1.5 text-xs font-semibold border-b select-none w-full min-w-0",
             isCadTheme ? "bg-slate-900/80 border-slate-800 text-cyan-300" : "bg-slate-100 border-slate-200 text-slate-800"
           )}
         >
-          <div className="flex items-center gap-2 min-w-0 truncate">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
             <span className="truncate">{title}</span>
             {viewPoints.length > 0 && (
               <Badge variant="secondary" className="h-4 px-1.5 text-[10px] bg-cyan-900/60 text-cyan-200 border border-cyan-700/50 shrink-0">
@@ -659,7 +659,7 @@ export function VehicleBlueprint5Views({
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-cyan-400 shrink-0"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-cyan-400 shrink-0 ml-1"
             title="Ampliar / Focar esta vista"
             onClick={() => setActiveView(activeView === view ? "all" : view)}
           >
@@ -810,34 +810,30 @@ export function VehicleBlueprint5Views({
           </Button>
         </div>
 
-        {/* Linha 2: Toolbar Unificada e Organizada de Carroceria e Vistas */}
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 bg-muted/40 p-2 rounded-lg border w-full min-w-0 max-w-full">
-          {/* Seletor de Carroceria */}
-          <div className="flex items-center gap-1.5 overflow-x-auto py-1 min-w-0 max-w-full">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1 shrink-0">
+        {/* Linha 2: Toolbar Compacta e Não-Transbordante de Carroceria e Vistas */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 bg-muted/40 p-2 rounded-lg border w-full min-w-0 max-w-full">
+          {/* Seletor de Carroceria via Dropdown Compacto e Ergonômico */}
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider shrink-0">
               Carroceria:
             </span>
-            <div className="flex items-center gap-1 bg-background/80 p-0.5 rounded-md border shrink-0">
-              {BODY_TYPES.map((bt) => (
-                <Button
-                  key={bt.code}
-                  size="sm"
-                  variant={bodyType === bt.code ? "default" : "ghost"}
-                  className={cn(
-                    "h-6 px-2.5 text-xs font-medium transition-all shrink-0",
-                    bodyType === bt.code && "bg-cyan-600 text-white shadow-sm font-semibold"
-                  )}
-                  onClick={() => handleSelectBodyType(bt.code)}
-                >
-                  {bt.label}
-                </Button>
-              ))}
-            </div>
+            <Select value={bodyType} onValueChange={(val) => handleSelectBodyType(val as VehicleBodyType)}>
+              <SelectTrigger className="h-7 w-[180px] sm:w-[210px] text-xs font-semibold bg-background border-slate-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BODY_TYPES.map((bt) => (
+                  <SelectItem key={bt.code} value={bt.code} className="text-xs font-medium">
+                    {bt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Filtro / Navegação de Vistas */}
-          <div className="flex items-center gap-1.5 overflow-x-auto py-1 min-w-0 max-w-full">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1 shrink-0">
+          <div className="flex items-center gap-1.5 min-w-0 overflow-x-auto py-0.5">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider shrink-0">
               Vista:
             </span>
             <div className="flex items-center gap-1 bg-background/80 p-0.5 rounded-md border shrink-0">
@@ -888,17 +884,17 @@ export function VehicleBlueprint5Views({
 
       {/* ÁREA GRÁFICA DO BLUEPRINT */}
       {activeView === "all" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 w-full min-w-0 max-w-full">
-          <div className="lg:col-span-4 flex flex-col gap-3 min-w-0 w-full max-w-full">
-            {renderTechnicalViewBox("front", "1. Vista Frontal", "front", "h-48 sm:h-52 md:h-56", false)}
-            {renderTechnicalViewBox("rear", "2. Vista Traseira", "rear", "h-48 sm:h-52 md:h-56", false)}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 w-full min-w-0 max-w-full">
+          <div className="md:col-span-4 flex flex-col gap-3 min-w-0 w-full max-w-full">
+            {renderTechnicalViewBox("front", "1. Vista Frontal", "front", "h-44 sm:h-48 md:h-52", false)}
+            {renderTechnicalViewBox("rear", "2. Vista Traseira", "rear", "h-44 sm:h-48 md:h-52", false)}
           </div>
-          <div className="lg:col-span-4 min-w-0 w-full max-w-full">
-            {renderTechnicalViewBox("top", "3. Vista Superior (Capô, Teto, Tampa)", "top", "h-80 sm:h-96 lg:h-[464px]", false)}
+          <div className="md:col-span-4 min-w-0 w-full max-w-full">
+            {renderTechnicalViewBox("top", "3. Vista Superior (Capô, Teto, Tampa)", "top", "h-72 sm:h-80 md:h-[432px]", false)}
           </div>
-          <div className="lg:col-span-4 flex flex-col gap-3 min-w-0 w-full max-w-full">
-            {renderTechnicalViewBox("left", "4. Lateral Esquerda (Motorista)", "left", "h-48 sm:h-52 md:h-56", true)}
-            {renderTechnicalViewBox("right", "5. Lateral Direita (Passageiro)", "right", "h-48 sm:h-52 md:h-56", false)}
+          <div className="md:col-span-4 flex flex-col gap-3 min-w-0 w-full max-w-full">
+            {renderTechnicalViewBox("left", "4. Lateral Esquerda (Motorista)", "left", "h-44 sm:h-48 md:h-52", true)}
+            {renderTechnicalViewBox("right", "5. Lateral Direita (Passageiro)", "right", "h-44 sm:h-48 md:h-52", false)}
           </div>
         </div>
       ) : (

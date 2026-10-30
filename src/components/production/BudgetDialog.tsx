@@ -2595,7 +2595,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-full max-w-[96vw] sm:max-w-6xl max-h-[92vh] overflow-y-auto overflow-x-hidden">
+      <DialogContent className="w-[calc(100vw-1.5rem)] sm:w-full max-w-6xl max-h-[92vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-3">
             {step === "form" && showBackToType && !initial ? (
