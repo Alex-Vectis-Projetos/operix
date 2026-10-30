@@ -31,7 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 
 export type VehicleViewType = "top" | "front" | "rear" | "left" | "right";
-export type VehicleBodyType = "sedan" | "hatchback" | "suv" | "pickup" | "pickup_cs" | "pickup_cd" | "van" | "furgao" | "wagon";
+export type VehicleBodyType = "sedan" | "hatchback" | "suv" | "pickup" | "pickup_cs" | "pickup_cd" | "van" | "furgao" | "wagon" | "chassis_cab";
 
 export interface DamagePointData {
   id?: string;
@@ -161,6 +161,7 @@ const BODY_TYPES: { code: VehicleBodyType; label: string }[] = [
   { code: "wagon", label: "Wagon / SW" },
   { code: "furgao", label: "Furgão" },
   { code: "van", label: "Van / Carrinha" },
+  { code: "chassis_cab", label: "Chassi Cabine / Caminhãozinho" },
 ];
 
 // Dimensões nativas exatas dos cortes (sem resíduos ou sobreposições)
@@ -194,11 +195,11 @@ const BLUEPRINT_DIMENSIONS: Record<VehicleBodyType, Record<VehicleViewType, { wi
     right: { width: 770, height: 295 },
   },
   pickup_cs: {
-    front: { width: 460, height: 368 },
-    rear: { width: 437, height: 369 },
-    top: { width: 473, height: 1111 },
-    left: { width: 1110, height: 369 },
-    right: { width: 1110, height: 369 },
+    front: { width: 413, height: 328 },
+    rear: { width: 419, height: 328 },
+    top: { width: 329, height: 966 },
+    left: { width: 975, height: 336 },
+    right: { width: 975, height: 336 },
   },
   pickup_cd: {
     front: { width: 295, height: 265 },
@@ -228,6 +229,13 @@ const BLUEPRINT_DIMENSIONS: Record<VehicleBodyType, Record<VehicleViewType, { wi
     left: { width: 419, height: 192 },
     right: { width: 419, height: 192 },
   },
+  chassis_cab: {
+    front: { width: 445, height: 419 },
+    rear: { width: 358, height: 427 },
+    top: { width: 389, height: 901 },
+    left: { width: 960, height: 437 },
+    right: { width: 960, height: 437 },
+  },
 };
 
 // Mapeamento pericial de regiões por coordenadas percentuais (todas as vistas com topo alinhado)
@@ -248,6 +256,14 @@ function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft =
       if (y < 48) return x < 20 ? "front_left_door" : x > 80 ? "front_right_door" : "roof";
       if (y < 53) return "rear_glass";
       return x < 22 ? "rear_left_quarter" : x > 78 ? "rear_right_quarter" : "trunk";
+    }
+    // Chassi Cabine com Baú / Caminhãozinho: Cabine compacta frontal + Grande baú de carga atrás
+    if (bodyType === "chassis_cab") {
+      if (y < 14) return x < 25 ? "front_left_fender" : x > 75 ? "front_right_fender" : "hood";
+      if (y < 22) return "windshield";
+      if (y < 35) return x < 15 ? "front_left_door" : x > 85 ? "front_right_door" : "roof";
+      if (y > 92) return "trunk";
+      return x < 20 ? "rear_left_quarter" : x > 80 ? "rear_right_quarter" : "roof";
     }
     // Orientação uniforme: Capô no topo (y < 35%), Teto no meio, Porta-malas na base
     if (y < 35) return x < 25 ? "front_left_fender" : x > 75 ? "front_right_fender" : "hood";
@@ -291,6 +307,16 @@ function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft =
       if (isFront) return view === "left" ? "front_left_fender" : "front_right_fender";
       if (isCabinDoor) return view === "left" ? "front_left_door" : "front_right_door";
       if (isBed) return view === "left" ? "rear_left_quarter" : "rear_right_quarter";
+    }
+
+    // Chassi Cabine com Baú / Caminhãozinho: Cabine compacta + Baú volumoso atrás
+    if (bodyType === "chassis_cab") {
+      const isFront = facingLeft ? x < 18 : x > 82;
+      const isCabinDoor = facingLeft ? (x >= 18 && x < 35) : (x >= 65 && x < 82);
+      const isCargoBox = facingLeft ? x >= 35 : x < 65;
+      if (isFront) return view === "left" ? "front_left_fender" : "front_right_fender";
+      if (isCabinDoor) return view === "left" ? "front_left_door" : "front_right_door";
+      if (isCargoBox) return view === "left" ? "rear_left_quarter" : "rear_right_quarter";
     }
 
     const isFrontSide = facingLeft
