@@ -51,6 +51,7 @@ import { cn } from "@/lib/utils";
 import { useExtractProductionOrder } from "@/hooks/useExtractProductionOrder";
 import { formatBRL } from "./BudgetDialog";
 import { useBudget, type ApiBudget, type ApiBudgetRevision } from "@/hooks/useBudgets";
+import { usePeople } from "@/hooks/usePeople";
 
 interface Props {
   order: ProductionOrder | null;
@@ -612,12 +613,25 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const { update, remove, create, finalize } = useProductionOrders();
   const [isFinalizing, setIsFinalizing] = useState(false);
   const { members: membersRaw } = useWorkspace();
-  const members = Array.isArray(membersRaw) ? membersRaw : [];
+  const { data: peopleList = [] } = usePeople({ status: "active" });
+  const members = useMemo(() => {
+    if (peopleList && peopleList.length > 0) {
+      return peopleList.map(p => ({
+        auth_user_id: p.system_access_user_id || p.id,
+        name: p.full_name,
+        email: p.email || p.role || ""
+      }));
+    }
+    return Array.isArray(membersRaw) ? membersRaw : [];
+  }, [peopleList, membersRaw]);
   const [form, setForm] = useState<Partial<ProductionOrder>>({});
   const [internalNotes, setInternalNotes] = useState("");
   const [activeTab, setActiveTab] = useState("ficha");
   const [productionTasks, setProductionTasks] = useState<ProductionTaskItem[]>([]);
   const [inspectionPoints, setInspectionPoints] = useState<DamagePointData[]>([]);
+  const [manualServices, setManualServices] = useState<Array<{ id: string; name: string; price: number; quantity: number }>>([]);
+  const [newServiceName, setNewServiceName] = useState("");
+  const [newServicePrice, setNewServicePrice] = useState("");
 
   useEffect(() => {
     if (order?.id && order.id !== "__new__") {
@@ -724,6 +738,17 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     setForm(order);
     setActiveTab("ficha");
     setPromotedId(null);
+    const existingPerformed = (order.performed_services || (order as any).performedServices || []) as any[];
+    if (Array.isArray(existingPerformed) && existingPerformed.length > 0) {
+      setManualServices(existingPerformed.map(s => ({
+        id: s.id || crypto.randomUUID(),
+        name: s.name || s.description || "Serviço",
+        price: Number(s.price ?? s.unit_price ?? s.total ?? 0),
+        quantity: Number(s.quantity ?? 1) || 1,
+      })));
+    } else {
+      setManualServices([]);
+    }
     const decoded = tryDecodeExecution(order.notes);
     if (decoded) {
       setExecution(decoded);
@@ -796,6 +821,50 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const displayYear = parsed.vehicle.year?.trim() || "—";
   const displayColor = parsed.vehicle.color?.trim() || form.color || order.color || "—";
   const displayKm = parsed.vehicle.km?.trim() || "—";
+
+  const manualServicesSubtotal = useMemo(() => {
+    return manualServices.reduce((sum, s) => sum + ((s.price || 0) * (s.quantity || 1)), 0);
+  }, [manualServices]);
+
+  const effectiveTotals = useMemo(() => {
+    const gross = parsed.totals.gross + manualServicesSubtotal;
+    const discount = (gross * parsed.totals.discountPct) / 100;
+    const net = Math.max(0, gross - discount);
+    const iva = (net * parsed.totals.ivaPct) / 100;
+    const total = net + iva;
+    return {
+      gross,
+      discount,
+      net,
+      iva,
+      total,
+      discountPct: parsed.totals.discountPct,
+      ivaPct: parsed.totals.ivaPct,
+    };
+  }, [parsed.totals, manualServicesSubtotal]);
+
+  const handleAddManualService = () => {
+    const name = newServiceName.trim();
+    if (!name) {
+      toast.warning(langDisplay === "fr" ? "Nom de prestation requis" : "Nome do serviço obrigatório.");
+      return;
+    }
+    const priceNum = parseFloat(newServicePrice.replace(",", ".")) || 0;
+    const item = {
+      id: crypto.randomUUID(),
+      name,
+      price: priceNum,
+      quantity: 1,
+    };
+    setManualServices(prev => [...prev, item]);
+    setNewServiceName("");
+    setNewServicePrice("");
+    toast.success(langDisplay === "fr" ? "Prestation ajoutée" : "Serviço adicionado.");
+  };
+
+  const handleRemoveManualService = (id: string) => {
+    setManualServices(prev => prev.filter(s => s.id !== id));
+  };
 
   const displayIntervention =
     parsed.interventionType?.trim() || form.insurer || order.insurer || "—";
@@ -926,14 +995,41 @@ export function OrderDetailDialog({ order, onClose }: Props) {
         budget,
         execution: executionToWrite,
       });
-      const payload: Partial<ProductionOrder> = { ...form, notes: finalNotes };
+      const performedPayload = manualServices.map(s => ({
+        id: s.id,
+        name: s.name,
+        description: s.name,
+        unit_price: s.price,
+        quantity: s.quantity || 1,
+        total: (s.price || 0) * (s.quantity || 1),
+        category: "service",
+        completed: false,
+      }));
 
+      const payload: Partial<ProductionOrder> = {
+        ...form,
+        notes: finalNotes,
+        performed_services: performedPayload.length > 0 ? performedPayload : (order?.performed_services ?? undefined),
+      };
+
+      let targetOrderId = order?.id;
       if (promotedId) {
+        targetOrderId = promotedId;
         await update.mutateAsync({ id: promotedId, ...payload });
       } else if (isNew) {
-        await create.mutateAsync(payload);
+        const created = await create.mutateAsync(payload);
+        targetOrderId = created?.id;
       } else {
         await update.mutateAsync({ id: order.id, ...payload });
+      }
+
+      // Se Concluído em / finished_at foi preenchido ou status alterado para finalizado, invoca finalização canônica
+      if (form.finished_at && targetOrderId && targetOrderId !== "__new__" && !locked) {
+        try {
+          await finalize.mutateAsync(targetOrderId);
+        } catch (fErr) {
+          console.warn("Auto-finalização na persistência:", fErr);
+        }
       }
       clearDraft();
       toast.success("Ordem de produção salva.");
@@ -1205,20 +1301,37 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm">
-                    <DataLine icon={UserIcon} label="Cliente" value={displayClientName} />
-                    <DataLine icon={Phone} label="Contacto" value={displayClientPhone} />
-                    <DataLine icon={Mail} label="E-mail" value={displayClientEmail} />
-                    <DataLine icon={FileSignature} label="Documento" value={displayClientDoc} />
-                    {!budgetHydrated && (
-                      <div className="grid grid-cols-1 gap-3 pt-2">
-                        <Field label="Nome (edição)">
-                          <Input
-                            value={form.client_name ?? ""}
-                            onChange={e => set("client_name", e.target.value)}
-                          />
-                        </Field>
-                      </div>
-                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Field label="Nome do Cliente">
+                        <Input
+                          placeholder="Ex: João Silva"
+                          value={form.client_name ?? (parsed.client.name?.trim() || order?.client_name || "")}
+                          onChange={e => set("client_name", e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Contacto / Telefone">
+                        <Input
+                          placeholder="Ex: +351 912 345 678"
+                          value={(form as any).client_phone ?? (parsed.client.phone?.trim() || "")}
+                          onChange={e => setForm(prev => ({ ...prev, client_phone: e.target.value } as any))}
+                        />
+                      </Field>
+                      <Field label="E-mail">
+                        <Input
+                          type="email"
+                          placeholder="cliente@exemplo.com"
+                          value={(form as any).client_email ?? (parsed.client.email?.trim() || "")}
+                          onChange={e => setForm(prev => ({ ...prev, client_email: e.target.value } as any))}
+                        />
+                      </Field>
+                      <Field label="Documento (NIF / CPF)">
+                        <Input
+                          placeholder="Ex: 123456789"
+                          value={(form as any).client_document ?? (parsed.client.document?.trim() || "")}
+                          onChange={e => setForm(prev => ({ ...prev, client_document: e.target.value } as any))}
+                        />
+                      </Field>
+                    </div>
                   </CardContent>
                 </Card>
 
@@ -1229,37 +1342,61 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm">
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                      <DataLine icon={Car} label="Marca" value={displayBrand} />
-                      <DataLine icon={Car} label="Modelo" value={displayModel} />
-                      <DataLine icon={HashIcon} label="Matrícula" value={displayPlate} mono />
-                      <DataLine icon={Shield} label="VIN" value={displayVin} mono />
-                      <DataLine icon={CalendarDays} label="Ano" value={displayYear} />
-                      <DataLine icon={Car} label="Cor" value={displayColor} />
-                      <DataLine icon={Car} label="KM" value={displayKm !== "—" ? `${displayKm} km` : "—"} />
-                    </div>
-                    {!budgetHydrated && (
-                      <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border/50">
-                        <Field label="Marca">
-                          <Input value={form.brand ?? ""} onChange={e => set("brand", e.target.value)} />
-                        </Field>
-                        <Field label="Modelo">
-                          <Input value={form.model ?? ""} onChange={e => set("model", e.target.value)} />
-                        </Field>
-                        <Field label="Placa">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      <Field label="Marca">
+                        <Input
+                          placeholder="Ex: Renault"
+                          value={form.brand ?? (parsed.vehicle.brand?.trim() || order?.brand || "")}
+                          onChange={e => set("brand", e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Modelo">
+                        <Input
+                          placeholder="Ex: Clio"
+                          value={form.model ?? (parsed.vehicle.model?.trim() || order?.model || "")}
+                          onChange={e => set("model", e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Matrícula / Placa">
+                        <Input
+                          placeholder="Ex: 00-AA-00"
+                          value={form.license_plate ?? (parsed.vehicle.plate?.trim() || order?.license_plate || "")}
+                          onChange={e => set("license_plate", e.target.value.toUpperCase())}
+                          className="font-mono"
+                        />
+                      </Field>
+                      <Field label="VIN / Chassi">
+                        <Input
+                          placeholder="Ex: VF1..."
+                          value={form.vin ?? (parsed.vehicle.vin?.trim() || order?.vin || "")}
+                          onChange={e => set("vin", e.target.value)}
+                          className="font-mono text-xs"
+                        />
+                      </Field>
+                      <Field label="Cor">
+                        <Input
+                          placeholder="Ex: Preto"
+                          value={form.color ?? (parsed.vehicle.color?.trim() || order?.color || "")}
+                          onChange={e => set("color", e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Ano">
+                        <Input
+                          placeholder="Ex: 2022"
+                          value={(form as any).vehicle_year ?? (parsed.vehicle.year?.trim() || "")}
+                          onChange={e => setForm(prev => ({ ...prev, vehicle_year: e.target.value } as any))}
+                        />
+                      </Field>
+                      <div className="col-span-2 sm:col-span-3">
+                        <Field label="Quilometragem (KM)">
                           <Input
-                            value={form.license_plate ?? ""}
-                            onChange={e => set("license_plate", e.target.value.toUpperCase())}
+                            placeholder="Ex: 85000"
+                            value={(form as any).vehicle_km ?? (parsed.vehicle.km?.trim() || "")}
+                            onChange={e => setForm(prev => ({ ...prev, vehicle_km: e.target.value } as any))}
                           />
                         </Field>
-                        <Field label="VIN">
-                          <Input value={form.vin ?? ""} onChange={e => set("vin", e.target.value)} />
-                        </Field>
-                        <Field label="Cor">
-                          <Input value={form.color ?? ""} onChange={e => set("color", e.target.value)} />
-                        </Field>
                       </div>
-                    )}
+                    </div>
                   </CardContent>
                 </Card>
               </div>
@@ -1405,6 +1542,89 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                 </Card>
               </div>
 
+              {/* Seção de Serviços e Intervenções Manuais / Cadastrados */}
+              <Card className="border-indigo-500/30">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-sm">
+                      <Wrench className="h-4 w-4 text-indigo-500" /> Intervenção / Serviços Adicionais
+                    </CardTitle>
+                    <Badge variant="outline" className="text-xs">
+                      {manualServices.length} {manualServices.length === 1 ? "serviço" : "serviços"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4 text-sm">
+                  {!locked && (
+                    <div className="flex flex-wrap items-end gap-3 p-3 rounded-lg border border-border/60 bg-slate-50 dark:bg-slate-900/50">
+                      <div className="flex-1 min-w-[200px]">
+                        <Label className="text-xs text-muted-foreground">Descrição do Serviço / Intervenção</Label>
+                        <Input
+                          placeholder="Ex: DSP, Substituição do Capô, 255 mossas 3cm..."
+                          value={newServiceName}
+                          onChange={e => setNewServiceName(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAddManualService(); } }}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div className="w-32">
+                        <Label className="text-xs text-muted-foreground">Valor (€)</Label>
+                        <Input
+                          placeholder="0,00"
+                          value={newServicePrice}
+                          onChange={e => setNewServicePrice(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAddManualService(); } }}
+                          className="mt-1 font-mono text-right"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={handleAddManualService}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium gap-1.5"
+                      >
+                        <PlusIcon className="h-4 w-4" /> Adicionar Serviço
+                      </Button>
+                    </div>
+                  )}
+
+                  {manualServices.length > 0 && (
+                    <div className="rounded-lg border border-border/70 overflow-hidden">
+                      <Table>
+                        <TableHeader className="bg-muted/40">
+                          <TableRow>
+                            <TableHead>Serviço / Intervenção</TableHead>
+                            <TableHead className="text-right w-24">Qtd</TableHead>
+                            <TableHead className="text-right w-32">Valor (€)</TableHead>
+                            <TableHead className="text-right w-16"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {manualServices.map((s) => (
+                            <TableRow key={s.id}>
+                              <TableCell className="font-medium">{s.name}</TableCell>
+                              <TableCell className="text-right tabular-nums">{s.quantity || 1}</TableCell>
+                              <TableCell className="text-right font-mono font-semibold">{formatBRL(s.price * (s.quantity || 1))}</TableCell>
+                              <TableCell className="text-right">
+                                {!locked && (
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                                    onClick={() => handleRemoveManualService(s.id)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               <Card className="border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/5">
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300">
@@ -1413,21 +1633,21 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-3 md:grid-cols-5">
-                    <TotalCell label="Subtotal" value={formatBRL(parsed.totals.gross)} />
+                    <TotalCell label="Subtotal" value={formatBRL(effectiveTotals.gross)} />
                     <TotalCell
-                      label={`Desconto (${parsed.totals.discountPct.toFixed(2)}%)`}
-                      value={`- ${formatBRL(parsed.totals.discount)}`}
+                      label={`Desconto (${effectiveTotals.discountPct.toFixed(2)}%)`}
+                      value={`- ${formatBRL(effectiveTotals.discount)}`}
                       tone="text-amber-600"
                     />
-                    <TotalCell label="Base tributável" value={formatBRL(parsed.totals.net)} />
+                    <TotalCell label="Base tributável" value={formatBRL(effectiveTotals.net)} />
                     <TotalCell
-                      label={`IVA (${parsed.totals.ivaPct.toFixed(2)}%)`}
-                      value={`+ ${formatBRL(parsed.totals.iva)}`}
+                      label={`IVA (${effectiveTotals.ivaPct.toFixed(2)}%)`}
+                      value={`+ ${formatBRL(effectiveTotals.iva)}`}
                       tone="text-sky-600"
                     />
                     <TotalCell
                       label="TOTAL"
-                      value={formatBRL(parsed.totals.total)}
+                      value={formatBRL(effectiveTotals.total)}
                       big
                       tone="text-emerald-700 dark:text-emerald-300"
                     />
@@ -1537,7 +1757,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                     </Field>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4 md:grid-cols-3">
                     <Field label="Data de entrada">
                       <div className="rounded-md border border-border/70 px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900/40">
                         <span className="text-muted-foreground">
@@ -1545,7 +1765,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                         </span>
                       </div>
                       <p className="text-[11px] text-muted-foreground pt-1">
-                        Data de criação da ordem — não editável.
+                        Data de criação — não editável.
                       </p>
                     </Field>
 
@@ -1558,6 +1778,23 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                           e.target.value ? new Date(e.target.value).toISOString() : null,
                         )}
                       />
+                    </Field>
+
+                    <Field label="Concluído em">
+                      <Input
+                        type="datetime-local"
+                        value={fmtDateInput(form.finished_at ?? (order as any)?.finished_at ?? (order as any)?.finishedAt)}
+                        onChange={e => {
+                          const val = e.target.value ? new Date(e.target.value).toISOString() : null;
+                          set("finished_at" as any, val as any);
+                          if (val) {
+                            set("status" as any, "finished" as any);
+                          }
+                        }}
+                      />
+                      <p className="text-[11px] text-muted-foreground pt-1">
+                        Preencher e salvar finaliza a OS e sincroniza ao WEEKLOG.
+                      </p>
                     </Field>
                   </div>
 

@@ -111,7 +111,6 @@ export const AppSidebar = memo(function AppSidebar() {
     {
       label: t("nav.group.accounts", "Contas"),
       items: [
-        { title: t("nav.users"), url: "/users", icon: Users, module: "users", action: "view" },
         { title: t("nav.subscription", "Assinaturas"), url: "/subscription", icon: Shield, module: "dashboard", action: "view" },
       ],
     },

@@ -221,10 +221,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         savedResult = updated;
         const targetRevisionId = updated.revision.id;
 
-        if (
-          b.status === "approved" &&
-          existing.approvedRevisionId !== targetRevisionId
-        ) {
+        if (b.status === "approved") {
           const res = await approveBudgetMutation.mutateAsync({
             budgetId: b.id,
             revisionId: targetRevisionId,
