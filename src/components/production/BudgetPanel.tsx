@@ -390,12 +390,13 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   };
 
   const filteredItems = useMemo(() => {
-    if (!filter || filter === "total") return items;
+    // Regra de Negócio: Na listagem padrão permanecem apenas rascunhos, enviados ou rejeitados. Aprovados vão para Produção.
+    if (!filter || filter === "total") return items.filter((b) => b.status !== "approved");
     if (filter === "draft") return items.filter((b) => b.status === "draft");
     if (filter === "sent") return items.filter((b) => b.status === "sent");
     if (filter === "approved") return items.filter((b) => b.status === "approved");
     if (filter === "rejected") return items.filter((b) => b.status === "rejected");
-    return items;
+    return items.filter((b) => b.status !== "approved");
   }, [items, filter]);
 
   return (

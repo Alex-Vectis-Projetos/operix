@@ -768,12 +768,18 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
       );
     }
 
-    // Workspace Owner/Admin may NOT approve a client Budget merely because they are workspace admins.
-    if (!budget.clientId) {
-      throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
-    }
+    const isApproveInternalManager =
+      ctx.platformRole === "platform_admin" ||
+      ctx.membershipRole === "owner" ||
+      ctx.membershipRole === "admin";
 
-    {
+    // Apenas colaboradores externos do cliente exigem ClientAccessGrant explícito.
+    // Gestores internos do workspace (owner, admin, plataforma) têm autoridade comercial direta para aprovação.
+    if (!isApproveInternalManager) {
+      if (!budget.clientId) {
+        throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
+      }
+
       const revForApprove = await prisma.budgetRevision.findFirst({
         where: { id: revisionId, budgetId: budget.id },
       });

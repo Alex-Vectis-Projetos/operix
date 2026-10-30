@@ -156,29 +156,30 @@ export const PROTOCOLE_ZONES = [
     parts: [
       { code: "hood", label: "Capot", match: ["capot", "capô", "capo", "hood"] },
       { code: "roof", label: "Pavillon", match: ["pavillon", "teto", "toit", "roof"] },
-      { code: "trunk", label: "Coffre supérieur", match: ["coffre", "porta-malas", "malle", "trunk"] },
-      { code: "tailgate", label: "Coffre inférieur", match: ["coffre inférieur", "tampa inf", "tailgate"] },
+      { code: "trunk", label: "Coffre supérieur", match: ["coffre", "porta-malas", "malle", "trunk", "tampa do porta-malas"] },
+      { code: "tailgate", label: "Coffre inférieur", match: ["coffre inférieur", "tampa inf", "tailgate", "tampa traseira"] },
     ],
   },
   {
     key: "gauche",
     title: "Côté gauche",
     parts: [
-      { code: "left_rail", label: "Brancard G", match: ["brancard g", "coluna esq", "rail g", "left rail"] },
-      { code: "front_left_fender", label: "Aile AVG", match: ["aile avg", "para-lama d. e", "aile avant gauche", "front left fender"] },
-      { code: "front_left_door", label: "Porte AVG", match: ["porte avg", "porta d. e", "porte avant gauche", "front left door"] },
-      { code: "rear_left_door", label: "Porte ARG", match: ["porte arg", "porta t. e", "porte arrière gauche", "rear left door"] },
-      { code: "rear_left_quarter", label: "Aile ARG", match: ["aile arg", "lateral t. e", "aile arrière gauche", "rear left quarter"] },
+      { code: "left_rail", label: "Brancard G", match: ["brancard g", "coluna / arco superior esquerdo", "arco superior esquerdo", "coluna esq", "rail g", "left rail", "coluna esquerda"] },
+      { code: "front_left_fender", label: "Aile AVG", match: ["aile avg", "para-lama dianteiro esquerdo", "paralama dianteiro esquerdo", "para-lama d. e", "aile avant gauche", "front left fender"] },
+      { code: "front_left_door", label: "Porte AVG", match: ["porte avg", "porta dianteira esquerda", "porta d. e", "porte avant gauche", "front left door"] },
+      { code: "rear_left_door", label: "Porte ARG", match: ["porte arg", "porta traseira esquerda", "porta t. e", "porte arrière gauche", "rear left door"] },
+      { code: "rear_left_quarter", label: "Aile ARG", match: ["aile arg", "lateral / para-lama traseiro esquerdo", "lateral traseira esquerda", "lateral t. e", "aile arrière gauche", "rear left quarter"] },
     ],
   },
   {
     key: "droit",
     title: "Côté droit",
     parts: [
-      { code: "right_rail", label: "Brancard D", match: ["brancard d", "coluna dir", "rail d", "right rail"] },
-      { code: "front_right_fender", label: "Aile AVD", match: ["aile avd", "para-lama d. d", "aile avant droite", "front right fender"] },
-      { code: "front_right_door", label: "Porte AVD", match: ["porte avd", "porta d. d", "porte avant droite", "front right door"] },
-      { code: "rear_right_quarter", label: "Aile ARD", match: ["aile ard", "lateral t. d", "aile arrière droite", "rear right quarter"] },
+      { code: "right_rail", label: "Brancard D", match: ["brancard d", "coluna / arco superior direito", "arco superior direito", "coluna dir", "rail d", "right rail", "coluna direita"] },
+      { code: "front_right_fender", label: "Aile AVD", match: ["aile avd", "para-lama dianteiro direito", "paralama dianteiro direito", "para-lama d. d", "aile avant droite", "front right fender"] },
+      { code: "front_right_door", label: "Porte AVD", match: ["porte avd", "porta dianteira direita", "porta d. d", "porte avant droite", "front right door"] },
+      { code: "rear_right_door", label: "Porte ARD", match: ["porte ard", "porta traseira direita", "porta t. d", "porte arrière droite", "rear right door"] },
+      { code: "rear_right_quarter", label: "Aile ARD", match: ["aile ard", "lateral / para-lama traseiro direito", "lateral traseira direita", "lateral t. d", "aile arrière droite", "rear right quarter"] },
     ],
   },
 ];
@@ -218,6 +219,7 @@ export const PDF_I18N = {
       right_rail: "Brancard D",
       front_right_fender: "Aile AVD",
       front_right_door: "Porte AVD",
+      rear_right_door: "Porte ARD",
       rear_right_quarter: "Aile ARD",
     } as Record<string, string>,
     colComponents: "Composants",
@@ -299,6 +301,7 @@ export const PDF_I18N = {
       right_rail: "Coluna / Arco Dir. (Brancard D)",
       front_right_fender: "Para-lama Dianteiro Dir.",
       front_right_door: "Porta Dianteira Dir.",
+      rear_right_door: "Porta Traseira Dir.",
       rear_right_quarter: "Lateral Traseira Dir.",
     } as Record<string, string>,
     colComponents: "Componentes",
@@ -380,6 +383,7 @@ export const PDF_I18N = {
       right_rail: "Right Roof Rail (Brancard R)",
       front_right_fender: "Front Right Fender",
       front_right_door: "Front Right Door",
+      rear_right_door: "Rear Right Door",
       rear_right_quarter: "Rear Right Quarter Panel",
     } as Record<string, string>,
     colComponents: "Components",
@@ -550,24 +554,69 @@ export function buildProtocoleDeReparationHtml(
     </tbody>`;
   }).join("");
 
-  // Tabela Peinture / MO
-  const paintRowsHtml = allServices
-    .filter((s) => (s.description || "").toLowerCase().includes("peint") || (s.description || "").toLowerCase().includes("pintura"))
-    .map((s) => {
-      const lineVal = (s.pricing_mode === "fixed" || s.pricingMode === "fixed") ? Number(s.unit_price) : Number(s.quantity || 1) * Number(s.unit_price);
-      return `<tr style="border-bottom:1px solid #d1d5db">
-        <td style="padding:3px 6px;border-right:1px solid #d1d5db;font-weight:600">${esc(s.description)}</td>
-        <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">-</td>
-        <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">1 H</td>
-        <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">3 H</td>
-        <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">-</td>
-        <td style="padding:3px 6px;text-align:right;font-weight:600">${lineVal.toFixed(2)} EUR</td>
-      </tr>`;
-    }).join("");
+  // Tabela Peinture / MO (inclui Pintura, Mão de Obra de desmontagem/montagem e serviços complementares)
+  const additionalWorkItems: Array<{ desc: string; hours: string; rate: string; total: number; comment?: string }> = [];
 
-  const totalPaintVal = allServices
+  // 1. Serviços de pintura
+  allServices
     .filter((s) => (s.description || "").toLowerCase().includes("peint") || (s.description || "").toLowerCase().includes("pintura"))
-    .reduce((sum, s) => sum + ((s.pricing_mode === "fixed" || s.pricingMode === "fixed") ? Number(s.unit_price) : Number(s.quantity || 1) * Number(s.unit_price)), 0);
+    .forEach((s) => {
+      const lineVal = (s.pricing_mode === "fixed" || s.pricingMode === "fixed") ? Number(s.unit_price) : Number(s.quantity || 1) * Number(s.unit_price);
+      additionalWorkItems.push({
+        desc: s.description || (lang === "fr" ? "Peinture" : "Pintura"),
+        hours: `${s.quantity || 1} H`,
+        rate: `${Number(s.unit_price || 0).toFixed(2)}`,
+        total: lineVal,
+        comment: lang === "fr" ? "Peinture" : "Pintura",
+      });
+    });
+
+  // 2. Mão de obra de montagem/desmontagem (b.labor)
+  const allLabor = Array.isArray(b.labor) ? b.labor : [];
+  allLabor
+    .filter((l: any) => l && (l.description || Number(l.hours) > 0 || Number(l.hourly_rate) > 0))
+    .forEach((l: any) => {
+      const hrs = Number(l.hours || 0);
+      const rate = Number(l.hourly_rate || 0);
+      const lineVal = hrs * rate;
+      additionalWorkItems.push({
+        desc: l.description || (lang === "fr" ? "Démontage / Montage" : "Montagem e Desmontagem"),
+        hours: hrs > 0 ? `${hrs} H` : "-",
+        rate: rate > 0 ? `${rate.toFixed(2)}` : "-",
+        total: lineVal,
+        comment: lang === "fr" ? "Main d'œuvre" : "Mão de obra",
+      });
+    });
+
+  // 3. Outros serviços complementares que não sejam PDR e nem pintura
+  allServices
+    .filter((s) => {
+      const desc = (s.description || "").toLowerCase();
+      return !desc.includes("pdr") && !desc.includes("peint") && !desc.includes("pintura") && !desc.includes("conjunto global");
+    })
+    .forEach((s) => {
+      const lineVal = (s.pricing_mode === "fixed" || s.pricingMode === "fixed") ? Number(s.unit_price) : Number(s.quantity || 1) * Number(s.unit_price);
+      additionalWorkItems.push({
+        desc: s.description || "Serviço Adicional",
+        hours: `${s.quantity || 1} UN`,
+        rate: `${Number(s.unit_price || 0).toFixed(2)}`,
+        total: lineVal,
+        comment: "-",
+      });
+    });
+
+  const paintRowsHtml = additionalWorkItems.map((item) => {
+    return `<tr style="border-bottom:1px solid #d1d5db">
+      <td style="padding:3px 6px;border-right:1px solid #d1d5db;font-weight:600">${esc(item.desc)}</td>
+      <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">${esc(item.comment || "-")}</td>
+      <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">${esc(item.hours)}</td>
+      <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">${esc(item.rate)}</td>
+      <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">-</td>
+      <td style="padding:3px 6px;text-align:right;font-weight:600">${item.total.toFixed(2)} EUR</td>
+    </tr>`;
+  }).join("");
+
+  const totalPaintVal = additionalWorkItems.reduce((sum, item) => sum + item.total, 0);
 
   const clientAddress = [b.address_street, b.address_number, b.address_postal, b.address_city, b.address_country]
     .filter(notEmpty)

@@ -1237,17 +1237,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const { data: catalogItems = [], isLoading: isCatalogLoading } = useServiceCatalogItems();
 
   const [pdfLang, setPdfLang] = useState<"pt" | "fr" | "en">(() => {
-    const c = String(form.address_country || "").toUpperCase();
-    if (c === "FR" || c === "FRANCE") return "fr";
-    if (c === "PT" || c === "PORTUGAL" || c === "BR" || c === "BRAZIL" || c === "BRASIL") return "pt";
     return langDisplay === "fr" ? "fr" : "pt";
   });
-
-  useEffect(() => {
-    const c = String(form.address_country || "").toUpperCase();
-    if (c === "FR" || c === "FRANCE") setPdfLang("fr");
-    else if (c === "PT" || c === "PORTUGAL" || c === "BR" || c === "BRAZIL" || c === "BRASIL") setPdfLang("pt");
-  }, [form.address_country]);
 
   // ─── Integração Cliente → Orçamento ───
   type BudgetClient = {
@@ -1270,8 +1261,9 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   };
   const { workspaceId, workspaceName, logoUrl, brandConfig } = useWorkspace();
   const qc = useQueryClient();
-  const { data: clientsData } = useQuery({
-    queryKey: ["clients", workspaceId],
+  const { data: clientsData, refetch: refetchClients } = useQuery({
+    queryKey: ["ops-billing-clients"],
+    staleTime: 0,
     queryFn: async () => {
       let list: any[] = [];
       try {
@@ -1346,7 +1338,9 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         country: null,
       };
       applyClientToBudget(formatted);
-      qc.invalidateQueries({ queryKey: ["clients"] });
+      await qc.invalidateQueries({ queryKey: ["ops-billing-clients"] });
+      await qc.invalidateQueries({ queryKey: ["clients"] });
+      await refetchClients();
       toast.success(
         langDisplay === "fr"
           ? `Client "${name}" créé avec succès`
@@ -2159,7 +2153,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         ? `${prefix} - ${summary.partLabel} ${materialTag}`.trim()
         : `${prefix} - ${summary.partLabel} ${materialTag} — ${summary.dentCount} ${summary.dentCount === 1 ? "mossa" : "mossas"}${sizeText}`.trim();
 
-      const desc = isGlobal ? `${baseDesc} [Conjunto Global - Incluso]` : baseDesc;
+      const desc = isGlobal ? `${baseDesc} [Incluso no Conjunto]` : baseDesc;
       const isFixed = summary.pricingMode === "fixed" || isGlobal;
       const newLine: BudgetServiceLine = {
         id: uid(),
@@ -2170,17 +2164,41 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       };
 
       setFormSafe((prev) => {
-        const existingIdx = prev.services.findIndex((s) => s.description.includes(summary.partLabel));
+        let nextServices = [...prev.services];
+
+        // Se veio valor total do conjunto global, cria ou atualiza a linha mestra do pacote global
+        if (isGlobal && summary.packageTotalAmount && summary.packageTotalAmount > 0) {
+          const masterPkgDesc = "PDR - Pacote Conjunto Global (Preço Fechado do Veículo)";
+          const masterIdx = nextServices.findIndex((s) => s.description.startsWith("PDR - Pacote Conjunto Global"));
+          const masterLine: BudgetServiceLine = {
+            id: masterIdx >= 0 ? nextServices[masterIdx].id : uid(),
+            description: masterPkgDesc,
+            quantity: 1,
+            unit_price: summary.packageTotalAmount,
+            pricing_mode: "fixed",
+          };
+          if (masterIdx >= 0) {
+            nextServices[masterIdx] = masterLine;
+          } else {
+            // Remove linha vazia se existir
+            nextServices = nextServices.filter((s) => s.description || s.unit_price > 0);
+            nextServices.unshift(masterLine);
+          }
+        }
+
+        const existingIdx = nextServices.findIndex((s) => s.description.includes(summary.partLabel));
         if (existingIdx >= 0) {
-          const nextServices = [...prev.services];
           nextServices[existingIdx] = { ...nextServices[existingIdx], ...newLine, id: nextServices[existingIdx].id };
-          return { ...prev, services: nextServices, updated_at: new Date().toISOString() };
+        } else {
+          if (nextServices.some((s) => !s.description && !s.unit_price)) {
+            nextServices = nextServices.map((s, idx) => (idx === 0 && !s.description ? newLine : s));
+          } else {
+            nextServices.push(newLine);
+          }
         }
         return {
           ...prev,
-          services: prev.services.some((s) => !s.description && !s.unit_price)
-            ? prev.services.map((s, idx) => (idx === 0 && !s.description ? newLine : s))
-            : [...prev.services, newLine],
+          services: nextServices,
           updated_at: new Date().toISOString(),
         };
       });
@@ -2843,7 +2861,13 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                       (C-00001 · nome · SIREN · telefone · documento)
                     </span>
                   </Label>
-                  <Popover open={clientSearchOpen} onOpenChange={setClientSearchOpen}>
+                  <Popover
+                    open={clientSearchOpen}
+                    onOpenChange={(val) => {
+                      setClientSearchOpen(val);
+                      if (val) refetchClients();
+                    }}
+                  >
                     <PopoverTrigger asChild>
                       <Button
                         type="button"
@@ -2852,15 +2876,19 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                         className="w-full justify-start font-normal text-left h-10 px-3"
                         disabled={isLocked}
                       >
-                        {form.client_display_id && selectedClient ? (
+                        {(selectedClient?.name || form.client_name || form.client_id) ? (
                           <span className="inline-flex items-center gap-2 overflow-hidden">
-                            <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/40 bg-primary/10 shrink-0">
-                              {form.client_display_id}
-                            </Badge>
-                            <span className="truncate font-medium">{selectedClient.name}</span>
-                            <span className="text-muted-foreground truncate text-[11px]">
-                              {[selectedClient.phone, selectedClient.email].filter(Boolean).join(" · ")}
-                            </span>
+                            {(form.client_display_id || selectedClient?.customer_display_id) && (
+                              <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/40 bg-primary/10 shrink-0">
+                                {form.client_display_id || selectedClient?.customer_display_id}
+                              </Badge>
+                            )}
+                            <span className="truncate font-medium">{selectedClient?.name || form.client_name}</span>
+                            {([form.client_phone || selectedClient?.phone, form.client_email || selectedClient?.email].filter(Boolean).length > 0) && (
+                              <span className="text-muted-foreground truncate text-[11px]">
+                                {[form.client_phone || selectedClient?.phone, form.client_email || selectedClient?.email].filter(Boolean).join(" · ")}
+                              </span>
+                            )}
                           </span>
                         ) : (
                           <span className="text-muted-foreground flex items-center gap-2 w-full">
@@ -2887,7 +2915,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                           onValueChange={setClientSearchQuery}
                           autoFocus
                         />
-                        <CommandList>
+                        <CommandList className="max-h-[360px] overflow-y-auto">
                           <CommandEmpty className="p-4 text-center">
                             <p className="text-xs text-muted-foreground mb-2">
                               {langDisplay === "fr"
@@ -2910,51 +2938,49 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                             ) : null}
                           </CommandEmpty>
                           <CommandGroup>
-                            <ScrollArea className="max-h-[340px]">
-                              {filteredClients.length === 0 && clientSearchQuery.trim().length === 0 ? (
-                                <div className="py-6 text-center text-xs text-muted-foreground">
-                                  {langDisplay === "fr"
-                                    ? "Aucun client cadastré."
-                                    : "Nenhum cliente cadastrado."}
-                                </div>
-                              ) : (
-                                filteredClients.map((c) => (
-                                  <CommandItem
-                                    key={c.id}
-                                    value={c.id}
-                                    onSelect={() => applyClientToBudget(c)}
-                                    className="py-2.5"
-                                  >
-                                    <div className="flex w-full flex-col gap-0.5">
-                                      <div className="flex items-center gap-2">
-                                        <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/30 bg-primary/10">
-                                          {c.customer_display_id ?? (
-                                            <span className="text-muted-foreground/70 font-normal">—</span>
-                                          )}
-                                        </Badge>
-                                        <span className="font-medium text-sm">{c.name}</span>
-                                        <Badge variant="outline" className="text-[10px] ml-auto">
-                                          {c.kind === "professional"
-                                            ? (langDisplay === "fr" ? "Professionnel" : "Profissional")
-                                            : (langDisplay === "fr" ? "Particulier" : "Particular")}
-                                        </Badge>
-                                      </div>
-                                      <div className="text-[11px] text-muted-foreground truncate">
-                                        {[c.siret, c.siren, c.tva_intracom, c.tax_id, c.phone, c.email, c.city]
-                                          .filter(Boolean)
-                                          .join(" · ")}
-                                      </div>
+                            {filteredClients.length === 0 && clientSearchQuery.trim().length === 0 ? (
+                              <div className="py-6 text-center text-xs text-muted-foreground">
+                                {langDisplay === "fr"
+                                  ? "Aucun client cadastré."
+                                  : "Nenhum cliente cadastrado."}
+                              </div>
+                            ) : (
+                              filteredClients.map((c) => (
+                                <CommandItem
+                                  key={c.id}
+                                  value={c.id}
+                                  onSelect={() => applyClientToBudget(c)}
+                                  className="py-2.5 cursor-pointer"
+                                >
+                                  <div className="flex w-full flex-col gap-0.5">
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/30 bg-primary/10">
+                                        {c.customer_display_id ?? (
+                                          <span className="text-muted-foreground/70 font-normal">—</span>
+                                        )}
+                                      </Badge>
+                                      <span className="font-medium text-sm">{c.name}</span>
+                                      <Badge variant="outline" className="text-[10px] ml-auto">
+                                        {c.kind === "professional"
+                                          ? (langDisplay === "fr" ? "Professionnel" : "Profissional")
+                                          : (langDisplay === "fr" ? "Particulier" : "Particular")}
+                                      </Badge>
                                     </div>
-                                    <CheckIcon
-                                      className={cn(
-                                        "ml-auto h-4 w-4 shrink-0",
-                                        form.client_id === c.id ? "opacity-100 text-primary" : "opacity-0",
-                                      )}
-                                    />
-                                  </CommandItem>
-                                ))
-                              )}
-                            </ScrollArea>
+                                    <div className="text-[11px] text-muted-foreground truncate">
+                                      {[c.siret, c.siren, c.tva_intracom, c.tax_id, c.phone, c.email, c.city]
+                                        .filter(Boolean)
+                                        .join(" · ")}
+                                    </div>
+                                  </div>
+                                  <CheckIcon
+                                    className={cn(
+                                      "ml-auto h-4 w-4 shrink-0",
+                                      form.client_id === c.id ? "opacity-100 text-primary" : "opacity-0",
+                                    )}
+                                  />
+                                </CommandItem>
+                              ))
+                            )}
                           </CommandGroup>
                         </CommandList>
                       </Command>
@@ -3021,7 +3047,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                     </Field>
                   </div>
                 </div>
-              ) : form.client_id && selectedClient ? (
+              ) : form.client_id || form.client_name ? (
                 <div className="mt-4 rounded-lg border border-slate-700/40 bg-slate-900/30 p-4 space-y-3">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
                     <div>

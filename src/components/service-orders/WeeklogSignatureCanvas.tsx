@@ -34,6 +34,7 @@ export const WeeklogSignatureCanvas = forwardRef<
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasDrawn, setHasDrawn] = useState(false);
+  const hasDrawnRef = useRef(false);
   const lastCoordRef = useRef<{ x: number; y: number } | null>(null);
 
   // Resize canvas according to display width and devicePixelRatio
@@ -46,9 +47,16 @@ export const WeeklogSignatureCanvas = forwardRef<
     const width = Math.max(280, Math.floor(rect.width));
     const dpr = window.devicePixelRatio || 1;
 
+    // Check if dimensions actually changed before resetting canvas buffer
+    const currentW = Math.round(parseFloat(canvas.style.width) || 0);
+    const currentH = Math.round(parseFloat(canvas.style.height) || 0);
+    if (currentW === width && currentH === height && canvas.width > 0) {
+      return; // Dimensions have not changed, avoid wiping context
+    }
+
     // Preserve existing image data if re-scaling
     let tempCanvas: HTMLCanvasElement | null = null;
-    if (canvas.width > 0 && canvas.height > 0) {
+    if (canvas.width > 0 && canvas.height > 0 && hasDrawnRef.current) {
       tempCanvas = document.createElement("canvas");
       tempCanvas.width = canvas.width;
       tempCanvas.height = canvas.height;
@@ -71,7 +79,7 @@ export const WeeklogSignatureCanvas = forwardRef<
       ctx.strokeStyle = "#0f172a"; // dark slate for contrast
       ctx.lineWidth = 2.5;
 
-      if (tempCanvas && hasDrawn) {
+      if (tempCanvas && hasDrawnRef.current) {
         ctx.drawImage(
           tempCanvas,
           0,
@@ -85,7 +93,7 @@ export const WeeklogSignatureCanvas = forwardRef<
         );
       }
     }
-  }, [height, hasDrawn]);
+  }, [height]);
 
   useEffect(() => {
     setupCanvas();
@@ -128,6 +136,11 @@ export const WeeklogSignatureCanvas = forwardRef<
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 2.5;
+
     ctx.beginPath();
     ctx.arc(x, y, 1.25, 0, Math.PI * 2);
     ctx.fillStyle = "#0f172a";
@@ -138,7 +151,10 @@ export const WeeklogSignatureCanvas = forwardRef<
     lastCoordRef.current = { x, y };
 
     setIsDrawing(true);
-    setHasDrawn(true);
+    hasDrawnRef.current = true;
+    if (!hasDrawn) {
+      setHasDrawn(true);
+    }
     onStrokeChange?.(true);
   };
 
@@ -151,10 +167,24 @@ export const WeeklogSignatureCanvas = forwardRef<
     if (!ctx) return;
 
     const { x, y } = getCoordinates(e);
-    const last = lastCoordRef.current || { x, y };
+    const last = lastCoordRef.current;
+    if (!last) {
+      lastCoordRef.current = { x, y };
+      return;
+    }
+
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 2.5;
+
+    // Use smooth continuous stroke
+    const midX = (last.x + x) / 2;
+    const midY = (last.y + y) / 2;
 
     ctx.beginPath();
     ctx.moveTo(last.x, last.y);
+    ctx.quadraticCurveTo(last.x, last.y, midX, midY);
     ctx.lineTo(x, y);
     ctx.stroke();
 
@@ -169,7 +199,9 @@ export const WeeklogSignatureCanvas = forwardRef<
     if (!canvas) return;
 
     try {
-      canvas.releasePointerCapture(e.pointerId);
+      if (canvas.hasPointerCapture(e.pointerId)) {
+        canvas.releasePointerCapture(e.pointerId);
+      }
     } catch {
       // Best-effort
     }
@@ -184,6 +216,7 @@ export const WeeklogSignatureCanvas = forwardRef<
 
     const dpr = window.devicePixelRatio || 1;
     ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+    hasDrawnRef.current = false;
     setHasDrawn(false);
     lastCoordRef.current = null;
     onStrokeChange?.(false);

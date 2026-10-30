@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +64,7 @@ export interface ValidatedPartSummary {
   materialLabel?: string;
   pricingMode: "fixed" | "unit" | "global";
   estimatedAmount?: number;
+  packageTotalAmount?: number;
   notes?: string;
 }
 
@@ -355,6 +357,10 @@ export function VehicleBlueprint5Views({
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [isCadTheme, setIsCadTheme] = useState<boolean>(true); // CAD Dark vs Ficha Clara
   const [hoveredPart, setHoveredPart] = useState<string | null>(null);
+  const [globalPackageAmount, setGlobalPackageAmount] = useState<number | string>(() => {
+    const found = damagePoints.find((p) => p.pricingMode === "global" && Number(p.estimatedAmount) > 0);
+    return found ? Number(found.estimatedAmount) : "";
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -558,8 +564,65 @@ export function VehicleBlueprint5Views({
         materialLabel: matObj.label,
         pricingMode: partPricingMode,
         estimatedAmount: finalAmount,
+        packageTotalAmount: partPricingMode === "global" ? (Number(globalPackageAmount) || 0) : undefined,
         notes: referencePoint.notes || undefined,
       });
+    }
+  };
+
+  // Aplica modalidade Conjunto em todas as avarias de uma só vez (Requisito Alex)
+  const handleApplyGlobalPricingToAll = () => {
+    if (damagePoints.length === 0) {
+      toast.warning("Mapeie ao menos uma avaria antes de aplicar o modo Conjunto.");
+      return;
+    }
+    const nextPoints = damagePoints.map((p) => ({
+      ...p,
+      pricingMode: "global" as const,
+    }));
+    onChange?.(nextPoints);
+    toast.success("Modalidade 'Conjunto' aplicada globalmente a todas as peças!");
+  };
+
+  // Validação em lote de todas as peças do Conjunto transferindo o valor total ao orçamento
+  const handleValidateAllGlobalPieces = () => {
+    const pkgAmount = Number(globalPackageAmount) || 0;
+    if (pkgAmount <= 0) {
+      toast.warning("Informe o Valor Total do Conjunto (€) antes de validar.");
+      return;
+    }
+    if (piecesSummary.length === 0) {
+      toast.warning("Nenhuma avaria mapeada para validar.");
+      return;
+    }
+    const nextPoints = damagePoints.map((p) => ({
+      ...p,
+      pricingMode: "global" as const,
+      validated: true,
+    }));
+    onChange?.(nextPoints);
+
+    if (onValidatePart) {
+      piecesSummary.forEach((piece, idx) => {
+        const refPt = piece.points[0];
+        const sizeObj = DENT_SIZES.find((s) => s.code === refPt?.dentSize);
+        onValidatePart({
+          carPartCode: piece.carPartCode,
+          partLabel: piece.partLabel,
+          damageType: piece.damageTypes[0] || "hail",
+          dentCount: piece.totalDents,
+          dentSize: refPt?.dentSize || "2",
+          dentSizeLabel: sizeObj?.shortLabel,
+          partMaterial: piece.materialCode,
+          materialTag: piece.materialObj.tag,
+          materialLabel: piece.materialObj.label,
+          pricingMode: "global",
+          estimatedAmount: 0,
+          packageTotalAmount: idx === 0 ? pkgAmount : 0,
+          notes: refPt?.notes || undefined,
+        });
+      });
+      toast.success(`Conjunto validado com sucesso! Total: ${pkgAmount.toFixed(2)} € para ${totalAllDents} mossas.`);
     }
   };
 
@@ -1168,14 +1231,27 @@ export function VehicleBlueprint5Views({
             <div className="space-y-1">
               <Label className="text-xs font-medium">
                 {selectedPoint.pricingMode === "global"
-                  ? "Valor da Peça (€)"
+                  ? "Valor Total do Conjunto (€)"
                   : selectedPoint.pricingMode === "fixed"
                   ? "Valor do Pacote (€)"
                   : "Valor Unitário / Mossa (€)"}
               </Label>
               {selectedPoint.pricingMode === "global" ? (
-                <div className="h-8 px-2.5 rounded border border-cyan-800/60 bg-cyan-950/40 text-cyan-300 text-xs flex items-center font-medium">
-                  0,00 € (Incluso no Conjunto)
+                <div className="space-y-1">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    className="h-8 border-cyan-600 bg-cyan-950/30 text-cyan-200 font-semibold text-xs"
+                    placeholder="Ex: 500.00"
+                    value={globalPackageAmount}
+                    onChange={(e) => {
+                      setGlobalPackageAmount(e.target.value);
+                      updateSelectedPoint({ estimatedAmount: 0 });
+                    }}
+                  />
+                  <span className="text-[10px] text-cyan-400 block font-normal">
+                    Preço fechado para o conjunto de todas as peças
+                  </span>
                 </div>
               ) : (
                 <Input
@@ -1264,8 +1340,57 @@ export function VehicleBlueprint5Views({
 
       {/* CONSOLIDADO DE DANOS POR PEÇA (Substitui a lista desordenada de 50 cards azuis) */}
       {piecesSummary.length > 0 && (
-        <div className="rounded-lg border bg-muted/20 p-3">
-          <div className="flex flex-wrap items-center justify-between pb-2 mb-2 border-b gap-2">
+        <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+          {/* BANNER DE CONTROLE GLOBAL PARA CONJUNTO (Requisito Alex) */}
+          <div className="p-3 rounded-lg border border-cyan-700/60 bg-cyan-950/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-cyan-400 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-cyan-200">
+                  Fechamento por Conjunto Geral (Preço Único para Todas as Mossas)
+                </p>
+                <p className="text-[11px] text-cyan-400/80">
+                  Aplica modalidade de preço global nas {totalAllDents} mossas e consolida o valor direto no orçamento.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded border border-cyan-800">
+                <span className="text-[11px] text-muted-foreground whitespace-nowrap">Total Conjunto:</span>
+                <Input
+                  type="number"
+                  step="0.01"
+                  className="h-7 w-24 text-xs font-bold bg-transparent border-0 text-cyan-300 focus-visible:ring-0 p-0"
+                  placeholder="Ex: 500.00"
+                  value={globalPackageAmount}
+                  onChange={(e) => setGlobalPackageAmount(e.target.value)}
+                />
+                <span className="text-xs text-cyan-400 font-bold">€</span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs border-cyan-700 text-cyan-300 hover:bg-cyan-950/80"
+                onClick={handleApplyGlobalPricingToAll}
+                title="Muda todas as peças mapeadas para modalidade Conjunto"
+              >
+                Definir Todas em Conjunto
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 text-xs bg-cyan-600 hover:bg-cyan-500 text-white font-semibold shadow"
+                onClick={handleValidateAllGlobalPieces}
+                title="Valida todas as peças com o preço único e transfere para a tabela financeira de Serviços"
+              >
+                <CheckCheck className="h-3.5 w-3.5 mr-1" />
+                Validar Todas do Conjunto
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between pb-2 border-b gap-2">
             <div className="flex items-center gap-2">
               <Car className="h-4 w-4 text-cyan-400" />
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
