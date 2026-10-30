@@ -629,11 +629,12 @@ export function VehicleBlueprint5Views({
       .filter((p) => p.view === view);
 
     const baseRadius = Math.max(7, Math.min(viewDims.width, viewDims.height) * 0.032);
+    const assetPath = getAssetPath(viewName);
 
     return (
       <div
         className={cn(
-          "relative flex flex-col rounded-lg border transition-all duration-200 overflow-hidden",
+          "relative flex flex-col rounded-lg border transition-all duration-200 overflow-hidden w-full min-w-0 max-w-full",
           isCadTheme
             ? "bg-[#090e1a] border-cyan-950/60 shadow-inner"
             : "bg-[#f8fafc] border-slate-200 shadow-sm",
@@ -643,14 +644,14 @@ export function VehicleBlueprint5Views({
         {/* Cabeçalho da Vista */}
         <div
           className={cn(
-            "flex items-center justify-between px-3 py-1.5 text-xs font-semibold border-b select-none",
+            "flex items-center justify-between px-3 py-1.5 text-xs font-semibold border-b select-none w-full min-w-0",
             isCadTheme ? "bg-slate-900/80 border-slate-800 text-cyan-300" : "bg-slate-100 border-slate-200 text-slate-800"
           )}
         >
-          <div className="flex items-center gap-2">
-            <span>{title}</span>
+          <div className="flex items-center gap-2 min-w-0 truncate">
+            <span className="truncate">{title}</span>
             {viewPoints.length > 0 && (
-              <Badge variant="secondary" className="h-4 px-1.5 text-[10px] bg-cyan-900/60 text-cyan-200 border border-cyan-700/50">
+              <Badge variant="secondary" className="h-4 px-1.5 text-[10px] bg-cyan-900/60 text-cyan-200 border border-cyan-700/50 shrink-0">
                 {viewPoints.length} {viewPoints.length === 1 ? "dano" : "danos"}
               </Badge>
             )}
@@ -658,7 +659,7 @@ export function VehicleBlueprint5Views({
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-cyan-400"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-cyan-400 shrink-0"
             title="Ampliar / Focar esta vista"
             onClick={() => setActiveView(activeView === view ? "all" : view)}
           >
@@ -669,7 +670,7 @@ export function VehicleBlueprint5Views({
         {/* Canvas da Vista */}
         <div
           className={cn(
-            "relative w-full flex items-center justify-center p-2 select-none",
+            "relative w-full min-w-0 max-w-full flex items-center justify-center p-2 select-none overflow-hidden",
             containerHeightClass,
             isCadTheme
               ? "bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]"
@@ -678,14 +679,16 @@ export function VehicleBlueprint5Views({
         >
           <svg
             viewBox={`0 0 ${viewDims.width} ${viewDims.height}`}
-            className="w-full h-full cursor-crosshair select-none"
+            className="w-full h-full max-w-full max-h-full cursor-crosshair select-none block"
+            style={{ objectFit: "contain", maxHeight: "100%", maxWidth: "100%" }}
             onClick={(e) => handleSvgClick(view, e, viewDims.width, viewDims.height, facingLeft)}
             onMouseMove={(e) => handleSvgMouseMove(view, e, viewDims.width, viewDims.height, facingLeft)}
             onMouseLeave={handleSvgMouseLeave}
           >
             {/* Camada 1: Imagem Oficial CAD com traços periciais */}
             <image
-              href={getAssetPath(viewName)}
+              href={assetPath}
+              xlinkHref={assetPath}
               x="0"
               y="0"
               width={viewDims.width}
@@ -759,7 +762,7 @@ export function VehicleBlueprint5Views({
   const selectedMaterialObj = PART_MATERIALS.find((m) => m.code === (selectedPoint?.partMaterial || "steel")) || PART_MATERIALS[0];
 
   return (
-    <div className={cn("flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-sm", className)}>
+    <div className={cn("flex flex-col gap-4 rounded-xl border bg-card p-3 sm:p-4 shadow-sm w-full min-w-0 max-w-full overflow-hidden", className)}>
       <input
         ref={fileInputRef}
         type="file"
@@ -769,11 +772,11 @@ export function VehicleBlueprint5Views({
       />
 
       {/* BARRA SUPERIOR DE CONTROLE PERICIAL */}
-      <div className="space-y-2.5 border-b pb-3">
+      <div className="space-y-2.5 border-b pb-3 w-full min-w-0 max-w-full">
         {/* Linha 1: Identificação, Contadores e Modo de Visualização */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="gap-1.5 px-2.5 py-1 text-xs font-semibold border-cyan-800 text-cyan-400 bg-cyan-950/40">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 min-w-0 max-w-full">
+          <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
+            <Badge variant="outline" className="gap-1.5 px-2.5 py-1 text-xs font-semibold border-cyan-800 text-cyan-400 bg-cyan-950/40 shrink-0">
               <Eye className="h-3.5 w-3.5 text-cyan-400" />
               Blueprint de Inspeção (5 Vistas)
             </Badge>
@@ -798,7 +801,7 @@ export function VehicleBlueprint5Views({
           <Button
             size="sm"
             variant="outline"
-            className="h-7 px-3 text-xs gap-1.5 border-slate-700 bg-card hover:bg-muted"
+            className="h-7 px-3 text-xs gap-1.5 border-slate-700 bg-card hover:bg-muted shrink-0"
             onClick={() => setIsCadTheme(!isCadTheme)}
             title={isCadTheme ? "Mudar para Ficha Técnica Clara" : "Mudar para CAD Blueprint Dark"}
           >
@@ -808,9 +811,9 @@ export function VehicleBlueprint5Views({
         </div>
 
         {/* Linha 2: Toolbar Unificada e Organizada de Carroceria e Vistas */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-muted/40 p-1.5 rounded-lg border">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 bg-muted/40 p-2 rounded-lg border w-full min-w-0 max-w-full">
           {/* Seletor de Carroceria */}
-          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
+          <div className="flex items-center gap-1.5 overflow-x-auto py-1 min-w-0 max-w-full">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1 shrink-0">
               Carroceria:
             </span>
@@ -821,7 +824,7 @@ export function VehicleBlueprint5Views({
                   size="sm"
                   variant={bodyType === bt.code ? "default" : "ghost"}
                   className={cn(
-                    "h-6 px-2.5 text-xs font-medium transition-all",
+                    "h-6 px-2.5 text-xs font-medium transition-all shrink-0",
                     bodyType === bt.code && "bg-cyan-600 text-white shadow-sm font-semibold"
                   )}
                   onClick={() => handleSelectBodyType(bt.code)}
@@ -833,7 +836,7 @@ export function VehicleBlueprint5Views({
           </div>
 
           {/* Filtro / Navegação de Vistas */}
-          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
+          <div className="flex items-center gap-1.5 overflow-x-auto py-1 min-w-0 max-w-full">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1 shrink-0">
               Vista:
             </span>
@@ -844,7 +847,7 @@ export function VehicleBlueprint5Views({
                   size="sm"
                   variant={activeView === v ? "default" : "ghost"}
                   className={cn(
-                    "h-6 px-2 text-xs transition-all",
+                    "h-6 px-2 text-xs transition-all shrink-0",
                     activeView === v && "bg-primary text-primary-foreground font-semibold shadow-sm"
                   )}
                   onClick={() => setActiveView(v)}
@@ -858,7 +861,7 @@ export function VehicleBlueprint5Views({
       </div>
 
       {/* LEGENDA JURÍDICA & HUD DE PEÇA DETECTADA */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs border">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs border w-full min-w-0 max-w-full">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-1.5">
             <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-600 border border-cyan-300 text-[9px] font-bold text-white shadow" />
@@ -872,7 +875,7 @@ export function VehicleBlueprint5Views({
 
         {/* HUD de Peça Sob o Cursor */}
         {hoveredPart ? (
-          <div className="flex items-center gap-1.5 font-mono text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
+          <div className="flex items-center gap-1.5 font-mono text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800 shrink-0">
             <Car className="h-3 w-3" />
             <span>Peça sob mira: <strong>{hoveredPart}</strong></span>
           </div>
@@ -885,26 +888,26 @@ export function VehicleBlueprint5Views({
 
       {/* ÁREA GRÁFICA DO BLUEPRINT */}
       {activeView === "all" ? (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-          <div className="md:col-span-4 flex flex-col gap-3">
-            {renderTechnicalViewBox("front", "1. Vista Frontal", "front", "h-52 md:h-56", false)}
-            {renderTechnicalViewBox("rear", "2. Vista Traseira", "rear", "h-52 md:h-56", false)}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 w-full min-w-0 max-w-full">
+          <div className="lg:col-span-4 flex flex-col gap-3 min-w-0 w-full max-w-full">
+            {renderTechnicalViewBox("front", "1. Vista Frontal", "front", "h-48 sm:h-52 md:h-56", false)}
+            {renderTechnicalViewBox("rear", "2. Vista Traseira", "rear", "h-48 sm:h-52 md:h-56", false)}
           </div>
-          <div className="md:col-span-4">
-            {renderTechnicalViewBox("top", "3. Vista Superior (Capô, Teto, Tampa)", "top", "h-96 md:h-[464px]", false)}
+          <div className="lg:col-span-4 min-w-0 w-full max-w-full">
+            {renderTechnicalViewBox("top", "3. Vista Superior (Capô, Teto, Tampa)", "top", "h-80 sm:h-96 lg:h-[464px]", false)}
           </div>
-          <div className="md:col-span-4 flex flex-col gap-3">
-            {renderTechnicalViewBox("left", "4. Lateral Esquerda (Motorista)", "left", "h-52 md:h-56", true)}
-            {renderTechnicalViewBox("right", "5. Lateral Direita (Passageiro)", "right", "h-52 md:h-56", false)}
+          <div className="lg:col-span-4 flex flex-col gap-3 min-w-0 w-full max-w-full">
+            {renderTechnicalViewBox("left", "4. Lateral Esquerda (Motorista)", "left", "h-48 sm:h-52 md:h-56", true)}
+            {renderTechnicalViewBox("right", "5. Lateral Direita (Passageiro)", "right", "h-48 sm:h-52 md:h-56", false)}
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
-          {activeView === "front" && renderTechnicalViewBox("front", "Vista Frontal Ampliada", "front", "h-[450px]", false)}
-          {activeView === "rear" && renderTechnicalViewBox("rear", "Vista Traseira Ampliada", "rear", "h-[450px]", false)}
-          {activeView === "top" && renderTechnicalViewBox("top", "Vista Superior Ampliada", "top", "h-[500px]", false)}
-          {activeView === "left" && renderTechnicalViewBox("left", "Lateral Esquerda Ampliada", "left", "h-[450px]", true)}
-          {activeView === "right" && renderTechnicalViewBox("right", "Lateral Direita Ampliada", "right", "h-[450px]", false)}
+        <div className="flex flex-col gap-2 w-full min-w-0 max-w-full">
+          {activeView === "front" && renderTechnicalViewBox("front", "Vista Frontal Ampliada", "front", "h-[350px] sm:h-[450px]", false)}
+          {activeView === "rear" && renderTechnicalViewBox("rear", "Vista Traseira Ampliada", "rear", "h-[350px] sm:h-[450px]", false)}
+          {activeView === "top" && renderTechnicalViewBox("top", "Vista Superior Ampliada", "top", "h-[400px] sm:h-[500px]", false)}
+          {activeView === "left" && renderTechnicalViewBox("left", "Lateral Esquerda Ampliada", "left", "h-[350px] sm:h-[450px]", true)}
+          {activeView === "right" && renderTechnicalViewBox("right", "Lateral Direita Ampliada", "right", "h-[350px] sm:h-[450px]", false)}
           <div className="flex justify-end">
             <Button size="sm" variant="outline" onClick={() => setActiveView("all")} className="text-xs gap-1">
               <Eye className="h-3.5 w-3.5" /> Voltar para Prancha Completa (5 Vistas)

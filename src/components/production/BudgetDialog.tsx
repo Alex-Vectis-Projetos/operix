@@ -2595,7 +2595,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="w-full max-w-[96vw] sm:max-w-6xl max-h-[92vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-3">
             {step === "form" && showBackToType && !initial ? (
@@ -5082,7 +5082,7 @@ function Section({
   actions?: React.ReactNode;
 }) {
   return (
-    <section className="space-y-3 rounded-xl border border-border/60 bg-background p-4 md:p-5">
+    <section className="space-y-3 rounded-xl border border-border/60 bg-background p-4 md:p-5 w-full min-w-0 max-w-full overflow-hidden">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {title}

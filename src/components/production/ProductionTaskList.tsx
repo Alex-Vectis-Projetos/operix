@@ -120,7 +120,7 @@ export function ProductionTaskList({
 
       {/* Blueprint Visual Sob Demanda */}
       {showBlueprint && inspectionDamagePoints.length > 0 && (
-        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 w-full min-w-0 max-w-full overflow-hidden">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-semibold text-primary">
               Mapa de Danos do Veículo (Somente Leitura para Orientação Técnica)
