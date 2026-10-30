@@ -194,11 +194,11 @@ const BLUEPRINT_DIMENSIONS: Record<VehicleBodyType, Record<VehicleViewType, { wi
     right: { width: 770, height: 295 },
   },
   pickup_cs: {
-    front: { width: 295, height: 265 },
-    rear: { width: 290, height: 265 },
-    top: { width: 300, height: 770 },
-    left: { width: 770, height: 295 },
-    right: { width: 770, height: 295 },
+    front: { width: 460, height: 368 },
+    rear: { width: 437, height: 369 },
+    top: { width: 473, height: 1111 },
+    left: { width: 1110, height: 369 },
+    right: { width: 1110, height: 369 },
   },
   pickup_cd: {
     front: { width: 295, height: 265 },
@@ -240,6 +240,14 @@ function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft =
       if (y < 86) return x < 15 ? "front_left_door" : x > 85 ? "front_right_door" : "roof";
       if (y < 93) return "rear_glass";
       return x < 25 ? "rear_left_quarter" : x > 75 ? "rear_right_quarter" : "trunk";
+    }
+    // Picape Cabine Simples: Capô curto, teto curto e caçamba longa
+    if (bodyType === "pickup_cs") {
+      if (y < 28) return x < 25 ? "front_left_fender" : x > 75 ? "front_right_fender" : "hood";
+      if (y < 36) return "windshield";
+      if (y < 48) return x < 20 ? "front_left_door" : x > 80 ? "front_right_door" : "roof";
+      if (y < 53) return "rear_glass";
+      return x < 22 ? "rear_left_quarter" : x > 78 ? "rear_right_quarter" : "trunk";
     }
     // Orientação uniforme: Capô no topo (y < 35%), Teto no meio, Porta-malas na base
     if (y < 35) return x < 25 ? "front_left_fender" : x > 75 ? "front_right_fender" : "hood";
@@ -610,7 +618,7 @@ export function VehicleBlueprint5Views({
 
   const getAssetPath = (viewName: string) => {
     const themePrefix = isCadTheme ? "cad" : "light";
-    const resolvedBody = (bodyType === "pickup_cs" || bodyType === "pickup_cd") ? "pickup" : bodyType;
+    const resolvedBody = bodyType === "pickup_cd" ? "pickup" : bodyType;
     return `/blueprints/${resolvedBody}/${themePrefix}_${viewName}.png`;
   };
 
