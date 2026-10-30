@@ -588,7 +588,7 @@ export function buildProtocoleDeReparationHtml(
   <meta charset="utf-8" />
   <title>${esc(i18n.protocolTitle)} - ${esc(b.number || b.code || "Devis")}</title>
   <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
+    @page { size: A4 portrait; margin: 4mm 8mm 6mm 8mm; }
     body {
       font-family: Arial, Helvetica, sans-serif;
       font-size: 10px;
@@ -648,25 +648,25 @@ export function buildProtocoleDeReparationHtml(
   ` : ""}
 
   <!-- 1. EN-TÊTE OFFICIEL & WHITELABEL (LOGO AMPLIADO & FAIXA ELEVADA) -->
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:10px">
     <div style="display:flex;align-items:center;gap:12px">
       ${logoUrl ? `
         <div>
-          <img src="${esc(logoUrl)}" alt="Logo" style="height:52px;max-height:58px;max-width:220px;object-fit:contain;display:block" />
-          <div style="font-size:8px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase;margin-top:4px">${esc(tagline)}</div>
+          <img src="${esc(logoUrl)}" alt="Logo" style="height:72px;max-height:80px;max-width:260px;object-fit:contain;display:block" />
+          <div style="font-size:7.5px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase;margin-top:3px">${esc(tagline)}</div>
         </div>
       ` : `
         <div>
-          <div style="font-size:18px;font-weight:900;letter-spacing:0.04em;color:#111827">${esc(companyName)}</div>
+          <div style="font-size:22px;font-weight:900;letter-spacing:0.04em;color:#111827">${esc(companyName)}</div>
           <div style="font-size:8px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase;margin-top:2px">${esc(tagline)}</div>
         </div>
       `}
     </div>
     <div style="text-align:right">
-      <div style="background:#111827;color:white;padding:6px 16px;border-radius:2px;font-size:14px;font-weight:900;letter-spacing:0.12em;display:inline-block;text-transform:uppercase">
+      <div style="background:#111827;color:white;padding:7px 18px;border-radius:2px;font-size:14.5px;font-weight:900;letter-spacing:0.12em;display:inline-block;text-transform:uppercase">
         ${esc(i18n.protocolTitle)}
       </div>
-      <div style="margin-top:6px;margin-bottom:2px">
+      <div style="margin-top:5px;margin-bottom:2px">
         <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:900;color:#b91c1c;border:1.5px solid #dc2626;background:#fef2f2;padding:2px 14px;border-radius:3px;display:inline-block;white-space:nowrap">
           ${esc(b.vehicle_plate || i18n.noPlate)}
         </span>

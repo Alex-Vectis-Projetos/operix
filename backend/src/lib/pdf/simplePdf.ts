@@ -633,15 +633,15 @@ export function buildProtocoleDeReparationPdf(
   const vehiclePlate = String(budget.vehiclePlate || (lang === "pt" ? "SEM PLACA" : lang === "en" ? "NO PLATE" : "SANS-PLAQUE")).toUpperCase();
   const protocolCode = budget.code || "FR-PFAN";
 
-  // 1. TOP HEADER & TITLE (Raised higher with ample breathing room)
+  // 1. TOP HEADER & TITLE (Raised higher with minimal top margin)
   const titleText = lang === "pt" ? "PROTOCOLO DE REPARACAO" : lang === "en" ? "REPAIR PROTOCOL" : "PROTOCOLE DE REPARATION";
   content.push("0.1 0.12 0.16 rg");
-  content.push("310 780 245 28 re f");
+  content.push("310 794 245 28 re f");
 
   content.push("BT");
   content.push("1 1 1 rg");
-  content.push("/F2 11 Tf");
-  content.push("322 790 Td");
+  content.push("/F2 11.5 Tf");
+  content.push("322 804 Td");
   content.push(`(${pdfEscapeWinAnsi(titleText)}) Tj`);
   content.push("ET");
 
@@ -650,7 +650,7 @@ export function buildProtocoleDeReparationPdf(
   const plateW = plateText.length * 6.2;
   const badgeW = Math.max(96, plateW + 20);
   const badgeX = 555 - badgeW;
-  const badgeY = 754;
+  const badgeY = 766;
   const badgeH = 20;
 
   content.push("0.98 0.94 0.94 rg");
@@ -666,10 +666,10 @@ export function buildProtocoleDeReparationPdf(
   content.push(`(${pdfEscapeWinAnsi(plateText)}) Tj`);
   content.push("ET");
 
-  // Company Brand / Logo on Left (Enlarged up to maxW 220, maxH 52)
+  // Company Brand / Logo on Left (Enlarged up to maxW 260, maxH 70)
   if (logoImage) {
-    const maxW = 220;
-    const maxH = 50;
+    const maxW = 260;
+    const maxH = 70;
     const aspect = (logoImage.width || 1) / (logoImage.height || 1);
     let renderW = maxW;
     let renderH = maxW / aspect;
@@ -678,7 +678,7 @@ export function buildProtocoleDeReparationPdf(
       renderW = maxH * aspect;
     }
     const imgX = 40;
-    const imgY = 754 + (maxH - renderH) / 2;
+    const imgY = 750 + (maxH - renderH) / 2;
 
     content.push("q");
     content.push(`${renderW.toFixed(2)} 0 0 ${renderH.toFixed(2)} ${imgX} ${imgY.toFixed(2)} cm`);
@@ -688,24 +688,24 @@ export function buildProtocoleDeReparationPdf(
     // Tagline below logo
     content.push("BT");
     content.push("0.4 0.45 0.5 rg /F2 6 Tf");
-    content.push(`40 746 Td (${pdfEscapeWinAnsi(tagline)}) Tj`);
+    content.push(`40 743 Td (${pdfEscapeWinAnsi(tagline)}) Tj`);
     content.push("ET");
   } else {
     content.push("BT");
     content.push("0.1 0.12 0.16 rg");
-    content.push("/F2 16 Tf");
-    content.push("40 786 Td");
+    content.push("/F2 17 Tf");
+    content.push("40 798 Td");
     content.push(`(${pdfEscapeWinAnsi(companyName)}) Tj`);
     content.push("/F2 7.5 Tf");
     content.push("0.4 0.45 0.5 rg");
-    content.push("0 -12 Td");
+    content.push("0 -13 Td");
     content.push(`(${pdfEscapeWinAnsi(tagline)}) Tj`);
     content.push("ET");
   }
 
   // Divider Line
   content.push("0.1 0.12 0.16 RG 1.5 w");
-  content.push("40 742 m 555 742 l S");
+  content.push("40 740 m 555 740 l S");
 
   // 2. CLIENT & VEHICLE GRID (Y: 738 -> 678)
   content.push("0.75 0.78 0.82 RG 0.5 w");
