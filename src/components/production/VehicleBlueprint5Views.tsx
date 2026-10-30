@@ -31,7 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 
 export type VehicleViewType = "top" | "front" | "rear" | "left" | "right";
-export type VehicleBodyType = "sedan" | "hatchback" | "suv" | "pickup" | "van" | "furgao" | "wagon";
+export type VehicleBodyType = "sedan" | "hatchback" | "suv" | "pickup" | "pickup_cs" | "pickup_cd" | "van" | "furgao" | "wagon";
 
 export interface DamagePointData {
   id?: string;
@@ -41,9 +41,9 @@ export interface DamagePointData {
   carPartCode: string;
   damageType: string;
   dentCount?: number | null;
-  dentSize?: string | null; // "1" | "2" | "3" | "4" | "5"
+  dentSize?: string | null; // "1" até "15"
   partMaterial?: string | null; // "steel" | "aluminum" | "plastic" | "carbon" | "other"
-  pricingMode?: "fixed" | "unit"; // "fixed" = pacote fechado da peça, "unit" = por mossa
+  pricingMode?: "fixed" | "unit" | "global"; // "fixed" = pacote fechado da peça, "unit" = por mossa, "global" = conjunto fechado
   validated?: boolean;
   contracted: boolean; // true = orçado/reparo contratado; false = dano pré-existente (Checklist de Entrada)
   estimatedAmount?: number | string | null;
@@ -61,7 +61,7 @@ export interface ValidatedPartSummary {
   partMaterial?: string | null;
   materialTag?: string;
   materialLabel?: string;
-  pricingMode: "fixed" | "unit";
+  pricingMode: "fixed" | "unit" | "global";
   estimatedAmount?: number;
   notes?: string;
 }
@@ -135,21 +135,32 @@ export const PART_MATERIALS: PartMaterialOption[] = [
 ];
 
 export const DENT_SIZES = [
-  { code: "1", label: "Nível 1 (< 2cm / Moeda 10c)", shortLabel: "< 2cm" },
-  { code: "2", label: "Nível 2 (2 - 3cm / Moeda 2€)", shortLabel: "2-3cm" },
-  { code: "3", label: "Nível 3 (3 - 5cm / Bola de Golfe)", shortLabel: "3-5cm" },
-  { code: "4", label: "Nível 4 (5 - 8cm / Bola de Tênis)", shortLabel: "5-8cm" },
-  { code: "5", label: "Nível 5 (> 8cm / Severo)", shortLabel: "> 8cm" },
+  { code: "1", label: "Nível 1 (< 1cm / Moeda 10c)", shortLabel: "< 1cm" },
+  { code: "2", label: "Nível 2 (1 - 2cm / Moeda 50c)", shortLabel: "1-2cm" },
+  { code: "3", label: "Nível 3 (2 - 3cm / Moeda 2€)", shortLabel: "2-3cm" },
+  { code: "4", label: "Nível 4 (3 - 4cm / Bola Ping-Pong)", shortLabel: "3-4cm" },
+  { code: "5", label: "Nível 5 (4 - 5cm / Bola de Golfe)", shortLabel: "4-5cm" },
+  { code: "6", label: "Nível 6 (5 - 6.5cm / Bola de Sinuca)", shortLabel: "5-6.5cm" },
+  { code: "7", label: "Nível 7 (6.5 - 8cm / Bola de Tênis)", shortLabel: "6.5-8cm" },
+  { code: "8", label: "Nível 8 (> 8cm / Dano Acentuado)", shortLabel: "> 8cm" },
+  { code: "9", label: "Nível 9 (> 10cm / Deformação)", shortLabel: "> 10cm" },
+  { code: "10", label: "Nível 10 (> 12cm / Dano Severo)", shortLabel: "> 12cm" },
+  { code: "11", label: "Nível 11 (> 15cm / Estiramento)", shortLabel: "> 15cm" },
+  { code: "12", label: "Nível 12 (> 20cm / Colisão Leve)", shortLabel: "> 20cm" },
+  { code: "13", label: "Nível 13 (> 25cm / Colisão Média)", shortLabel: "> 25cm" },
+  { code: "14", label: "Nível 14 (> 35cm / Colisão Grave)", shortLabel: "> 35cm" },
+  { code: "15", label: "Nível 15 (> 50cm / Troca Recomendada)", shortLabel: "> 50cm" },
 ];
 
 const BODY_TYPES: { code: VehicleBodyType; label: string }[] = [
   { code: "sedan", label: "Sedan" },
   { code: "hatchback", label: "Hatchback" },
   { code: "suv", label: "SUV" },
-  { code: "pickup", label: "Picape" },
+  { code: "pickup_cs", label: "Picape Cab. Simples" },
+  { code: "pickup_cd", label: "Picape Cab. Dupla" },
   { code: "wagon", label: "Wagon / SW" },
   { code: "furgao", label: "Furgão" },
-  { code: "van", label: "Van" },
+  { code: "van", label: "Van / Carrinha" },
 ];
 
 // Dimensões nativas exatas dos cortes (sem resíduos ou sobreposições)
@@ -176,6 +187,20 @@ const BLUEPRINT_DIMENSIONS: Record<VehicleBodyType, Record<VehicleViewType, { wi
     right: { width: 361, height: 162 },
   },
   pickup: {
+    front: { width: 295, height: 265 },
+    rear: { width: 290, height: 265 },
+    top: { width: 300, height: 770 },
+    left: { width: 770, height: 295 },
+    right: { width: 770, height: 295 },
+  },
+  pickup_cs: {
+    front: { width: 295, height: 265 },
+    rear: { width: 290, height: 265 },
+    top: { width: 300, height: 770 },
+    left: { width: 770, height: 295 },
+    right: { width: 770, height: 295 },
+  },
+  pickup_cd: {
     front: { width: 295, height: 265 },
     rear: { width: 290, height: 265 },
     top: { width: 300, height: 770 },
@@ -246,6 +271,20 @@ function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft =
   }
 
   if (view === "left" || view === "right") {
+    // Região superior do perfil lateral pericialmente pertence ao Brancard / Coluna Lateral (left_rail / right_rail)
+    if (y < 32) return view === "left" ? "left_rail" : "right_rail";
+    if (y > 78) return view === "left" ? "left_sill" : "right_sill";
+
+    // Picape Cabine Simples: Frente + Porta dianteira longa + Caçamba direta atrás
+    if (bodyType === "pickup_cs") {
+      const isFront = facingLeft ? x < 30 : x > 70;
+      const isCabinDoor = facingLeft ? (x >= 30 && x < 58) : (x >= 42 && x < 70);
+      const isBed = facingLeft ? x >= 58 : x < 42;
+      if (isFront) return view === "left" ? "front_left_fender" : "front_right_fender";
+      if (isCabinDoor) return view === "left" ? "front_left_door" : "front_right_door";
+      if (isBed) return view === "left" ? "rear_left_quarter" : "rear_right_quarter";
+    }
+
     const isFrontSide = facingLeft
       ? (bodyType === "van" || bodyType === "furgao" ? x < 22 : x < 30)
       : (bodyType === "van" || bodyType === "furgao" ? x > 78 : x > 70);
@@ -258,9 +297,6 @@ function detectCarPart(view: VehicleViewType, x: number, y: number, facingLeft =
     const isMidRear = facingLeft
       ? (bodyType === "van" || bodyType === "furgao" ? x >= 45 && x <= 78 : x >= 52 && x <= 70)
       : (bodyType === "van" || bodyType === "furgao" ? x >= 22 && x < 55 : x >= 30 && x < 48);
-
-    if (y < 32) return "roof";
-    if (y > 78) return view === "left" ? "left_sill" : "right_sill";
 
     if (isFrontSide) return view === "left" ? "front_left_fender" : "front_right_fender";
     if (isRearSide) return view === "left" ? "rear_left_quarter" : "rear_right_quarter";
@@ -465,6 +501,9 @@ export function VehicleBlueprint5Views({
     const partLabel = partObj?.label || targetCode;
     const sizeObj = DENT_SIZES.find((s) => s.code === referencePoint.dentSize);
 
+    const partPricingMode = referencePoint.pricingMode || "fixed";
+    const finalAmount = partPricingMode === "global" ? 0 : Number(referencePoint.estimatedAmount) || 0;
+
     // Marca todos os pontos da peça como validados
     const nextPoints = damagePoints.map((p) =>
       p.carPartCode === targetCode ? { ...p, validated: true } : p
@@ -483,8 +522,8 @@ export function VehicleBlueprint5Views({
         partMaterial: matCode,
         materialTag: matObj.tag,
         materialLabel: matObj.label,
-        pricingMode: referencePoint.pricingMode || "fixed",
-        estimatedAmount: Number(referencePoint.estimatedAmount) || 0,
+        pricingMode: partPricingMode,
+        estimatedAmount: finalAmount,
         notes: referencePoint.notes || undefined,
       });
     }
@@ -502,6 +541,15 @@ export function VehicleBlueprint5Views({
     updateSelectedPoint({ photoStoragePath: url });
   };
 
+  // Contagem dinâmica total de mossas somando todas as peças
+  const totalAllDents = useMemo(() => {
+    return damagePoints.reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
+  }, [damagePoints]);
+
+  const totalContractedDents = useMemo(() => {
+    return damagePoints.filter((p) => p.contracted).reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
+  }, [damagePoints]);
+
   // Agrupamento consolidado por peça da carroceria (elimina poluição de dezenas de cards individuais)
   const piecesSummary = useMemo(() => {
     const map = new Map<string, {
@@ -514,7 +562,7 @@ export function VehicleBlueprint5Views({
       damageTypes: string[];
       hasContracted: boolean;
       isValidated: boolean;
-      pricingMode: "fixed" | "unit";
+      pricingMode: "fixed" | "unit" | "global";
       estimatedTotal: number;
       dentSizeLabel?: string;
     }>();
@@ -562,7 +610,8 @@ export function VehicleBlueprint5Views({
 
   const getAssetPath = (viewName: string) => {
     const themePrefix = isCadTheme ? "cad" : "light";
-    return `/blueprints/${bodyType}/${themePrefix}_${viewName}.png`;
+    const resolvedBody = (bodyType === "pickup_cs" || bodyType === "pickup_cd") ? "pickup" : bodyType;
+    return `/blueprints/${resolvedBody}/${themePrefix}_${viewName}.png`;
   };
 
   // Renderiza uma vista técnica com dimensões fixas no viewBox
@@ -728,12 +777,16 @@ export function VehicleBlueprint5Views({
               <Eye className="h-3.5 w-3.5 text-cyan-400" />
               Blueprint de Inspeção (5 Vistas)
             </Badge>
-            <div className="flex items-center gap-1.5 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 font-medium text-foreground">
                 <strong className="text-cyan-400">{damagePoints.length}</strong> {damagePoints.length === 1 ? "marcador" : "marcadores"}
               </span>
+              <span className="inline-flex items-center gap-1 rounded-md bg-cyan-950/70 border border-cyan-700/60 px-2 py-0.5 text-cyan-200 font-semibold shadow-sm">
+                <Sparkles className="h-3 w-3 text-cyan-400" />
+                <strong className="text-white">{totalAllDents}</strong> {totalAllDents === 1 ? "mossa total" : "mossas totais"}
+              </span>
               <span className="inline-flex items-center gap-1 rounded-md bg-blue-950/50 border border-blue-800/60 px-2 py-0.5 text-cyan-300 font-medium">
-                {damagePoints.filter((p) => p.contracted).length} orçados
+                {totalContractedDents} orçadas
               </span>
               <span className="inline-flex items-center gap-1 rounded-md bg-amber-950/50 border border-amber-800/60 px-2 py-0.5 text-amber-300 font-medium">
                 {damagePoints.filter((p) => !p.contracted).length} pré-existentes
@@ -1034,7 +1087,7 @@ export function VehicleBlueprint5Views({
               </div>
             </div>
 
-            {/* Modo de Precificação: Fixo vs Unitário */}
+            {/* Modo de Precificação: Fixo vs Unitário vs Conjunto Global */}
             <div className="space-y-1">
               <Label className="text-xs font-medium">Modo de Precificação</Label>
               <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded border border-slate-800 h-8">
@@ -1043,24 +1096,37 @@ export function VehicleBlueprint5Views({
                   size="sm"
                   variant={selectedPoint.pricingMode === "fixed" ? "default" : "ghost"}
                   className={cn(
-                    "h-6 flex-1 text-[11px] font-medium",
+                    "h-6 flex-1 text-[10px] font-medium px-1",
                     selectedPoint.pricingMode === "fixed" && "bg-cyan-600 text-white"
                   )}
                   onClick={() => updateSelectedPoint({ pricingMode: "fixed" })}
                 >
-                  Fixo (Peça)
+                  Fixo
                 </Button>
                 <Button
                   type="button"
                   size="sm"
                   variant={selectedPoint.pricingMode === "unit" ? "default" : "ghost"}
                   className={cn(
-                    "h-6 flex-1 text-[11px] font-medium",
+                    "h-6 flex-1 text-[10px] font-medium px-1",
                     selectedPoint.pricingMode === "unit" && "bg-cyan-600 text-white"
                   )}
                   onClick={() => updateSelectedPoint({ pricingMode: "unit" })}
                 >
                   Por Mossa
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedPoint.pricingMode === "global" ? "default" : "ghost"}
+                  className={cn(
+                    "h-6 flex-1 text-[10px] font-medium px-1",
+                    selectedPoint.pricingMode === "global" && "bg-cyan-600 text-white"
+                  )}
+                  onClick={() => updateSelectedPoint({ pricingMode: "global", estimatedAmount: 0 })}
+                  title="Conjunto / Preço por tudo (peça sem cobrança avulsa no dossiê)"
+                >
+                  Conjunto
                 </Button>
               </div>
             </div>
@@ -1068,16 +1134,26 @@ export function VehicleBlueprint5Views({
             {/* Valor Estimado / Negociado */}
             <div className="space-y-1">
               <Label className="text-xs font-medium">
-                {selectedPoint.pricingMode === "fixed" ? "Valor do Pacote (€)" : "Valor Unitário / Mossa (€)"}
+                {selectedPoint.pricingMode === "global"
+                  ? "Valor da Peça (€)"
+                  : selectedPoint.pricingMode === "fixed"
+                  ? "Valor do Pacote (€)"
+                  : "Valor Unitário / Mossa (€)"}
               </Label>
-              <Input
-                type="number"
-                step="0.01"
-                className="h-8"
-                placeholder="Ex: 350.00"
-                value={selectedPoint.estimatedAmount ?? ""}
-                onChange={(e) => updateSelectedPoint({ estimatedAmount: e.target.value })}
-              />
+              {selectedPoint.pricingMode === "global" ? (
+                <div className="h-8 px-2.5 rounded border border-cyan-800/60 bg-cyan-950/40 text-cyan-300 text-xs flex items-center font-medium">
+                  0,00 € (Incluso no Conjunto)
+                </div>
+              ) : (
+                <Input
+                  type="number"
+                  step="0.01"
+                  className="h-8"
+                  placeholder="Ex: 350.00"
+                  value={selectedPoint.estimatedAmount ?? ""}
+                  onChange={(e) => updateSelectedPoint({ estimatedAmount: e.target.value })}
+                />
+              )}
             </div>
 
             {/* Enquadramento Pericial */}
@@ -1160,7 +1236,7 @@ export function VehicleBlueprint5Views({
             <div className="flex items-center gap-2">
               <Car className="h-4 w-4 text-cyan-400" />
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Dossiê Consolidado por Peça ({piecesSummary.length} {piecesSummary.length === 1 ? "peça" : "peças"})
+                Dossiê Consolidado por Peça ({piecesSummary.length} {piecesSummary.length === 1 ? "peça" : "peças"} • <strong className="text-cyan-400 font-bold">{totalAllDents}</strong> {totalAllDents === 1 ? "mossa total" : "mossas no total"})
               </span>
             </div>
             <span className="text-[11px] text-muted-foreground">

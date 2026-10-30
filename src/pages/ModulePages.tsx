@@ -918,7 +918,7 @@ export function Documents() {
       if (p) targetName = p.full_name;
     } else if (type === "client" && clientId) {
       const c = clients.find((x: any) => x.id === clientId);
-      if (c) targetName = c.name || c.trade_name || "";
+      if (c) targetName = c.name || (c as any).trade_name || "";
     }
     if (targetName) {
       setCountryFolderName(`${country} - ${targetName}`);

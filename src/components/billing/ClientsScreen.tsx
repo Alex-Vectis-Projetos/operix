@@ -879,8 +879,7 @@ function CompanyLookupBar({ onApply }: { onApply: (c: NormalizedCompany) => void
               type="button"
               onClick={() => {
                 onApply(c);
-                toast({
-                  title: "Dados aplicados",
+                toast.success("Dados aplicados", {
                   description: `Informações de ${c.company_name} foram aplicadas ao formulário.`,
                 });
                 setCandidates([]);

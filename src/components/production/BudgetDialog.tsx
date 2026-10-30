@@ -31,7 +31,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { useWorkspace } from "@/hooks/useWorkspace";
-import { openBudgetPreview } from "@/lib/budgetPdfUtils";
+import { openBudgetPreview, downloadBudgetHtml } from "@/lib/budgetPdfUtils";
 import { apiRequest } from "@/lib/api";
 import {
   Table,
@@ -63,7 +63,7 @@ export type BudgetPartLine = {
   description: string;
   quantity: number;
   unit_price: number;
-  pricing_mode?: "fixed" | "unit";
+  pricing_mode?: "fixed" | "unit" | "global";
 };
 
 export type BudgetServiceLine = {
@@ -74,7 +74,7 @@ export type BudgetServiceLine = {
   description: string;
   quantity: number;
   unit_price: number;
-  pricing_mode?: "fixed" | "unit";
+  pricing_mode?: "fixed" | "unit" | "global";
 };
 
 export const BUDGET_TYPE_TO_CATEGORIES: Record<string, string[]> = {
@@ -424,6 +424,7 @@ export const INTERVENTION_CATALOG: Record<BudgetType, { pt: string[]; fr: string
   },
   pdr: {
     pt: [
+      "Reparação PDR",
       "Avaliação de danos",
       "Danos de granizo",
       "Danos de estacionamento",
@@ -435,7 +436,6 @@ export const INTERVENTION_CATALOG: Record<BudgetType, { pt: string[]; fr: string
       "Batida de porta",
       "Marcas de estacionamento",
       "Reparação localizada",
-      "Reparação PDR",
       "Acesso interno",
       "Acesso por desmontagem",
       "Acabamento PDR",
@@ -444,6 +444,7 @@ export const INTERVENTION_CATALOG: Record<BudgetType, { pt: string[]; fr: string
       "Outros",
     ],
     fr: [
+      "Réparation PDR",
       "Évaluation des dommages",
       "Dommages de grêle",
       "Dommages de stationnement",
@@ -455,7 +456,6 @@ export const INTERVENTION_CATALOG: Record<BudgetType, { pt: string[]; fr: string
       "Coup de porte",
       "Marques de stationnement",
       "Réparation localisée",
-      "Réparation PDR",
       "Accès par l'intérieur",
       "Accès par démontage",
       "Finition PDR",
@@ -537,6 +537,7 @@ export function getInterventionsListFor(type: BudgetType | string | null | undef
 export type Budget = {
   id: string;
   number: string;
+  code?: string;
   issued_at: string;
   status: BudgetStatus;
   budget_type: BudgetType;
@@ -561,6 +562,13 @@ export type Budget = {
   dossier_expert_number?: string;
   dossier_insurance_company?: string;
   dossier_garage_name?: string;
+  dossier_broker_name?: string;
+  dossier_claim_date?: string;
+  dossier_franchise_amount?: number | string;
+  dossier_expert_name?: string;
+  dossier_expert_phone?: string;
+  dossier_expert_time?: string;
+  dossier_expert_date?: string;
 
   vehicle_brand?: string;
   vehicle_model?: string;
@@ -1226,6 +1234,19 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const { lang } = useLanguage();
   const langDisplay = resolveInterventionDisplayLang(lang);
   const { data: catalogItems = [], isLoading: isCatalogLoading } = useServiceCatalogItems();
+
+  const [pdfLang, setPdfLang] = useState<"pt" | "fr" | "en">(() => {
+    const c = String(form.address_country || "").toUpperCase();
+    if (c === "FR" || c === "FRANCE") return "fr";
+    if (c === "PT" || c === "PORTUGAL" || c === "BR" || c === "BRAZIL" || c === "BRASIL") return "pt";
+    return langDisplay === "fr" ? "fr" : "pt";
+  });
+
+  useEffect(() => {
+    const c = String(form.address_country || "").toUpperCase();
+    if (c === "FR" || c === "FRANCE") setPdfLang("fr");
+    else if (c === "PT" || c === "PORTUGAL" || c === "BR" || c === "BRAZIL" || c === "BRASIL") setPdfLang("pt");
+  }, [form.address_country]);
 
   // ─── Integração Cliente → Orçamento ───
   type BudgetClient = {
@@ -2221,17 +2242,19 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       });
       toast.success(`Peça "${summary.partLabel}" vinculada à tabela de Peças/Materiais.`);
     } else {
+      const isGlobal = summary.pricingMode === "global";
       const prefix = isPaint ? "Pintura" : "PDR";
-      const desc = isPaint
+      const baseDesc = isPaint
         ? `${prefix} - ${summary.partLabel} ${materialTag}`.trim()
         : `${prefix} - ${summary.partLabel} ${materialTag} — ${summary.dentCount} ${summary.dentCount === 1 ? "mossa" : "mossas"}${sizeText}`.trim();
 
-      const isFixed = summary.pricingMode === "fixed";
+      const desc = isGlobal ? `${baseDesc} [Conjunto Global - Incluso]` : baseDesc;
+      const isFixed = summary.pricingMode === "fixed" || isGlobal;
       const newLine: BudgetServiceLine = {
         id: uid(),
         description: desc,
         quantity: isFixed ? 1 : summary.dentCount,
-        unit_price: summary.estimatedAmount || 0,
+        unit_price: isGlobal ? 0 : (summary.estimatedAmount || 0),
         pricing_mode: summary.pricingMode || "fixed",
       };
 
@@ -2304,7 +2327,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         );
         return false;
       }
-      const blob = await getBudgetPdf(targetId);
+      const blob = await getBudgetPdf(targetId, pdfLang);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -2336,8 +2359,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         }));
 
       if (isPdr) {
-        // Visualização instantânea em tempo real com os dados correntes do formulário
-        openBudgetPreview(form as any, langDisplay, {
+        // Visualização instantânea em tempo real com os dados correntes do formulário e idioma selecionado
+        openBudgetPreview(form as any, pdfLang, {
           name: workspaceName,
           logoUrl: logoUrl,
           brandConfig: brandConfig,
@@ -2354,7 +2377,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
           );
           return;
         }
-        const blob = await getBudgetPdf(targetId);
+        const blob = await getBudgetPdf(targetId, pdfLang);
         const url = URL.createObjectURL(blob);
         window.open(url, "_blank", "noopener,noreferrer");
         window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -2499,6 +2522,23 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   };
 
   const downloadPDF = async () => {
+    const isPdr =
+      form.budget_type === "pdr" ||
+      (form as any).budgetType === "pdr" ||
+      inspectionPoints.length > 0 ||
+      Boolean((form as any).vehicle_body_type);
+
+    if (isPdr) {
+      downloadBudgetHtml(form as any, pdfLang, {
+        name: workspaceName,
+        logoUrl: logoUrl,
+        brandConfig: brandConfig,
+      });
+      toast.success(langDisplay === "fr" ? "Document téléchargé." : "Documento do orçamento baixado.");
+      persistCurrentState(false).catch(() => {});
+      return;
+    }
+
     const downloaded = await triggerBudgetBlobDownload();
     if (downloaded) {
       toast.success(langDisplay === "fr" ? "PDF téléchargé." : "PDF baixado.");
@@ -2689,7 +2729,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                 variant="outline"
                 className="gap-1.5 ml-2 h-8 border-dashed text-muted-foreground hover:text-foreground"
                 onClick={() => {
-                  setOcrSelectedBudgetType(null);
+                  setOcrSelectedBudgetType(form.budget_type || "pdr");
                   setOcrErrorMessage(null);
                   setOcrExtraction(null);
                   setOcrApplySelections({});
@@ -2833,6 +2873,48 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
           </div>
         ) : (
           <div className="space-y-6 pt-2">
+            {/* TIPO DE ORÇAMENTO (Promovido para o topo do formulário) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border bg-muted/20 border-slate-700/60 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className={cn("p-2 rounded-lg border shadow-sm", meta.accent)}>
+                  <meta.icon className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {langDisplay === "fr" ? "Type de devis actif" : "Tipo de orçamento ativo"}
+                  </div>
+                  <div className="text-sm font-bold text-foreground flex items-center gap-2">
+                    <span>{btLabel(form.budget_type, langDisplay)}</span>
+                    <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", meta.accent)}>
+                      {form.budget_type === "pdr" ? "Baremo Pericial UT" : "Itens Comerciais"}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+
+              {!isLocked && (
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={isValidBudgetType(form.budget_type) ? form.budget_type : "pdr"}
+                    onValueChange={(v) => {
+                      const t = normalizeBudgetType(v);
+                      if (t) requestBudgetTypeChange(t, "form_step");
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-[200px] border-slate-700 bg-background/80">
+                      <SelectValue placeholder={langDisplay === "fr" ? "Changer type de devis" : "Alterar tipo de orçamento"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pdr">Martelinho / PDR</SelectItem>
+                      <SelectItem value="body_paint">Funilaria e Pintura</SelectItem>
+                      <SelectItem value="mechanics">Mecânica</SelectItem>
+                      <SelectItem value="assembly_disassembly">Montagem / Desmontagem</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
             <Section
               title={
                 <span className="inline-flex items-center gap-2">
@@ -4253,7 +4335,26 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                   <X className="h-4 w-4" /> {isLocked ? (langDisplay === "fr" ? "Fermer" : "Fechar") : (langDisplay === "fr" ? "Annuler" : "Cancelar")}
                 </Button>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Seletor rápido de idioma do documento PDF (PT | FR | EN) */}
+                <div className="flex items-center gap-0.5 bg-muted/60 p-0.5 rounded-md border border-slate-700/60 h-9" title="Idioma do documento PDF emitido">
+                  {(["pt", "fr", "en"] as const).map((l) => (
+                    <Button
+                      key={l}
+                      type="button"
+                      size="sm"
+                      variant={pdfLang === l ? "default" : "ghost"}
+                      className={cn(
+                        "h-7 px-2 text-[11px] font-bold uppercase transition-all",
+                        pdfLang === l && "bg-cyan-600 text-white shadow-sm"
+                      )}
+                      onClick={() => setPdfLang(l)}
+                    >
+                      {l}
+                    </Button>
+                  ))}
+                </div>
+
                 <Button
                   type="button"
                   variant="outline"

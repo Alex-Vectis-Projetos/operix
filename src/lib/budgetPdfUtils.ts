@@ -18,12 +18,14 @@ export { formatBRL } from "@/components/production/BudgetDialog";
 
 export type { Budget, BudgetSignature, BudgetRejection, BudgetType };
 
-export function signerTypeLabel(t: BudgetSignerType | string | null | undefined, lang: "pt" | "fr"): string {
-  return bdSignerTypeLabel(t, lang);
+export type PdfLanguage = "pt" | "fr" | "en";
+
+export function signerTypeLabel(t: BudgetSignerType | string | null | undefined, lang: PdfLanguage = "pt"): string {
+  return bdSignerTypeLabel(t, lang === "en" ? "fr" : lang);
 }
 
-export function btLabel(t: BudgetType | string | null | undefined, lang: "pt" | "fr"): string {
-  return bdBtLabel(t, lang);
+export function btLabel(t: BudgetType | string | null | undefined, lang: PdfLanguage = "pt"): string {
+  return bdBtLabel(t, lang === "en" ? "fr" : lang);
 }
 
 export function getBudgetInterventions(b: { intervention_type?: string; intervention_types?: string[] | null }): string[] {
@@ -114,6 +116,24 @@ export interface WorkspaceBrandInfo {
 // -------------------------------------------------------------
 // BAREMO FRANCÊS DSP / PDR (UT - Unité de Temps)
 // -------------------------------------------------------------
+export const DENT_SIZE_MULTIPLIERS: Record<string, number> = {
+  "1": 0.85,
+  "2": 1.0,
+  "3": 1.15,
+  "4": 1.30,
+  "5": 1.50,
+  "6": 1.70,
+  "7": 1.90,
+  "8": 2.15,
+  "9": 2.40,
+  "10": 2.70,
+  "11": 3.00,
+  "12": 3.40,
+  "13": 3.80,
+  "14": 4.30,
+  "15": 5.00,
+};
+
 export function calculateBaremoUT(dents: number, sizeCode = "2"): number {
   if (!dents || dents <= 0) return 0;
   let baseUt = 0;
@@ -125,8 +145,7 @@ export function calculateBaremoUT(dents: number, sizeCode = "2"): number {
   else if (dents <= 200) baseUt = 71 + (dents - 100) * 0.4;
   else baseUt = 111 + (dents - 200) * 0.35;
 
-  // Ajuste por tamanho de diâmetro (mm)
-  const sizeMult = sizeCode === "3" ? 1.25 : sizeCode === "4" ? 1.5 : sizeCode === "5" ? 1.8 : 1.0;
+  const sizeMult = DENT_SIZE_MULTIPLIERS[String(sizeCode)] ?? 1.0;
   return Math.round(baseUt * sizeMult * 100) / 100;
 }
 
@@ -135,34 +154,280 @@ export const PROTOCOLE_ZONES = [
     key: "horizontaux",
     title: "Composants horizontaux",
     parts: [
-      { code: "hood", label: "Capot", match: ["capot", "capô"] },
-      { code: "roof", label: "Pavillon", match: ["pavillon", "teto", "toit"] },
-      { code: "trunk", label: "Coffre supérieur", match: ["coffre", "porta-malas", "malle"] },
-      { code: "tailgate", label: "Coffre inférieur", match: ["coffre inférieur", "tampa inf"] },
+      { code: "hood", label: "Capot", match: ["capot", "capô", "capo", "hood"] },
+      { code: "roof", label: "Pavillon", match: ["pavillon", "teto", "toit", "roof"] },
+      { code: "trunk", label: "Coffre supérieur", match: ["coffre", "porta-malas", "malle", "trunk"] },
+      { code: "tailgate", label: "Coffre inférieur", match: ["coffre inférieur", "tampa inf", "tailgate"] },
     ],
   },
   {
     key: "gauche",
     title: "Côté gauche",
     parts: [
-      { code: "left_rail", label: "Brancard G", match: ["brancard g", "coluna esq", "rail g"] },
-      { code: "front_left_fender", label: "Aile AVG", match: ["aile avg", "para-lama d. e", "aile avant gauche"] },
-      { code: "front_left_door", label: "Porte AVG", match: ["porte avg", "porta d. e", "porte avant gauche"] },
-      { code: "rear_left_door", label: "Porte ARG", match: ["porte arg", "porta t. e", "porte arrière gauche"] },
-      { code: "rear_left_quarter", label: "Aile ARG", match: ["aile arg", "lateral t. e", "aile arrière gauche"] },
+      { code: "left_rail", label: "Brancard G", match: ["brancard g", "coluna esq", "rail g", "left rail"] },
+      { code: "front_left_fender", label: "Aile AVG", match: ["aile avg", "para-lama d. e", "aile avant gauche", "front left fender"] },
+      { code: "front_left_door", label: "Porte AVG", match: ["porte avg", "porta d. e", "porte avant gauche", "front left door"] },
+      { code: "rear_left_door", label: "Porte ARG", match: ["porte arg", "porta t. e", "porte arrière gauche", "rear left door"] },
+      { code: "rear_left_quarter", label: "Aile ARG", match: ["aile arg", "lateral t. e", "aile arrière gauche", "rear left quarter"] },
     ],
   },
   {
     key: "droit",
     title: "Côté droit",
     parts: [
-      { code: "right_rail", label: "Brancard D", match: ["brancard d", "coluna dir", "rail d"] },
-      { code: "front_right_fender", label: "Aile AVD", match: ["aile avd", "para-lama d. d", "aile avant droite"] },
-      { code: "front_right_door", label: "Porte AVD", match: ["porte avd", "porta d. d", "porte avant droite"] },
-      { code: "rear_right_quarter", label: "Aile ARD", match: ["aile ard", "lateral t. d", "aile arrière droite"] },
+      { code: "right_rail", label: "Brancard D", match: ["brancard d", "coluna dir", "rail d", "right rail"] },
+      { code: "front_right_fender", label: "Aile AVD", match: ["aile avd", "para-lama d. d", "aile avant droite", "front right fender"] },
+      { code: "front_right_door", label: "Porte AVD", match: ["porte avd", "porta d. d", "porte avant droite", "front right door"] },
+      { code: "rear_right_quarter", label: "Aile ARD", match: ["aile ard", "lateral t. d", "aile arrière droite", "rear right quarter"] },
     ],
   },
 ];
+
+export const PDF_I18N = {
+  fr: {
+    protocolTitle: "PROTOCOLE DE RÉPARATION",
+    defaultTagline: "GESTION ET RÉPARATION DES SINISTRES GRÊLE",
+    noPlate: "SANS-PLAQUE",
+    clientName: "Nom Client",
+    brand: "Marque",
+    plate: "Plaque d'immatriculation",
+    protocolNo: "N° de Protocole",
+    address: "Adresse / Code Postal / Ville",
+    model: "Modèle",
+    vin: "N° de Châssis (VIN)",
+    dateStart: "Date début réparation",
+    phone: "N° Tél.",
+    color: "Couleur",
+    km: "Kilométrage",
+    dateEnd: "Date fin réparation",
+    zones: {
+      horizontaux: "Composants horizontaux",
+      gauche: "Côté gauche",
+      droit: "Côté droit",
+    },
+    parts: {
+      hood: "Capot",
+      roof: "Pavillon",
+      trunk: "Coffre supérieur",
+      tailgate: "Coffre inférieur",
+      left_rail: "Brancard G",
+      front_left_fender: "Aile AVG",
+      front_left_door: "Porte AVG",
+      rear_left_door: "Porte ARG",
+      rear_left_quarter: "Aile ARG",
+      right_rail: "Brancard D",
+      front_right_fender: "Aile AVD",
+      front_right_door: "Porte AVD",
+      rear_right_quarter: "Aile ARD",
+    } as Record<string, string>,
+    colComponents: "Composants",
+    colDents: "Nb. de bosses",
+    colSize: "Taille 10-80 mm",
+    colUt: "UT",
+    colSupp: "Coût supp.",
+    colSuppSub: "ALU | Colle | DAP",
+    colSommeUt: "Somme UT",
+    colSommeUtSub: "UT | Rés",
+    colPeint: "Peint.",
+    colNew: "Nouv.",
+    colPrice: "Prix",
+    totalDsp: "TOTAL DSP",
+    optionsFootnote: "Option : AR = Anti-rouille, BHN = Bosses Hors Norme, I = Induction, VHN = Véhicule Hors Norme",
+    paintMoTitle: "Total Peinture / MO",
+    colElement: "Element",
+    colComment: "Commentaire",
+    boxTarifTitle: "TARIFICATION",
+    boxTarifAlu: "• Aluminium : +25% supplémentaire",
+    boxTarifColle: "• Colle : +25% sur élément",
+    boxTarifDap: "• DAP : -40% sur élément",
+    boxTarifPdrRate: "• Taux horaire PDR : 90.00 EUR",
+    boxTarifAssemblyRate: "• Taux horaire montage : 85.00 EUR",
+    boxTarifUt: "• Unité de Temps : 10UT = 1H",
+    boxOptionsTitle: "OPTIONS SUPPLÉMENTAIRES",
+    boxLaborTitle: "FORFAIT DÉGARNISSAGE",
+    boxTotalLabor: "TOTAL DÉGARNISSAGE :",
+    boxTotalTitle: "PRIX TOTAL",
+    totalHt: "Total HT :",
+    tva: "TVA (20%) :",
+    totalTtc: "Total :",
+    insuranceHeader: "ASSURANCE / EXTENSION DES DOMMAGES",
+    insurance: "Assurance",
+    broker: "Apporteur d'affaires",
+    claimDate: "Date Sinistre",
+    deductible: "Montant franchise",
+    expertSig: "Signature Expert",
+    expert: "Expert",
+    time: "Heure",
+    expertDate: "Date Expertise",
+    versionOf: "Version du :",
+    rejectedBadge: "DEVIS REJETÉ",
+    rejectedReason: "Motif :",
+    rejectedAt: "Rejeté le :",
+    rejectedBy: "Par :",
+  },
+  pt: {
+    protocolTitle: "PROTOCOLO DE REPARAÇÃO",
+    defaultTagline: "GESTÃO E REPARAÇÃO DE DANOS DE GRANIZO",
+    noPlate: "SEM PLACA",
+    clientName: "Nome do Cliente",
+    brand: "Marca",
+    plate: "Placa / Matrícula",
+    protocolNo: "N° de Protocolo",
+    address: "Endereço / Cód. Postal / Cidade",
+    model: "Modelo",
+    vin: "N° de Chassi (VIN)",
+    dateStart: "Data Início Reparação",
+    phone: "Telefone",
+    color: "Cor",
+    km: "Quilometragem",
+    dateEnd: "Data Fim Reparação",
+    zones: {
+      horizontaux: "Componentes Horizontais",
+      gauche: "Lado Esquerdo",
+      droit: "Lado Direito",
+    },
+    parts: {
+      hood: "Capô",
+      roof: "Teto / Pavilhão",
+      trunk: "Tampa Traseira Sup.",
+      tailgate: "Tampa Traseira Inf.",
+      left_rail: "Coluna / Arco Esq. (Brancard G)",
+      front_left_fender: "Para-lama Dianteiro Esq.",
+      front_left_door: "Porta Dianteira Esq.",
+      rear_left_door: "Porta Traseira Esq.",
+      rear_left_quarter: "Lateral Traseira Esq.",
+      right_rail: "Coluna / Arco Dir. (Brancard D)",
+      front_right_fender: "Para-lama Dianteiro Dir.",
+      front_right_door: "Porta Dianteira Dir.",
+      rear_right_quarter: "Lateral Traseira Dir.",
+    } as Record<string, string>,
+    colComponents: "Componentes",
+    colDents: "Qtd. de Mossas",
+    colSize: "Diâmetro 10-80 mm",
+    colUt: "UT",
+    colSupp: "Custo Adic.",
+    colSuppSub: "ALU | Cola | DAP",
+    colSommeUt: "Soma UT",
+    colSommeUtSub: "UT | Res",
+    colPeint: "Pint.",
+    colNew: "Nova",
+    colPrice: "Preço",
+    totalDsp: "TOTAL PDR / GRANIZO",
+    optionsFootnote: "Opções: AR = Anti-ferrugem, BHN = Mossas Fora do Padrão, I = Indução, VHN = Veículo Fora do Padrão",
+    paintMoTitle: "Total Pintura / M.O.",
+    colElement: "Elemento",
+    colComment: "Observação",
+    boxTarifTitle: "TARIFAS E PARÂMETROS",
+    boxTarifAlu: "• Alumínio: +25% adicional",
+    boxTarifColle: "• Cola: +25% sobre a peça",
+    boxTarifDap: "• DAP: -40% sobre a peça",
+    boxTarifPdrRate: "• Taxa horária PDR: 90.00 EUR",
+    boxTarifAssemblyRate: "• Taxa horária montagem: 85.00 EUR",
+    boxTarifUt: "• Unidade de Tempo: 10UT = 1H",
+    boxOptionsTitle: "OPÇÕES ADICIONAIS",
+    boxLaborTitle: "DESMONTAGEM E MONTAGEM",
+    boxTotalLabor: "TOTAL DESMONTAGEM :",
+    boxTotalTitle: "VALOR TOTAL",
+    totalHt: "Subtotal (S/ IVA) :",
+    tva: "IVA (20%) :",
+    totalTtc: "Total Geral :",
+    insuranceHeader: "SEGURO / EXTENSÃO DE DANOS",
+    insurance: "Seguradora",
+    broker: "Intermediário / Garagem",
+    claimDate: "Data do Sinistro",
+    deductible: "Valor da Franquia",
+    expertSig: "Assinatura do Perito",
+    expert: "Perito",
+    time: "Horário",
+    expertDate: "Data da Perícia",
+    versionOf: "Versão de :",
+    rejectedBadge: "ORÇAMENTO REJEITADO",
+    rejectedReason: "Motivo :",
+    rejectedAt: "Rejeitado em :",
+    rejectedBy: "Por :",
+  },
+  en: {
+    protocolTitle: "REPAIR PROTOCOL",
+    defaultTagline: "HAIL DAMAGE MANAGEMENT & REPAIR",
+    noPlate: "NO PLATE",
+    clientName: "Client Name",
+    brand: "Brand",
+    plate: "License Plate",
+    protocolNo: "Protocol No.",
+    address: "Address / Postal Code / City",
+    model: "Model",
+    vin: "VIN / Chassis No.",
+    dateStart: "Repair Start Date",
+    phone: "Phone No.",
+    color: "Color",
+    km: "Mileage",
+    dateEnd: "Repair End Date",
+    zones: {
+      horizontaux: "Horizontal Components",
+      gauche: "Left Side",
+      droit: "Right Side",
+    },
+    parts: {
+      hood: "Hood",
+      roof: "Roof Panel",
+      trunk: "Upper Trunk / Tailgate",
+      tailgate: "Lower Tailgate",
+      left_rail: "Left Roof Rail (Brancard L)",
+      front_left_fender: "Front Left Fender",
+      front_left_door: "Front Left Door",
+      rear_left_door: "Rear Left Door",
+      rear_left_quarter: "Rear Left Quarter Panel",
+      right_rail: "Right Roof Rail (Brancard R)",
+      front_right_fender: "Front Right Fender",
+      front_right_door: "Front Right Door",
+      rear_right_quarter: "Rear Right Quarter Panel",
+    } as Record<string, string>,
+    colComponents: "Components",
+    colDents: "Dent Count",
+    colSize: "Size 10-80 mm",
+    colUt: "TU",
+    colSupp: "Add. Cost",
+    colSuppSub: "ALU | Glue | DAP",
+    colSommeUt: "Total TU",
+    colSommeUtSub: "TU | Res",
+    colPeint: "Paint",
+    colNew: "New",
+    colPrice: "Price",
+    totalDsp: "TOTAL PDR",
+    optionsFootnote: "Option: AR = Anti-rust, BHN = Non-standard Dents, I = Induction, VHN = Non-standard Vehicle",
+    paintMoTitle: "Total Paint / Labor",
+    colElement: "Element",
+    colComment: "Comments",
+    boxTarifTitle: "PRICING & PARAMETERS",
+    boxTarifAlu: "• Aluminum: +25% surcharge",
+    boxTarifColle: "• Glue: +25% on element",
+    boxTarifDap: "• DAP: -40% on element",
+    boxTarifPdrRate: "• Hourly PDR rate: 90.00 EUR",
+    boxTarifAssemblyRate: "• Hourly assembly rate: 85.00 EUR",
+    boxTarifUt: "• Time Unit: 10TU = 1H",
+    boxOptionsTitle: "ADDITIONAL OPTIONS",
+    boxLaborTitle: "DISASSEMBLY & ASSEMBLY",
+    boxTotalLabor: "TOTAL DISASSEMBLY :",
+    boxTotalTitle: "TOTAL PRICE",
+    totalHt: "Total Excl. Tax :",
+    tva: "VAT (20%) :",
+    totalTtc: "Total Incl. Tax :",
+    insuranceHeader: "INSURANCE & CLAIM EXTENSION",
+    insurance: "Insurance Co.",
+    broker: "Broker / Garage",
+    claimDate: "Claim Date",
+    deductible: "Deductible Amount",
+    expertSig: "Expert Signature",
+    expert: "Surveyor / Expert",
+    time: "Time",
+    expertDate: "Inspection Date",
+    versionOf: "Version of :",
+    rejectedBadge: "QUOTE REJECTED",
+    rejectedReason: "Reason :",
+    rejectedAt: "Rejected on :",
+    rejectedBy: "By :",
+  },
+};
 
 // -------------------------------------------------------------
 // RENDERIZADOR OFICIAL: PROTOCOLE DE RÉPARATION (DSP / GRÊLE)
@@ -170,11 +435,12 @@ export const PROTOCOLE_ZONES = [
 export function buildProtocoleDeReparationHtml(
   b: Budget,
   workspaceInfo?: WorkspaceBrandInfo,
-  lang: "pt" | "fr" = "fr",
+  lang: PdfLanguage = "fr",
 ): string {
+  const i18n = PDF_I18N[lang] || PDF_I18N.fr;
   const brand = workspaceInfo?.brandConfig || {};
   const companyName = brand.legalName || brand.name || workspaceInfo?.name || "PDR-Team SAS";
-  const tagline = brand.tagline || "GESTION ET RÉPARATION DES SINISTRES GRÊLE";
+  const tagline = brand.tagline || i18n.defaultTagline;
   const legalAddress = brand.address || "388 Rue Louis Joseph Gay Lussac";
   const postalCity = [brand.postalCode || "26100", brand.city || "Romans sur Isère"].filter(Boolean).join(" ");
   const companyPhone = brand.phone || "04 87 20 01 47";
@@ -195,6 +461,7 @@ export function buildProtocoleDeReparationHtml(
 
   // Renderiza as 3 seções do Baremo DSP
   const dspTablesHtml = PROTOCOLE_ZONES.map((zone) => {
+    const zoneTitle = (i18n.zones as any)[zone.key] || zone.title;
     const rowsHtml = zone.parts.map((pDef) => {
       // Procura linha correspondente no orçamento
       const matchedSvc = allServices.find((s) => {
@@ -257,8 +524,10 @@ export function buildProtocoleDeReparationHtml(
         grandTotalPrixDsp += finalPrice;
       }
 
+      const displayPartLabel = i18n.parts[pDef.code] || pDef.label;
+
       return `<tr style="border-bottom:1px solid #d1d5db;height:20px">
-        <td style="padding:3px 6px;border-right:1px solid #d1d5db;font-weight:600">${esc(pDef.label)}</td>
+        <td style="padding:3px 6px;border-right:1px solid #d1d5db;font-weight:600">${esc(displayPartLabel)}</td>
         <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">${hasDamage && dents > 0 ? dents : "-"}</td>
         <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:center">${hasDamage ? sizeMm : "-"}</td>
         <td style="padding:3px 4px;border-right:1px solid #d1d5db;text-align:right">${hasDamage ? baseUt.toFixed(2) : "-"}</td>
@@ -275,7 +544,7 @@ export function buildProtocoleDeReparationHtml(
 
     return `<tbody>
       <tr style="background:#e5e7eb;font-weight:bold;border-bottom:1px solid #9ca3af">
-        <td colspan="12" style="padding:3px 6px;text-transform:uppercase;font-size:9px;letter-spacing:0.04em">${esc(zone.title)}</td>
+        <td colspan="12" style="padding:3px 6px;text-transform:uppercase;font-size:9px;letter-spacing:0.04em">${esc(zoneTitle)}</td>
       </tr>
       ${rowsHtml}
     </tbody>`;
@@ -314,10 +583,10 @@ export function buildProtocoleDeReparationHtml(
   const sigName = sig?.signerName || sig?.signer_name || b.client_name;
 
   return `<!DOCTYPE html>
-<html lang="fr">
+<html lang="${lang}">
 <head>
   <meta charset="utf-8" />
-  <title>Protocole de Réparation - ${esc(b.number || b.code || "Devis")}</title>
+  <title>${esc(i18n.protocolTitle)} - ${esc(b.number || b.code || "Devis")}</title>
   <style>
     @page { size: A4 portrait; margin: 8mm 10mm; }
     body {
@@ -352,116 +621,116 @@ export function buildProtocoleDeReparationHtml(
 </head>
 <body>
   <div class="print-bar print-actions no-print">
-    <div style="font-weight:bold;font-size:12px">Operix Engine — Visualisation "Protocole de Réparation" (Fidélité 100%)</div>
+    <div style="font-weight:bold;font-size:12px">Operix Engine — ${esc(i18n.protocolTitle)}</div>
     <div style="display:flex;gap:8px">
-      <button onclick="window.print()" style="background:#0284c7;color:white;border:none;padding:5px 12px;border-radius:3px;font-weight:bold;cursor:pointer">Imprimer / PDF</button>
+      <button onclick="window.print()" style="background:#0284c7;color:white;border:none;padding:5px 12px;border-radius:3px;font-weight:bold;cursor:pointer">Imprimir / PDF</button>
       <button onclick="window.close()" style="background:#4b5563;color:white;border:none;padding:5px 12px;border-radius:3px;cursor:pointer">Fermer</button>
     </div>
   </div>
 
   ${isRejected ? `
-  <div style="background:#fef2f2;border:1px solid #dc2626;padding:6px 10px;margin-bottom:8px;border-radius:2px;display:flex;justify-content:space-between;align-items:center">
+  <div style="background:#fef2f2;border:1px solid #dc2626;padding:6px 10px;margin-bottom:10px;border-radius:2px;display:flex;justify-content:space-between;align-items:center">
     <div>
       <div style="font-weight:900;color:#991b1b;font-size:10px;text-transform:uppercase">
-        ${lang === "fr" ? "DEVIS REJETÉ" : "ORÇAMENTO REJEITADO"}
+        ${esc(i18n.rejectedBadge)}
       </div>
       <div style="color:#7f1d1d;font-size:8.5px;margin-top:2px">
-        ${(b as any).rejection?.reason ? `<strong>Motivo:</strong> ${esc((b as any).rejection.reason)}` : "Orçamento recusado pelo cliente ou seguradora."}
+        ${(b as any).rejection?.reason ? `<strong>${esc(i18n.rejectedReason)}</strong> ${esc((b as any).rejection.reason)}` : "Orçamento recusado."}
       </div>
     </div>
     ${(b as any).rejection?.rejectedAt ? `
       <div style="color:#991b1b;font-size:8px;text-align:right">
-        Rejeitado em: ${formatDateTime((b as any).rejection.rejectedAt)}<br/>
-        ${(b as any).rejection?.rejectedBy ? `Por: ${esc((b as any).rejection.rejectedBy)}` : ""}
+        ${esc(i18n.rejectedAt)} ${formatDateTime((b as any).rejection.rejectedAt)}<br/>
+        ${(b as any).rejection?.rejectedBy ? `${esc(i18n.rejectedBy)} ${esc((b as any).rejection.rejectedBy)}` : ""}
       </div>
     ` : ""}
   </div>
   ` : ""}
 
-  <!-- 1. EN-TÊTE OFFICIEL & WHITELABEL -->
-  <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px">
+  <!-- 1. EN-TÊTE OFFICIEL & WHITELABEL (LOGO AMPLIADO & FAIXA ELEVADA) -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:14px">
     <div style="display:flex;align-items:center;gap:12px">
       ${logoUrl ? `
         <div>
-          <img src="${esc(logoUrl)}" alt="Logo" style="height:44px;max-width:180px;object-fit:contain;display:block" />
-          <div style="font-size:8px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase;margin-top:2px">${esc(tagline)}</div>
+          <img src="${esc(logoUrl)}" alt="Logo" style="height:52px;max-height:58px;max-width:220px;object-fit:contain;display:block" />
+          <div style="font-size:8px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase;margin-top:4px">${esc(tagline)}</div>
         </div>
       ` : `
         <div>
-          <div style="font-size:16px;font-weight:900;letter-spacing:0.04em;color:#111827">${esc(companyName)}</div>
-          <div style="font-size:8px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase">${esc(tagline)}</div>
+          <div style="font-size:18px;font-weight:900;letter-spacing:0.04em;color:#111827">${esc(companyName)}</div>
+          <div style="font-size:8px;font-weight:bold;color:#4b5563;letter-spacing:0.06em;text-transform:uppercase;margin-top:2px">${esc(tagline)}</div>
         </div>
       `}
     </div>
     <div style="text-align:right">
-      <div style="background:#111827;color:white;padding:5px 14px;border-radius:2px;font-size:14px;font-weight:900;letter-spacing:0.12em;display:inline-block">
-        ${lang === "pt" ? "PROTOCOLO DE REPARAÇÃO" : "PROTOCOLE DE RÉPARATION"}
+      <div style="background:#111827;color:white;padding:6px 16px;border-radius:2px;font-size:14px;font-weight:900;letter-spacing:0.12em;display:inline-block;text-transform:uppercase">
+        ${esc(i18n.protocolTitle)}
       </div>
-      <div style="margin-top:4px">
-        <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:900;color:#b91c1c;border:1.5px solid #dc2626;background:#fef2f2;padding:2px 12px;border-radius:3px;display:inline-block;white-space:nowrap">
-          ${esc(b.vehicle_plate || "SANS-PLAQUE")}
+      <div style="margin-top:6px;margin-bottom:2px">
+        <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:900;color:#b91c1c;border:1.5px solid #dc2626;background:#fef2f2;padding:2px 14px;border-radius:3px;display:inline-block;white-space:nowrap">
+          ${esc(b.vehicle_plate || i18n.noPlate)}
         </span>
       </div>
     </div>
   </div>
 
   <!-- 2. FICHE CLIENT & VÉHICULE (GRILLE PERICIALE 4x3) -->
-  <table class="border-all" style="margin-bottom:8px;font-size:9.5px;table-layout:fixed;width:100%">
+  <table class="border-all" style="margin-bottom:12px;font-size:9.5px;table-layout:fixed;width:100%">
     <colgroup>
       <col style="width:28%" /><col style="width:22%" /><col style="width:25%" /><col style="width:25%" />
     </colgroup>
     <tbody>
       <tr>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af;border-bottom:1px solid #9ca3af">
-          <div class="cell-label">Nom Client</div>
+          <div class="cell-label">${esc(i18n.clientName)}</div>
           <div class="cell-val">${esc(b.client_name || "-")}${b.client_display_id ? ` <span style="font-size:8px;color:#4b5563;font-weight:normal">(${esc(b.client_display_id)})</span>` : ""}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af;border-bottom:1px solid #9ca3af">
-          <div class="cell-label">Marque</div>
+          <div class="cell-label">${esc(i18n.brand)}</div>
           <div class="cell-val">${esc(b.vehicle_brand || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af;border-bottom:1px solid #9ca3af">
-          <div class="cell-label">Plaque d'immatriculation</div>
+          <div class="cell-label">${esc(i18n.plate)}</div>
           <div class="cell-val" style="color:#b91c1c">${esc(b.vehicle_plate || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-bottom:1px solid #9ca3af">
-          <div class="cell-label">N° de Protocole</div>
+          <div class="cell-label">${esc(i18n.protocolNo)}</div>
           <div class="cell-val">${esc(b.number || b.code || "-")}</div>
         </td>
       </tr>
       <tr>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af;border-bottom:1px solid #9ca3af">
-          <div class="cell-label">Adresse/Code Postale/Ville</div>
+          <div class="cell-label">${esc(i18n.address)}</div>
           <div class="cell-val">${esc(clientAddress || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af;border-bottom:1px solid #9ca3af">
-          <div class="cell-label">Modèle</div>
+          <div class="cell-label">${esc(i18n.model)}</div>
           <div class="cell-val">${esc(b.vehicle_model || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af;border-bottom:1px solid #9ca3af">
-          <div class="cell-label">N° de Châssis</div>
+          <div class="cell-label">${esc(i18n.vin)}</div>
           <div class="cell-val" style="font-family:monospace">${esc(b.vehicle_vin || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-bottom:1px solid #9ca3af">
-          <div class="cell-label">Date début réparation</div>
+          <div class="cell-label">${esc(i18n.dateStart)}</div>
           <div class="cell-val">${formatDate(b.issued_at || b.created_at)}</div>
         </td>
       </tr>
       <tr>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af">
-          <div class="cell-label">N° Tél.</div>
+          <div class="cell-label">${esc(i18n.phone)}</div>
           <div class="cell-val">${esc(b.client_phone || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af">
-          <div class="cell-label">Couleur</div>
+          <div class="cell-label">${esc(i18n.color)}</div>
           <div class="cell-val">${esc(b.vehicle_color || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #9ca3af">
-          <div class="cell-label">Kms</div>
+          <div class="cell-label">${esc(i18n.km)}</div>
           <div class="cell-val">${esc(b.vehicle_km || "-")}</div>
         </td>
         <td style="padding:4px 6px">
-          <div class="cell-label">Date fin réparation</div>
+          <div class="cell-label">${esc(i18n.dateEnd)}</div>
           <div class="cell-val">-</div>
         </td>
       </tr>
@@ -472,27 +741,27 @@ export function buildProtocoleDeReparationHtml(
   <table style="border:1px solid #4b5563;margin-bottom:4px">
     <thead>
       <tr style="background:#374151;color:white;font-weight:bold;text-align:center;font-size:9px">
-        <th style="padding:4px 6px;text-align:left;width:24%;border-right:1px solid #4b5563">Composants</th>
-        <th style="padding:4px 3px;width:9%;border-right:1px solid #4b5563">Nb. de bosses</th>
-        <th style="padding:4px 3px;width:9%;border-right:1px solid #4b5563">Taille 10-80 mm</th>
-        <th style="padding:4px 3px;width:7%;border-right:1px solid #4b5563">UT</th>
+        <th style="padding:4px 6px;text-align:left;width:24%;border-right:1px solid #4b5563">${esc(i18n.colComponents)}</th>
+        <th style="padding:4px 3px;width:9%;border-right:1px solid #4b5563">${esc(i18n.colDents)}</th>
+        <th style="padding:4px 3px;width:9%;border-right:1px solid #4b5563">${esc(i18n.colSize)}</th>
+        <th style="padding:4px 3px;width:7%;border-right:1px solid #4b5563">${esc(i18n.colUt)}</th>
         <th style="padding:2px 2px;width:12%;border-right:1px solid #4b5563" colspan="3">
-          Coût supp.<br/>
-          <span style="font-size:7.5px;font-weight:normal">ALU | Colle | DAP</span>
+          ${esc(i18n.colSupp)}<br/>
+          <span style="font-size:7.5px;font-weight:normal">${esc(i18n.colSuppSub)}</span>
         </th>
         <th style="padding:2px 2px;width:12%;border-right:1px solid #4b5563" colspan="2">
-          Somme UT<br/>
-          <span style="font-size:7.5px;font-weight:normal">UT | Rés</span>
+          ${esc(i18n.colSommeUt)}<br/>
+          <span style="font-size:7.5px;font-weight:normal">${esc(i18n.colSommeUtSub)}</span>
         </th>
-        <th style="padding:4px 2px;width:5%;border-right:1px solid #4b5563">Peint.</th>
-        <th style="padding:4px 2px;width:5%;border-right:1px solid #4b5563">Nouv.</th>
-        <th style="padding:4px 6px;text-align:right;width:15%">Prix</th>
+        <th style="padding:4px 2px;width:5%;border-right:1px solid #4b5563">${esc(i18n.colPeint)}</th>
+        <th style="padding:4px 2px;width:5%;border-right:1px solid #4b5563">${esc(i18n.colNew)}</th>
+        <th style="padding:4px 6px;text-align:right;width:15%">${esc(i18n.colPrice)}</th>
       </tr>
     </thead>
     ${dspTablesHtml}
     <tfoot>
       <tr style="background:#1f2937;color:white;font-weight:bold;height:22px">
-        <td style="padding:4px 6px;text-transform:uppercase;letter-spacing:0.05em">TOTAL DSP</td>
+        <td style="padding:4px 6px;text-transform:uppercase;letter-spacing:0.05em">${esc(i18n.totalDsp)}</td>
         <td colspan="2"></td>
         <td style="padding:4px 4px;text-align:right">${grandTotalUt.toFixed(2)}</td>
         <td colspan="3"></td>
@@ -503,7 +772,7 @@ export function buildProtocoleDeReparationHtml(
     </tfoot>
   </table>
   <div style="font-size:7.5px;color:#4b5563;margin-bottom:8px;font-style:italic">
-    Option : AR = Anti-rouille, BHN = Bosses Hors Norme, I = Induction, VHN = Véhicule Hors Norme
+    ${esc(i18n.optionsFootnote)}
   </div>
 
   <!-- 4. TABLEAU PEINTURE / MO (MAIN D'OEUVRE) -->
@@ -511,12 +780,12 @@ export function buildProtocoleDeReparationHtml(
   <table style="border:1px solid #4b5563;margin-bottom:8px;font-size:9.5px">
     <thead>
       <tr style="background:#374151;color:white;font-weight:bold;text-align:center;font-size:9px">
-        <th style="padding:4px 6px;text-align:left;width:30%;border-right:1px solid #4b5563">Element</th>
+        <th style="padding:4px 6px;text-align:left;width:30%;border-right:1px solid #4b5563">${esc(i18n.colElement)}</th>
         <th style="padding:4px 4px;width:10%;border-right:1px solid #4b5563">T1</th>
         <th style="padding:4px 4px;width:15%;border-right:1px solid #4b5563">T2 (47,00 EUR/h)</th>
         <th style="padding:4px 4px;width:15%;border-right:1px solid #4b5563">Peinture (36,00 EUR/h)</th>
         <th style="padding:4px 4px;width:15%;border-right:1px solid #4b5563">Ing. (N.V.) (36,00 EUR/h)</th>
-        <th style="padding:4px 6px;text-align:right;width:15%">Commentaire</th>
+        <th style="padding:4px 6px;text-align:right;width:15%">${esc(i18n.colComment)}</th>
       </tr>
     </thead>
     <tbody>
@@ -524,7 +793,7 @@ export function buildProtocoleDeReparationHtml(
     </tbody>
     <tfoot>
       <tr style="background:#1f2937;color:white;font-weight:bold">
-        <td style="padding:4px 6px">Total Peinture / MO</td>
+        <td style="padding:4px 6px">${esc(i18n.paintMoTitle)}</td>
         <td colspan="4"></td>
         <td style="padding:4px 6px;text-align:right">${totalPaintVal.toFixed(2)} EUR</td>
       </tr>
@@ -538,22 +807,22 @@ export function buildProtocoleDeReparationHtml(
     </colgroup>
     <thead>
       <tr style="background:#374151;color:white;font-weight:bold;font-size:9px">
-        <th style="padding:4px 6px;text-align:left;border-right:1px solid #4b5563">TARIFICATION</th>
-        <th style="padding:4px 6px;text-align:left;border-right:1px solid #4b5563">OPTIONS SUPPLÉMENTAIRES</th>
-        <th style="padding:4px 6px;text-align:left;border-right:1px solid #4b5563">FORFAIT DÉGARNISSAGE</th>
-        <th style="padding:4px 6px;text-align:right;background:#111827">PRIX TOTAL</th>
+        <th style="padding:4px 6px;text-align:left;border-right:1px solid #4b5563">${esc(i18n.boxTarifTitle)}</th>
+        <th style="padding:4px 6px;text-align:left;border-right:1px solid #4b5563">${esc(i18n.boxOptionsTitle)}</th>
+        <th style="padding:4px 6px;text-align:left;border-right:1px solid #4b5563">${esc(i18n.boxLaborTitle)}</th>
+        <th style="padding:4px 6px;text-align:right;background:#111827">${esc(i18n.boxTotalTitle)}</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <!-- Caixa 1: Tarification -->
         <td style="padding:6px;border-right:1px solid #d1d5db;vertical-align:top;font-size:8.5px;line-height:1.4">
-          • Aluminium : +25% supplémentaire<br/>
-          • Colle : +25% sur élément<br/>
-          • DAP : -40% sur élément<br/>
-          • Taux horaire PDR : 90.00 EUR<br/>
-          • Taux horaire montage : 85.00 EUR<br/>
-          • Unité de Temps : 10UT = 1H
+          ${esc(i18n.boxTarifAlu)}<br/>
+          ${esc(i18n.boxTarifColle)}<br/>
+          ${esc(i18n.boxTarifDap)}<br/>
+          ${esc(i18n.boxTarifPdrRate)}<br/>
+          ${esc(i18n.boxTarifAssemblyRate)}<br/>
+          ${esc(i18n.boxTarifUt)}
         </td>
         <!-- Caixa 2: Options -->
         <td style="padding:6px;border-right:1px solid #d1d5db;vertical-align:top;font-size:8.5px;line-height:1.4">
@@ -563,15 +832,15 @@ export function buildProtocoleDeReparationHtml(
         </td>
         <!-- Caixa 3: Dégarnissage -->
         <td style="padding:6px;border-right:1px solid #d1d5db;vertical-align:top;font-size:8.5px;line-height:1.4">
-          TOTAL DÉGARNISSAGE :<br/>
+          ${esc(i18n.boxTotalLabor)}<br/>
           <strong>${t.labor > 0 ? `${t.labor.toFixed(2)} EUR` : "0.00 EUR"}</strong>
         </td>
         <!-- Caixa 4: Prix Total -->
         <td style="padding:6px;vertical-align:top;background:#f9fafb;font-size:9px;line-height:1.5;text-align:right">
-          Total HT : <strong>${totalHt.toFixed(2)} EUR</strong><br/>
-          TVA (20%) : <strong>${tvaVal.toFixed(2)} EUR</strong><br/>
+          ${esc(i18n.totalHt)} <strong>${totalHt.toFixed(2)} EUR</strong><br/>
+          ${esc(i18n.tva)} <strong>${tvaVal.toFixed(2)} EUR</strong><br/>
           <div style="font-size:12px;font-weight:900;color:#111827;border-top:1px solid #9ca3af;padding-top:3px;margin-top:3px">
-            Total : ${totalTtc.toFixed(2)} EUR
+            ${esc(i18n.totalTtc)} ${totalTtc.toFixed(2)} EUR
           </div>
         </td>
       </tr>
@@ -582,47 +851,47 @@ export function buildProtocoleDeReparationHtml(
   <table style="border:1px solid #4b5563;margin-bottom:8px;font-size:9px">
     <thead>
       <tr style="background:#4b5563;color:white;font-weight:bold;text-align:center">
-        <th colspan="5" style="padding:3px 6px;text-transform:uppercase;letter-spacing:0.06em">ASSURANCE / EXTENSION DES DOMMAGES</th>
+        <th colspan="5" style="padding:3px 6px;text-transform:uppercase;letter-spacing:0.06em">${esc(i18n.insuranceHeader)}</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db;border-bottom:1px solid #d1d5db;width:22%">
-          <div class="cell-label">Assurance</div>
+          <div class="cell-label">${esc(i18n.insurance)}</div>
           <div class="cell-val">${esc(b.dossier_insurance_company || "-")}${b.dossier_claim_number ? ` (${esc(b.dossier_claim_number)})` : ""}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db;border-bottom:1px solid #d1d5db;width:24%">
-          <div class="cell-label">Apporteur d'affaires</div>
+          <div class="cell-label">${esc(i18n.broker)}</div>
           <div class="cell-val">${esc(b.dossier_broker_name || b.dossier_garage_name || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db;border-bottom:1px solid #d1d5db;width:20%">
-          <div class="cell-label">Date Sinistre</div>
+          <div class="cell-label">${esc(i18n.claimDate)}</div>
           <div class="cell-val">${formatDate(b.dossier_claim_date)}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db;border-bottom:1px solid #d1d5db;width:16%">
-          <div class="cell-label">Montant franchise</div>
+          <div class="cell-label">${esc(i18n.deductible)}</div>
           <div class="cell-val">${b.dossier_franchise_amount ? `${Number(b.dossier_franchise_amount).toFixed(2)} EUR` : "- EUR"}</div>
         </td>
         <td style="padding:4px 6px;width:18%;text-align:center;vertical-align:bottom" rowspan="2">
-          <div class="cell-label">${esc(sigName ? `Signature (${sigName})` : "Signature Expert")}</div>
+          <div class="cell-label">${esc(sigName ? `Signature (${sigName})` : i18n.expertSig)}</div>
           ${sigImg ? `<img src="${esc(sigImg)}" style="max-height:36px;max-width:100%;object-fit:contain" alt="Signature" />` : `<div style="height:32px;border-bottom:1px dashed #9ca3af;margin-top:4px"></div>`}
         </td>
       </tr>
       <tr>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db">
-          <div class="cell-label">Expert</div>
+          <div class="cell-label">${esc(i18n.expert)}</div>
           <div class="cell-val">${esc(b.dossier_expert_name || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db">
-          <div class="cell-label">N° Tél.</div>
+          <div class="cell-label">${esc(i18n.phone)}</div>
           <div class="cell-val">${esc(b.dossier_expert_phone || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db">
-          <div class="cell-label">Heure</div>
+          <div class="cell-label">${esc(i18n.time)}</div>
           <div class="cell-val">${esc(b.dossier_expert_time || "-")}</div>
         </td>
         <td style="padding:4px 6px;border-right:1px solid #d1d5db">
-          <div class="cell-label">Date Expertise</div>
+          <div class="cell-label">${esc(i18n.expertDate)}</div>
           <div class="cell-val">${formatDate(b.dossier_expert_date)}</div>
         </td>
       </tr>
@@ -648,7 +917,7 @@ export function buildProtocoleDeReparationHtml(
           ${esc(companyEmail)} - ${esc(companyWebsite)}
         </td>
         <td style="padding:4px 6px;width:14%;vertical-align:top;text-align:right">
-          Version du:<br/>
+          ${esc(i18n.versionOf)}<br/>
           <strong>${formatDate(b.updated_at || b.created_at || new Date().toISOString())}</strong>
         </td>
       </tr>
@@ -663,18 +932,18 @@ export function buildProtocoleDeReparationHtml(
 // -------------------------------------------------------------
 export function buildPrintableBudget(
   b: Budget,
-  lang: "pt" | "fr" = "pt",
+  lang: PdfLanguage = "pt",
   workspaceInfo?: WorkspaceBrandInfo,
 ): string {
   // Se for do tipo PDR / Granizo, renderiza com exclusividade o Protocole de Réparation pericial
   if (b.budget_type === "pdr") {
-    return buildProtocoleDeReparationHtml(b, workspaceInfo, "fr");
+    return buildProtocoleDeReparationHtml(b, workspaceInfo, lang);
   }
 
   // Layout Tradicional para Mecânica / Colisão
   const t = computeTotalsFor(b);
   const sections: string[] = [];
-  const headerTitle = lang === "fr" ? "DEVIS DE RÉPARATION" : "ORÇAMENTO DE SERVIÇOS";
+  const headerTitle = lang === "fr" ? "DEVIS DE RÉPARATION" : lang === "en" ? "REPAIR ESTIMATE" : "ORÇAMENTO DE SERVIÇOS";
   const brand = workspaceInfo?.brandConfig || {};
   const companyName = brand.legalName || workspaceInfo?.name || "Operix";
 
@@ -685,22 +954,21 @@ export function buildPrintableBudget(
   <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px;padding:0 4px">
     <div>
       <div style="font-size:14px;font-weight:800;color:#111827">${esc(companyName)}</div>
-      <div style="font-size:11px;font-weight:600;color:#4b5563">${lang === "fr" ? "Atelier de réparation automobile" : "Oficina de reparação automotiva"}</div>
+      <div style="font-size:11px;font-weight:600;color:#4b5563">${lang === "fr" ? "Atelier de réparation automobile" : lang === "en" ? "Automotive Repair Center" : "Oficina de reparação automotiva"}</div>
     </div>
     <div style="text-align:right">
-      <div style="font-size:9px;color:#4b5563;letter-spacing:0.1em;text-transform:uppercase">${lang === "fr" ? "N° de Devis" : "N° Orçamento"}</div>
+      <div style="font-size:9px;color:#4b5563;letter-spacing:0.1em;text-transform:uppercase">${lang === "fr" ? "N° de Devis" : lang === "en" ? "Quote No." : "N° Orçamento"}</div>
       <div style="font-size:16px;font-weight:800;font-family:ui-monospace,Menlo,monospace;color:#111827">${esc(b.number || b.code || "(rascunho)")}</div>
-      <div style="font-size:10px;color:#4b5563;margin-top:4px">${lang === "fr" ? "Émis le" : "Emissão"}: ${formatDate(b.issued_at || b.created_at || new Date().toISOString())}</div>
+      <div style="font-size:10px;color:#4b5563;margin-top:4px">${lang === "fr" ? "Émis le" : lang === "en" ? "Issued on" : "Emissão"}: ${formatDate(b.issued_at || b.created_at || new Date().toISOString())}</div>
     </div>
   </div>`);
 
-  // Restante do layout tradicional...
   return buildProtocoleDeReparationHtml(b, workspaceInfo, lang);
 }
 
 export function openBudgetPreview(
   b: Budget,
-  lang: "pt" | "fr" = "pt",
+  lang: PdfLanguage = "pt",
   workspaceInfo?: WorkspaceBrandInfo,
 ): void {
   try {
@@ -729,7 +997,7 @@ export function openBudgetPreview(
 
 export function downloadBudgetHtml(
   b: Budget,
-  lang: "pt" | "fr" = "pt",
+  lang: PdfLanguage = "pt",
   workspaceInfo?: WorkspaceBrandInfo,
 ): void {
   try {

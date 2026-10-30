@@ -210,7 +210,8 @@ budgetsRouter.get("/public-sign/:token/pdf", async (req: Request, res: Response,
       include: { damagePoints: true },
     });
 
-    const pdfBuffer = await generateBudgetPdfBuffer(budget, revision, budget.workspace, inspection);
+    const lang = (req.query.lang as "pt" | "fr" | "en") || "fr";
+    const pdfBuffer = await generateBudgetPdfBuffer(budget, revision, budget.workspace, inspection, lang);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="Orcamento-${budget.code}.pdf"`);
@@ -1211,7 +1212,8 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
       }),
     ]);
 
-    const pdfBuffer = await generateBudgetPdfBuffer(budget, rev, workspace, inspection);
+    const lang = (req.query.lang as "pt" | "fr" | "en") || "fr";
+    const pdfBuffer = await generateBudgetPdfBuffer(budget, rev, workspace, inspection, lang);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${budget.code}.pdf"`);
@@ -1282,7 +1284,8 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
           include: { damagePoints: true },
         }),
       ]);
-      pdfBuf = await generateBudgetPdfBuffer(budget, rev, workspace, inspection);
+      const mailLang = (req.query.lang as "pt" | "fr" | "en") || (req.body?.lang as "pt" | "fr" | "en") || "fr";
+      pdfBuf = await generateBudgetPdfBuffer(budget, rev, workspace, inspection, mailLang);
     } catch {
       const pdfLines = [
         `Date: ${(rev.createdAt ?? budget.createdAt).toISOString().slice(0, 10)}`,

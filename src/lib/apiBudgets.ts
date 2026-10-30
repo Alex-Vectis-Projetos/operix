@@ -108,6 +108,7 @@ export interface ApiBudget {
   workspaceId: string;
   workspace_id: string;
   code: string;
+  status?: BudgetStatus;
   clientId?: string | null;
   client_id?: string | null;
   clientName?: string | null;
@@ -299,8 +300,9 @@ export function deleteBudget(id: string): Promise<{ success: boolean; id: string
   });
 }
 
-export function getBudgetPdf(id: string): Promise<Blob> {
-  return apiBlobRequest(`/budgets/${id}/pdf`);
+export function getBudgetPdf(id: string, lang?: "pt" | "fr" | "en"): Promise<Blob> {
+  const query = lang ? `?lang=${encodeURIComponent(lang)}` : "";
+  return apiBlobRequest(`/budgets/${id}/pdf${query}`);
 }
 
 export function sendBudgetEmail(id: string, to: string): Promise<{
