@@ -1594,7 +1594,29 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       if (!next.number) {
         next.number = generateBudgetNumber();
       }
-      setForm(next);
+      setForm((prev) => {
+        const keepClientId = prev.client_id || next.client_id;
+        const keepClientDisplayId = prev.client_display_id || next.client_display_id;
+        const keepClientName = prev.client_name || next.client_name;
+        const keepClientPhone = prev.client_phone || next.client_phone;
+        const keepClientEmail = prev.client_email || next.client_email;
+        const keepClientDoc = prev.client_document || next.client_document;
+
+        return {
+          ...next,
+          client_id: keepClientId || "",
+          client_display_id: keepClientDisplayId || "",
+          client_name: keepClientName || "",
+          client_phone: keepClientPhone || "",
+          client_email: keepClientEmail || "",
+          client_document: keepClientDoc || "",
+          address_street: prev.address_street || next.address_street,
+          address_complement: prev.address_complement || next.address_complement,
+          address_postal: prev.address_postal || next.address_postal,
+          address_city: prev.address_city || next.address_city,
+          address_country: prev.address_country || next.address_country,
+        };
+      });
 
       if (initial) {
         setStep("form");
@@ -1803,9 +1825,11 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       if (sel.vehicle_km) maybeSet("vehicle_km", ocrExtraction.vehicle_km);
       if (sel.dossier_insurance_company) maybeSet("dossier_insurance_company", ocrExtraction.dossier_insurance_company);
       if (sel.dossier_claim_number) maybeSet("dossier_claim_number", ocrExtraction.dossier_claim_number);
-      if (sel.client_name) maybeSet("client_name", ocrExtraction.client_name);
-      if (sel.client_phone) maybeSet("client_phone", ocrExtraction.client_phone);
-      if (sel.client_email) maybeSet("client_email", ocrExtraction.client_email);
+      if (!next.client_id) {
+        if (sel.client_name) maybeSet("client_name", ocrExtraction.client_name);
+        if (sel.client_phone) maybeSet("client_phone", ocrExtraction.client_phone);
+        if (sel.client_email) maybeSet("client_email", ocrExtraction.client_email);
+      }
       if (sel.diagnosis) maybeSet("diagnosis", ocrExtraction.diagnosis);
       if (sel.technical_description) maybeSet("technical_description", ocrExtraction.technical_description);
 
@@ -2908,8 +2932,19 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                       </div>
 
                       <div
-                        className="max-h-[340px] overflow-y-auto overflow-x-hidden p-1 space-y-0.5"
-                        onWheel={(e) => e.stopPropagation()}
+                        ref={(el) => {
+                          if (!el) return;
+                          const handleWheel = (e: WheelEvent) => {
+                            e.stopPropagation();
+                            el.scrollTop += e.deltaY;
+                          };
+                          el.addEventListener("wheel", handleWheel, { passive: true });
+                        }}
+                        onWheelCapture={(e) => {
+                          e.stopPropagation();
+                          e.currentTarget.scrollTop += e.deltaY;
+                        }}
+                        className="max-h-[380px] overflow-y-scroll overflow-x-hidden p-1 space-y-0.5 [scrollbar-width:thin] [scrollbar-color:#64748b_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-slate-800/40 [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-500"
                         style={{ overscrollBehavior: "contain" }}
                       >
                         {filteredClients.length === 0 ? (

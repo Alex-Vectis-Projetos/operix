@@ -1219,8 +1219,8 @@ export function VehicleBlueprint5Views({
                     "h-6 flex-1 text-[10px] font-medium px-1",
                     selectedPoint.pricingMode === "global" && "bg-cyan-600 text-white"
                   )}
-                  onClick={() => updateSelectedPoint({ pricingMode: "global", estimatedAmount: 0 })}
-                  title="Conjunto / Preço por tudo (peça sem cobrança avulsa no dossiê)"
+                  onClick={() => handleApplyGlobalPricingToAll()}
+                  title="Conjunto / Preço por tudo (aplica a todas as peças do veículo)"
                 >
                   Conjunto
                 </Button>

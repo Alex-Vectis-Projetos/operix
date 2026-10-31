@@ -199,9 +199,12 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         const net = Math.max(0, gross - disc);
         const iva = (net * Math.max(0, Number(b.iva_pct) || 0)) / 100;
         const total = net + iva;
+        if (b.status === "approved") {
+          acc.approved += 1;
+          return acc;
+        }
         acc.count += 1;
         acc.total += total;
-        if (b.status === "approved") acc.approved += 1;
         if (b.status === "draft") acc.drafts += 1;
         if (b.status === "sent") acc.sent = (acc.sent || 0) + 1;
         if (b.status === "rejected") acc.rejected += 1;
@@ -486,17 +489,17 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         <EmptyState onNew={openNew} />
       ) : (
         <Card className="border-border/50">
-          <CardContent className="p-0 overflow-x-auto">
+          <CardContent className="p-0 overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[130px]">Nº Orçamento</TableHead>
-                  <TableHead className="w-[100px]">Data</TableHead>
-                  <TableHead className="min-w-[160px]">Cliente</TableHead>
-                  <TableHead className="min-w-[160px]">Veículo</TableHead>
-                  <TableHead className="w-[100px]">Status</TableHead>
-                  <TableHead className="w-[110px] text-right">Total</TableHead>
-                  <TableHead className="w-[180px] text-right sticky right-0 z-20 bg-card/95 backdrop-blur border-l border-border/50 shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.3)]">
+                  <TableHead className="w-[125px]">Nº Orçamento</TableHead>
+                  <TableHead className="w-[95px]">Data</TableHead>
+                  <TableHead className="min-w-[130px] max-w-[180px]">Cliente</TableHead>
+                  <TableHead className="min-w-[130px] max-w-[200px]">Veículo</TableHead>
+                  <TableHead className="w-[95px]">Status</TableHead>
+                  <TableHead className="w-[105px] text-right">Total</TableHead>
+                  <TableHead className="w-[160px] text-right sticky right-0 z-20 bg-slate-900/95 backdrop-blur border-l border-slate-800 shadow-[-8px_0_12px_-4px_rgba(0,0,0,0.5)]">
                     Ação
                   </TableHead>
                 </TableRow>
@@ -576,7 +579,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                       >
                         {formatBRL(computeTotalsFor(b).total, b.currency || "EUR")}
                       </TableCell>
-                      <TableCell className="text-right sticky right-0 z-10 bg-card/95 group-hover:bg-muted/90 backdrop-blur border-l border-border/50 shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.3)] transition-colors">
+                      <TableCell className="text-right sticky right-0 z-10 bg-slate-900 group-hover:bg-slate-800 border-l border-slate-800 shadow-[-8px_0_12px_-4px_rgba(0,0,0,0.5)] transition-colors py-2 px-3">
                         <div className="flex items-center justify-end gap-1">
                           <Button
                             size="icon"

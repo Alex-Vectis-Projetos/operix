@@ -23,6 +23,7 @@ const BLANK: ProductionOrder = {
 export default function ProductionPage() {
   const { t } = useLanguage();
   const { workspaceId } = useWorkspace();
+  const [activeTab, setActiveTab] = useState<"budgets" | "board" | "history">("budgets");
   const [open, setOpen] = useState<ProductionOrder | null>(null);
   const [orderKeyCounter, setOrderKeyCounter] = useState(0);
 
@@ -33,6 +34,11 @@ export default function ProductionPage() {
   const openNewOrder = () => {
     setOrderKeyCounter((c) => c + 1);
     setOpen({ ...BLANK, workspace_id: workspaceId ?? "" });
+  };
+
+  const handleOpenOrderFromBudget = (order: ProductionOrder) => {
+    setActiveTab("board");
+    setOpen(order);
   };
 
   return (
@@ -94,7 +100,7 @@ export default function ProductionPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="budgets" className="min-w-0 max-w-full">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="min-w-0 max-w-full">
         <TabsList className="grid h-auto w-full grid-cols-3 gap-1 p-1 md:inline-flex md:w-auto">
           <TabsTrigger value="budgets" className="min-h-10 gap-1.5 px-2 text-xs md:text-sm">
             <Calculator className="h-4 w-4" />
@@ -110,7 +116,7 @@ export default function ProductionPage() {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="budgets" className="mt-4">
-          <BudgetPanel onOpenOrder={(order) => { setOpen(order); }} />
+          <BudgetPanel onOpenOrder={handleOpenOrderFromBudget} />
         </TabsContent>
         <ErrorBoundary
           fallback={
