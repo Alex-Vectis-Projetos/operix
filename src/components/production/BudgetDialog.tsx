@@ -2914,8 +2914,9 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent
-                      className="w-[calc(100vw-48px)] sm:w-[640px] p-0 shadow-2xl border border-slate-700 bg-slate-900 z-[100]"
+                      className="w-[calc(100vw-48px)] sm:w-[640px] p-0 shadow-2xl border border-slate-700 bg-slate-900 z-[1200]"
                       align="start"
+                      sideOffset={4}
                       onWheel={(e) => e.stopPropagation()}
                     >
                       <div className="flex items-center border-b border-slate-800 px-3 py-2 gap-2">
