@@ -56,6 +56,7 @@ export async function updateMemberMembershipOnly(
   data: {
     role?: string | null;
     status?: string;
+    permissionsOverrides?: Prisma.InputJsonValue | null;
   }
 ) {
   return tx.membership.update({
@@ -63,6 +64,9 @@ export async function updateMemberMembershipOnly(
     data: {
       role: data.role ?? undefined,
       status: data.status ?? undefined,
+      ...(data.permissionsOverrides !== undefined
+        ? { permissionsOverrides: data.permissionsOverrides as Prisma.InputJsonValue }
+        : {}),
     },
     select: {
       id: true,
@@ -70,6 +74,7 @@ export async function updateMemberMembershipOnly(
       status: true,
       userId: true,
       workspaceId: true,
+      permissionsOverrides: true,
     },
   });
 }

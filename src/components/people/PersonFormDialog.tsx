@@ -7,7 +7,10 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus, Trash2, UploadCloud, Sparkles, CheckCircle2, Paperclip } from "lucide-react";
+import { Loader2, Plus, Trash2, UploadCloud, Sparkles, CheckCircle2, Paperclip, Shield, KeyRound, Copy, Check, UserPlus, UserX } from "lucide-react";
+import { useWorkspace } from "@/hooks/useWorkspace";
+import { UserPermissionsDialog } from "@/components/permissions/UserPermissionsDialog";
+import { Badge } from "@/components/ui/badge";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/api";
 import { uploadFile } from "@/lib/storage";
@@ -71,6 +74,64 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
 
   const { locations } = useLocations({ status: "active" });
   const { data: assignableUsers } = useAssignableUsers();
+  const { workspaceId, members } = useWorkspace();
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [creatingAccess, setCreatingAccess] = useState(false);
+  const [tempCredentials, setTempCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [selectedRoleForAccess, setSelectedRoleForAccess] = useState<string>("technician");
+
+  const linkedMember = useMemo(() => {
+    if (!form.system_access_user_id || !members) return null;
+    return members.find(
+      (m) => m.auth_user_id === form.system_access_user_id || m.app_user_id === form.system_access_user_id
+    );
+  }, [form.system_access_user_id, members]);
+
+  const handleCreateAccess = async () => {
+    if (!form.email || !form.full_name) {
+      toast({ title: "Nome e E-mail são obrigatórios para criar acesso.", variant: "destructive" });
+      return;
+    }
+    if (!workspaceId) {
+      toast({ title: "Workspace ativo não encontrado.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      setCreatingAccess(true);
+      const res = await apiRequest<{
+        member: { membership_id: string; auth_user_id: string; email: string; name: string };
+        temp_password: string;
+      }>("/workspaces/" + workspaceId + "/members", {
+        method: "POST",
+        body: JSON.stringify({
+          email: form.email,
+          fullName: form.full_name,
+          role: selectedRoleForAccess,
+        }),
+      });
+
+      set("system_access_user_id")(res.member.auth_user_id);
+      setTempCredentials({
+        email: res.member.email,
+        tempPassword: res.temp_password,
+      });
+      qc.invalidateQueries({ queryKey: ["workspace-members", workspaceId] });
+      toast({
+        title: "Acesso criado com sucesso",
+        description: "Login gerado para " + res.member.email,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Erro ao criar acesso",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setCreatingAccess(false);
+    }
+  };
 
   useEffect(() => {
     if (open) {
@@ -96,7 +157,13 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
       );
       setSavedPerson(editing);
       setPendingOcrDoc(null);
+      setTempCredentials(null);
+      setPermissionsOpen(false);
       setErrors([]);
+      const defaultRole = editing?.type === "administrative" || defaultType === "administrative"
+        ? "admin"
+        : (editing?.type === "operations_manager" || defaultType === "operations_manager" ? "partner" : "technician");
+      setSelectedRoleForAccess(defaultRole);
     }
   }, [open, editing, defaultType]);
 
@@ -508,19 +575,170 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
                   <Label>Setor</Label>
                   <Input value={form.department ?? ""} onChange={(e) => set("department")(e.target.value)} />
                 </div>
-                <div className="col-span-2 space-y-1.5">
-                  <Label>Acesso ao sistema (usuário)</Label>
-                  <Select value={form.system_access_user_id ?? ""} onValueChange={(v) => set("system_access_user_id")(v)}>
-                    <SelectTrigger><SelectValue placeholder="Nenhum" /></SelectTrigger>
-                    <SelectContent>
-                      {assignableUsers.map((u) => (
-                        <SelectItem key={u.user_id} value={u.user_id}>{u.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
               </>
             )}
+
+            {/* Seção Unificada: Acesso ao Sistema e Credenciais (Para todos os tipos) */}
+            <div className="col-span-2 rounded-lg border border-border/80 bg-card/60 p-4 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                  <KeyRound className="h-4 w-4 text-primary" />
+                  Acesso ao Sistema (Login)
+                </Label>
+                {linkedMember ? (
+                  <Badge variant="outline" className="text-xs bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-medium">
+                    Usuário Vinculado
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-xs text-muted-foreground">
+                    Sem Acesso Direto
+                  </Badge>
+                )}
+              </div>
+
+              {linkedMember ? (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-md bg-muted/30 border border-border/50">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">{linkedMember.name || linkedMember.email}</span>
+                      <Badge variant="secondary" className="text-[10px] font-mono">
+                        {linkedMember.role_label || linkedMember.role}
+                      </Badge>
+                      <Badge variant={linkedMember.status === "active" ? "default" : "secondary"} className="text-[10px]">
+                        {linkedMember.status === "active" ? "Ativo" : "Inativo"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground font-mono">{linkedMember.email}</p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setPermissionsOpen(true)}
+                      className="gap-1.5 h-8 text-xs border-primary/30 hover:bg-primary/10"
+                    >
+                      <Shield className="h-3.5 w-3.5 text-primary" />
+                      Permissões
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => set("system_access_user_id")("")}
+                      className="gap-1.5 h-8 text-xs text-muted-foreground hover:text-destructive"
+                    >
+                      <UserX className="h-3.5 w-3.5" />
+                      Desvincular
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {tempCredentials ? (
+                    <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                          <CheckCircle2 className="h-4 w-4" /> Credenciais Criadas com Sucesso!
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const credText = "Login: " + tempCredentials.email + "\nSenha temporaria: " + tempCredentials.tempPassword;
+                            navigator.clipboard.writeText(credText);
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 2500);
+                            toast({ title: "Copiado para a área de transferência" });
+                          }}
+                          className="h-7 text-xs gap-1 border-emerald-500/30"
+                        >
+                          {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          {copied ? "Copiado!" : "Copiar Acesso"}
+                        </Button>
+                      </div>
+                      <div className="text-xs space-y-1 font-mono bg-background/80 p-2 rounded border border-emerald-500/20">
+                        <p><span className="text-muted-foreground">E-mail:</span> {tempCredentials.email}</p>
+                        <p><span className="text-muted-foreground">Senha:</span> <span className="font-bold text-foreground">{tempCredentials.tempPassword}</span></p>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Informe estas credenciais ao colaborador para o primeiro login no sistema ou app.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                      {/* Opção A: Criar Login Imediato */}
+                      <div className="p-3 rounded-md border border-border/60 bg-muted/20 space-y-2.5">
+                        <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                          <UserPlus className="h-3.5 w-3.5 text-primary" /> Criar Novo Acesso
+                        </span>
+                        <div className="space-y-1.5">
+                          <Label className="text-[11px] text-muted-foreground">Papel no Workspace</Label>
+                          <Select value={selectedRoleForAccess} onValueChange={setSelectedRoleForAccess}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="technician">Técnico / Operacional</SelectItem>
+                              <SelectItem value="partner">Parceiro / Gestor</SelectItem>
+                              <SelectItem value="admin">Administrador</SelectItem>
+                              <SelectItem value="client">Cliente</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={handleCreateAccess}
+                          disabled={creatingAccess || !form.email || !form.full_name}
+                          className="w-full h-8 text-xs gap-1.5"
+                        >
+                          {creatingAccess ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                          Gerar Credenciais
+                        </Button>
+                        {(!form.email || !form.full_name) && (
+                          <p className="text-[10px] text-muted-foreground">
+                            * Preencha o Nome e o E-mail acima para gerar credenciais.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Opção B: Vincular Usuário Existente */}
+                      <div className="p-3 rounded-md border border-border/60 bg-muted/20 space-y-2.5">
+                        <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                          <Paperclip className="h-3.5 w-3.5 text-muted-foreground" /> Vincular Conta Existente
+                        </span>
+                        <div className="space-y-1.5">
+                          <Label className="text-[11px] text-muted-foreground">Selecionar Usuário</Label>
+                          <Select
+                            value={form.system_access_user_id || "none"}
+                            onValueChange={(v) => set("system_access_user_id")(v === "none" ? "" : v)}
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="Selecione um usuário..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Nenhum / Desvinculado</SelectItem>
+                              {assignableUsers.map((u) => (
+                                <SelectItem key={u.user_id} value={u.user_id}>
+                                  {u.name} ({u.email || "Sem e-mail"})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Vincula este colaborador a uma conta de usuário já registrada.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             {requiresLocation && (
               <>
@@ -596,6 +814,17 @@ export function PersonFormDialog({ open, onOpenChange, editing, defaultType, onS
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {permissionsOpen && (
+        <UserPermissionsDialog
+          open={permissionsOpen}
+          onOpenChange={setPermissionsOpen}
+          userId={form.system_access_user_id}
+          membershipId={linkedMember?.membership_id}
+          userName={form.full_name}
+          userRole={linkedMember?.role}
+        />
+      )}
     </Dialog>
   );
 }

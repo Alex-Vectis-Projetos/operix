@@ -329,6 +329,32 @@ peopleRouter.patch("/:id", async (req: AuthenticatedRequest, res: Response, next
             })),
         });
       }
+      if (body.status !== undefined && (body.status === "inactive" || body.status === "active")) {
+        const targetUserId = body.system_access_user_id !== undefined ? body.system_access_user_id : existing.systemAccessUserId;
+        if (targetUserId && existing.workspaceId) {
+          const targetAppUser = await tx.appUser.findFirst({
+            where: {
+              OR: [
+                { authUserId: targetUserId },
+                { id: targetUserId },
+              ],
+            },
+            select: { id: true },
+          });
+          if (targetAppUser) {
+            await tx.membership.updateMany({
+              where: {
+                workspaceId: existing.workspaceId,
+                userId: targetAppUser.id,
+              },
+              data: {
+                status: body.status === "inactive" ? "inactive" : "active",
+              },
+            });
+          }
+        }
+      }
+
       return tx.person.update({
         where: { id },
         data,
@@ -353,9 +379,32 @@ peopleRouter.delete("/:id", async (req: AuthenticatedRequest, res: Response, nex
     if (!existing) return res.status(404).json({ message: "Pessoa não encontrada." });
     assertTenantAccess(req.ctx!, existing.workspaceId);
 
-    await prisma.person.update({
-      where: { id },
-      data: { deletedAt: new Date(), deletedBy: req.auth?.userId ?? null },
+    await prisma.$transaction(async (tx) => {
+      await tx.person.update({
+        where: { id },
+        data: { deletedAt: new Date(), deletedBy: req.auth?.userId ?? null },
+      });
+
+      if (existing.systemAccessUserId && existing.workspaceId) {
+        const targetAppUser = await tx.appUser.findFirst({
+          where: {
+            OR: [
+              { authUserId: existing.systemAccessUserId },
+              { id: existing.systemAccessUserId },
+            ],
+          },
+          select: { id: true },
+        });
+        if (targetAppUser) {
+          await tx.membership.updateMany({
+            where: {
+              workspaceId: existing.workspaceId,
+              userId: targetAppUser.id,
+            },
+            data: { status: "inactive" },
+          });
+        }
+      }
     });
     return res.json({ deleted: 1 });
   } catch (err) {

@@ -19,15 +19,17 @@ import { apiRequest } from "@/lib/api";
 import { useAuth } from "./useAuth";
 import type { BrandConfig } from "@/components/layout/BrandNameEditor";
 
-interface WorkspaceMember {
+export interface WorkspaceMember {
   auth_user_id: string;
   app_user_id: string;
   name: string | null;
   email: string;
   phone: string | null;
   role: string;
+  role_label?: string;
   status: string;
   membership_id: string;
+  permissions_overrides?: Record<string, boolean> | null;
 }
 
 export type MembershipRole = "admin" | "tecnico" | "cliente" | "socio";

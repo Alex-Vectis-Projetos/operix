@@ -38,6 +38,7 @@ type EffectiveAccessContext = {
       memberships: Array<{
         workspaceId: string;
         role: string;
+        permissionsOverrides: Prisma.JsonValue | null;
         workspace: { ownerUserId: string; name: string };
       }>;
     } | null;
@@ -46,6 +47,12 @@ type EffectiveAccessContext = {
   membershipRole: PermissionRole | null;
   effectiveDbRole: PermissionRole | null;
   isWorkspaceOwner: boolean;
+  currentMembership: {
+    workspaceId: string;
+    role: string;
+    permissionsOverrides: Prisma.JsonValue | null;
+    workspace: { ownerUserId: string; name: string };
+  } | null;
 };
 
 function toDisplayRole(role: string | null) {
@@ -101,6 +108,7 @@ async function resolveEffectiveAccessContext(
             select: {
               workspaceId: true,
               role: true,
+              permissionsOverrides: true,
               workspace: {
                 select: {
                   ownerUserId: true,
@@ -144,6 +152,7 @@ async function resolveEffectiveAccessContext(
     membershipRole,
     effectiveDbRole,
     isWorkspaceOwner,
+    currentMembership,
   };
 }
 
@@ -444,7 +453,29 @@ accountRouter.get("/permissions", async (req: AuthenticatedRequest, res: Respons
     const targetUserId = userId ?? req.auth!.userId;
 
     if (targetUserId !== req.auth!.userId && req.auth!.role !== "admin") {
-      return res.status(403).json({ message: "Forbidden." });
+      if (!workspaceId) {
+        return res.status(403).json({ message: "Forbidden." });
+      }
+      const callerAppUser = await prisma.appUser.findUnique({
+        where: { authUserId: req.auth!.userId },
+        select: { id: true },
+      });
+      if (!callerAppUser) {
+        return res.status(403).json({ message: "Forbidden." });
+      }
+      const callerMembership = await prisma.membership.findFirst({
+        where: {
+          workspaceId,
+          userId: callerAppUser.id,
+          status: "active",
+        },
+        select: { role: true, workspace: { select: { ownerUserId: true } } },
+      });
+      const isOwner = callerMembership?.workspace.ownerUserId === callerAppUser.id;
+      const isAdmin = callerMembership?.role === "admin";
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ message: "Forbidden." });
+      }
     }
 
     const access = await resolveEffectiveAccessContext(targetUserId, workspaceId ?? null);
@@ -452,12 +483,16 @@ accountRouter.get("/permissions", async (req: AuthenticatedRequest, res: Respons
       return res.status(404).json({ message: "User not found." });
     }
 
-    const permissions = buildPermissionsForRole(access.effectiveDbRole);
+    const permissions = buildPermissionsForRole(
+      access.effectiveDbRole,
+      access.currentMembership?.permissionsOverrides as Record<string, boolean> | null
+    );
     return res.json({
       role: access.effectiveDbRole,
       membership_role: access.membershipRole,
       is_workspace_owner: access.isWorkspaceOwner,
       workspace_id: access.currentWorkspaceId,
+      permissions_overrides: access.currentMembership?.permissionsOverrides ?? null,
       ...permissions,
     });
   } catch (error) {

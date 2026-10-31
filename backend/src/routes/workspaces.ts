@@ -40,7 +40,8 @@ const createWorkspaceMemberSchema = z.object({
 const updateWorkspaceMemberSchema = z.object({
   role: workspaceMemberRoleSchema.optional(),
   status: z.enum(["active", "inactive"]).optional(),
-}).refine((value) => value.role !== undefined || value.status !== undefined, {
+  permissions_overrides: z.record(z.boolean()).nullable().optional(),
+}).refine((value) => value.role !== undefined || value.status !== undefined || value.permissions_overrides !== undefined, {
   message: "No changes requested.",
 });
 
@@ -397,6 +398,7 @@ workspaceRouter.get("/:workspaceId/members", async (req: AuthenticatedRequest, r
         role: true,
         status: true,
         userId: true,
+        permissionsOverrides: true,
         user: {
           select: {
             id: true,
@@ -457,6 +459,7 @@ workspaceRouter.get("/:workspaceId/members", async (req: AuthenticatedRequest, r
           role_label: toWorkspaceRoleLabel(normalizedRole, isWorkspaceOwner),
           status: isActive ? "active" : "inactive",
           membership_status: membership.status,
+          permissions_overrides: membership.permissionsOverrides,
           avatar_url: membership.user.user?.profile?.avatarUrl ?? null,
           last_access_at: lastSeenByAuthUserId.get(membership.user.authUserId) ?? null,
           is_workspace_owner: isWorkspaceOwner,
@@ -637,6 +640,7 @@ workspaceRouter.patch("/:workspaceId/members/:membershipId", async (req: Authent
       const nextMembership = await updateMemberMembershipOnly(tx, membership.id, {
         role: normalizedRole,
         status: input.status,
+        permissionsOverrides: input.permissions_overrides,
       });
 
       return nextMembership;
@@ -648,6 +652,7 @@ workspaceRouter.patch("/:workspaceId/members/:membershipId", async (req: Authent
         role: normalizedRole ?? normalizeWorkspaceRole(updated.role) ?? updated.role,
         role_label: toWorkspaceRoleLabel(normalizedRole ?? normalizeWorkspaceRole(updated.role)),
         status: updated.status === "active" ? "active" : "inactive",
+        permissions_overrides: updated.permissionsOverrides,
       },
     });
   } catch (error) {

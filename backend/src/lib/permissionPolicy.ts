@@ -221,7 +221,10 @@ export function normalizePermissionRole(role: string | null | undefined): Permis
   }
 }
 
-export function buildPermissionsForRole(role: string | null | undefined) {
+export function buildPermissionsForRole(
+  role: string | null | undefined,
+  overrides?: Record<string, boolean> | null
+) {
   const normalizedRole = normalizePermissionRole(role);
   const rules = normalizedRole === "owner" ? OWNER_RULES : (normalizedRole ? ROLE_RULES[normalizedRole] : undefined) ?? [];
   const map: Record<string, PermissionEntry> = {};
@@ -229,22 +232,20 @@ export function buildPermissionsForRole(role: string | null | undefined) {
   for (const key of KNOWN_PERMISSION_KEYS) {
     const [module, action] = key.split(".");
     const matchingRule = rules.find((rule) => ruleAllows(rule, module, action));
+    const roleAllowed = Boolean(matchingRule);
 
-    map[key] = matchingRule
-      ? {
-          allowed: true,
-          scope: matchingRule.scope ?? "all",
-          source: "role",
-        }
-      : {
-          allowed: false,
-          scope: null,
-          source: "default-deny",
-        };
+    const hasOverride = overrides && typeof (overrides as Record<string, unknown>)[key] === "boolean";
+    const allowed = hasOverride ? Boolean((overrides as Record<string, unknown>)[key]) : roleAllowed;
+
+    map[key] = {
+      allowed,
+      scope: allowed ? (matchingRule?.scope ?? "all") : null,
+      source: hasOverride ? "role" : (roleAllowed ? "role" : "default-deny"),
+    };
   }
 
   return {
     admin: normalizedRole === "owner",
     map,
   };
-}
+};
