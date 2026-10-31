@@ -1797,6 +1797,13 @@ export function buildProtocoleDeReparationPdf(
 
   content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 420 ${aY + 20} Td (${pdfEscapeWinAnsi(lblBoxSig)}) Tj ET`);
   content.push(`0.8 0.82 0.86 RG 0.5 w 420 ${aY + 8} 125 10 re s`);
+  const sig = rev?.signature;
+  if (sig && (sig.signed || sig.signedAt)) {
+    const signer = sig.signerName || budget.clientName || clientSnap.name || "Client";
+    const dateStr = (sig.signedAt || "").slice(0, 10);
+    const method = sig.confirmationMethod === "EXPLICIT_CONFIRMATION" ? (lang === "fr" ? "Valide" : "Aprovado") : (lang === "fr" ? "Signe" : "Assinado");
+    content.push(`BT 0.08 0.55 0.25 rg /F2 5.5 Tf 424 ${aY + 10.5} Td (${pdfEscapeWinAnsi(`[${method}: ${clipCell(signer, 14)} ${dateStr}]`)}) Tj ET`);
+  }
 
   // 6. MULTI-TENANT WHITELABEL FOOTER (Y: 45 -> 15)
   content.push("0.1 0.12 0.16 RG 1 w");

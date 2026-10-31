@@ -285,6 +285,7 @@ const approveRevisionSchema = z.object({
   notes: z.string().max(2000).optional(),
   dueAt: z.string().datetime().optional().nullable(),
   operationalSiteKey: z.string().optional().nullable(),
+  signature: z.any().optional().nullable(),
 });
 
 const rejectRevisionSchema = z.object({
@@ -815,6 +816,7 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
         notes: input.notes,
         dueAt: input.dueAt,
         operationalSiteKey: input.operationalSiteKey,
+        signature: input.signature,
       }
     );
 
@@ -1199,7 +1201,7 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
     }
     assertObjectAccess(ctx, budget);
 
-    const rev = budget.currentRevision || budget.approvedRevision;
+    const rev = budget.approvedRevision || budget.currentRevision;
     if (!rev) {
       return res.status(409).json({ message: "Orçamento sem revisão corrente." });
     }
@@ -1253,7 +1255,7 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
     }
     assertObjectAccess(ctx, budget);
 
-    const rev = budget.currentRevision || budget.approvedRevision;
+    const rev = budget.approvedRevision || budget.currentRevision;
     if (!rev) {
       return res.status(409).json({ message: "Orçamento sem revisão corrente." });
     }

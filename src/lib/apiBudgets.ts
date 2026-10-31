@@ -52,6 +52,8 @@ export interface UpdateBudgetRevisionInput {
 export interface ApproveBudgetRevisionOptions {
   notes?: string;
   dueAt?: string | null;
+  operationalSiteKey?: string | null;
+  signature?: any;
 }
 
 export interface ApiBudgetRevision {

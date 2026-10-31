@@ -246,7 +246,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           const res = await approveBudgetMutation.mutateAsync({
             budgetId: b.id,
             revisionId: targetRevisionId,
-            options: { notes: b.diagnosis || undefined },
+            options: { notes: b.diagnosis || undefined, signature: b.signature },
           });
           if (res?.productionOrder && onOpenOrder) {
             onOpenOrder(res.productionOrder);
@@ -267,7 +267,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           const res = await approveBudgetMutation.mutateAsync({
             budgetId: createdBudgetId,
             revisionId: createdRevId,
-            options: { notes: b.diagnosis || undefined },
+            options: { notes: b.diagnosis || undefined, signature: b.signature },
           });
           if (res?.productionOrder && onOpenOrder) {
             onOpenOrder(res.productionOrder);
