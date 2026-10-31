@@ -1237,8 +1237,14 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const { data: catalogItems = [], isLoading: isCatalogLoading } = useServiceCatalogItems();
 
   const [pdfLang, setPdfLang] = useState<"pt" | "fr" | "en">(() => {
-    return langDisplay === "fr" ? "fr" : "pt";
+    return (lang as any) === "fr" ? "fr" : (lang as any) === "en" ? "en" : "pt";
   });
+
+  useEffect(() => {
+    if (lang === "fr" || lang === "pt" || lang === "en") {
+      setPdfLang(lang);
+    }
+  }, [lang]);
 
   // ─── Integração Cliente → Orçamento ───
   type BudgetClient = {

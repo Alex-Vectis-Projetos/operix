@@ -439,9 +439,9 @@ export const PDF_I18N = {
 export function buildProtocoleDeReparationHtml(
   b: Budget,
   workspaceInfo?: WorkspaceBrandInfo,
-  lang: PdfLanguage = "fr",
+  lang: PdfLanguage = "pt",
 ): string {
-  const i18n = PDF_I18N[lang] || PDF_I18N.fr;
+  const i18n = PDF_I18N[lang] || PDF_I18N.pt;
   const brand = workspaceInfo?.brandConfig || {};
   const companyName = brand.legalName || brand.name || workspaceInfo?.name || "PDR-Team SAS";
   const tagline = brand.tagline || i18n.defaultTagline;

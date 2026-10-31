@@ -300,8 +300,14 @@ export function deleteBudget(id: string): Promise<{ success: boolean; id: string
   });
 }
 
-export function getBudgetPdf(id: string, lang?: "pt" | "fr" | "en"): Promise<Blob> {
-  const query = lang ? `?lang=${encodeURIComponent(lang)}` : "";
+export function getBudgetPdf(id: string, lang?: string): Promise<Blob> {
+  let resolvedLang = lang;
+  if (!resolvedLang && typeof window !== "undefined") {
+    try {
+      resolvedLang = localStorage.getItem("qwork-lang") || undefined;
+    } catch {}
+  }
+  const query = resolvedLang ? `?lang=${encodeURIComponent(resolvedLang)}` : "";
   return apiBlobRequest(`/budgets/${id}/pdf${query}`);
 }
 

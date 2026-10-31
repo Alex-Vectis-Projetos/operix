@@ -210,7 +210,9 @@ budgetsRouter.get("/public-sign/:token/pdf", async (req: Request, res: Response,
       include: { damagePoints: true },
     });
 
-    const lang = (req.query.lang as "pt" | "fr" | "en") || "fr";
+    const lang = (typeof req.query.lang === "string" && req.query.lang.trim())
+      ? req.query.lang.trim()
+      : ((req.headers["accept-language"]?.split(",")[0]?.split(";")[0]?.trim()) || "pt");
     const pdfBuffer = await generateBudgetPdfBuffer(budget, revision, budget.workspace, inspection, lang);
 
     res.setHeader("Content-Type", "application/pdf");
@@ -1218,7 +1220,9 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
       }),
     ]);
 
-    const lang = (req.query.lang as "pt" | "fr" | "en") || "fr";
+    const lang = (typeof req.query.lang === "string" && req.query.lang.trim())
+      ? req.query.lang.trim()
+      : ((req.headers["accept-language"]?.split(",")[0]?.split(";")[0]?.trim()) || "pt");
     const pdfBuffer = await generateBudgetPdfBuffer(budget, rev, workspace, inspection, lang);
 
     res.setHeader("Content-Type", "application/pdf");
@@ -1290,7 +1294,11 @@ budgetsRouter.post("/:id/send-email", async (req: Request, res: Response, next: 
           include: { damagePoints: true },
         }),
       ]);
-      const mailLang = (req.query.lang as "pt" | "fr" | "en") || (req.body?.lang as "pt" | "fr" | "en") || "fr";
+      const mailLang = (typeof req.query.lang === "string" && req.query.lang.trim())
+        ? req.query.lang.trim()
+        : (typeof req.body?.lang === "string" && req.body.lang.trim())
+          ? req.body.lang.trim()
+          : ((req.headers["accept-language"]?.split(",")[0]?.split(";")[0]?.trim()) || "pt");
       pdfBuf = await generateBudgetPdfBuffer(budget, rev, workspace, inspection, mailLang);
     } catch {
       const pdfLines = [

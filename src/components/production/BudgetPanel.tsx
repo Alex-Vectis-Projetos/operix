@@ -304,7 +304,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       return;
     }
     try {
-      const blob = await getBudgetPdf(b.id);
+      const blob = await getBudgetPdf(b.id, lang);
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank", "noopener,noreferrer");
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -316,7 +316,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const downloadBudgetFile = async (b: Budget) => {
     if (b.id && !b.id.startsWith("local-")) {
       try {
-        const blob = await getBudgetPdf(b.id);
+        const blob = await getBudgetPdf(b.id, lang);
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
