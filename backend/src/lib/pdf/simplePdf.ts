@@ -1517,6 +1517,9 @@ export function buildProtocoleDeReparationPdf(
   let curY = 644;
   const rowH = 9.5;
   const allServices: any[] = Array.isArray(rev?.services) ? rev?.services : [];
+  const allParts: any[] = Array.isArray(rev?.parts) ? rev?.parts : [];
+  const allLabor: any[] = Array.isArray(rev?.labor) ? rev?.labor : [];
+  const allItems: any[] = [...allServices, ...allParts, ...allLabor];
   const damagePoints: any[] = Array.isArray(inspection?.damagePoints) ? inspection?.damagePoints : [];
 
   let grandUt = 0;
@@ -1536,18 +1539,22 @@ export function buildProtocoleDeReparationPdf(
     for (const p of zone.parts) {
       const partLabel = (p.label as any)[lang] || (p.label as any).fr;
       const pts = damagePoints.filter((dp) => dp.carPartCode === p.code || p.match.some((m) => String(dp.carPartCode).toLowerCase().includes(m)));
-      const svc = allServices.find((s) => p.match.some((m) => String(s.description || "").toLowerCase().includes(m)));
+      const svc = allItems.find((s) => p.match.some((m) => String(s.description || "").toLowerCase().includes(m)) || (s.code && s.code === p.code));
 
       let dents = pts.reduce((sum, pt) => sum + (Number(pt.dentCount) || 1), 0);
       let isAlu = pts.some((pt) => pt.partMaterial === "aluminum") || String(svc?.description || "").includes("[ALU]");
       let isColle = String(svc?.description || "").toLowerCase().includes("colle") || String(svc?.description || "").toLowerCase().includes("cola");
       let isDap = String(svc?.description || "").toLowerCase().includes("dap");
       let isPaint = pts.some((pt) => pt.damageType === "paint_damage") || String(svc?.description || "").toLowerCase().includes("peint") || String(svc?.description || "").toLowerCase().includes("pintura");
-      let isNew = pts.some((pt) => pt.damageType === "replace");
+      let isNew = pts.some((pt) => pt.damageType === "replace") || String(svc?.description || "").toLowerCase().includes("substitu") || String(svc?.description || "").toLowerCase().includes("remplac");
 
       if (dents === 0 && svc) {
-        const m = String(svc.description || "").match(/(\d+)\s*mossa/i);
-        if (m) dents = parseInt(m[1], 10);
+        const m = String(svc.description || "").match(/(\d+)\s*(?:mossa|mossas|dents|dent|bosse|bosses)/i);
+        if (m) {
+          dents = parseInt(m[1], 10);
+        } else if (Number(svc.quantity) > 1 && !svc.pricing_mode) {
+          dents = Number(svc.quantity);
+        }
       }
 
       let baseUt = 0;
@@ -1621,20 +1628,61 @@ export function buildProtocoleDeReparationPdf(
   content.push(`BT 1 1 1 rg /F2 6 Tf 485 ${curY + 3} Td (${pdfEscapeWinAnsi(lblPaintComment)}) Tj ET`);
   curY -= 10;
 
-  const paintElements = [
-    { name: i18n.paintElemHood, t2: "1 H", p: "3 H", ing: "3 H" },
-    { name: i18n.paintElemTrunk, t2: "1 H", p: "1 H", ing: "1 H" },
-    { name: i18n.paintElemRail, t2: "1 H", p: "1 H", ing: "1 H" },
-  ];
-  for (const pe of paintElements) {
+  const laborRows: { name: string; t1: string; t2: string; p: string; ing: string; comm: string; totalHours: number; totalPrice: number }[] = [];
+
+  for (const l of allLabor) {
+    const hours = Number(l.hours || l.quantity || 1);
+    const rate = Number(l.hourly_rate || l.unit_price || 47);
+    const lineTotal = hours * rate;
+    laborRows.push({
+      name: clipCell(String(l.description || l.name || "Mão de obra"), 26),
+      t1: "-",
+      t2: `${hours.toFixed(1)} H`,
+      p: "-",
+      ing: "-",
+      comm: `${lineTotal.toFixed(2)} EUR`,
+      totalHours: hours,
+      totalPrice: lineTotal,
+    });
+  }
+
+  if (laborRows.length === 0) {
+    const paintServices = allServices.filter(s => String(s.description || "").toLowerCase().includes("pintura") || String(s.description || "").toLowerCase().includes("peint"));
+    if (paintServices.length > 0) {
+      for (const ps of paintServices) {
+        const pr = Number(ps.unit_price || 0);
+        laborRows.push({
+          name: clipCell(String(ps.description), 26),
+          t1: "-",
+          t2: "-",
+          p: "1 H",
+          ing: "-",
+          comm: `${pr.toFixed(2)} EUR`,
+          totalHours: 1,
+          totalPrice: pr,
+        });
+      }
+    } else {
+      laborRows.push(
+        { name: i18n.paintElemHood, t1: "-", t2: "1 H", p: "3 H", ing: "3 H", comm: "-", totalHours: 7, totalPrice: 141 },
+        { name: i18n.paintElemTrunk, t1: "-", t2: "1 H", p: "1 H", ing: "1 H", comm: "-", totalHours: 3, totalPrice: 94 },
+        { name: i18n.paintElemRail, t1: "-", t2: "1 H", p: "1 H", ing: "1 H", comm: "-", totalHours: 3, totalPrice: 94 },
+      );
+    }
+  }
+
+  const totalLaborHours = laborRows.reduce((s, r) => s + r.totalHours, 0);
+  const totalLaborPrice = laborRows.reduce((s, r) => s + r.totalPrice, 0);
+
+  for (const pe of laborRows.slice(0, 4)) {
     content.push("0.85 0.88 0.9 RG 0.3 w");
     content.push(`40 ${curY} 515 9 re s`);
     content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 44 ${curY + 2.5} Td (${pdfEscapeWinAnsi(pe.name)}) Tj ET`);
-    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 175 ${curY + 2.5} Td (-) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 175 ${curY + 2.5} Td (${pe.t1}) Tj ET`);
     content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 240 ${curY + 2.5} Td (${pe.t2}) Tj ET`);
     content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 330 ${curY + 2.5} Td (${pe.p}) Tj ET`);
     content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 420 ${curY + 2.5} Td (${pe.ing}) Tj ET`);
-    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 485 ${curY + 2.5} Td (-) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 485 ${curY + 2.5} Td (${pe.comm}) Tj ET`);
     curY -= 9;
   }
 
@@ -1646,9 +1694,9 @@ export function buildProtocoleDeReparationPdf(
   content.push(`40 ${curY} 515 9 re s`);
   content.push(`BT 0.1 0.12 0.16 rg /F2 5.5 Tf 44 ${curY + 2.5} Td (${pdfEscapeWinAnsi(lblSum)}) Tj ET`);
   content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 175 ${curY + 2.5} Td (-) Tj ET`);
-  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 240 ${curY + 2.5} Td (3 H) Tj ET`);
-  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 330 ${curY + 2.5} Td (5 H) Tj ET`);
-  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 420 ${curY + 2.5} Td (5 H) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 240 ${curY + 2.5} Td (${totalLaborHours.toFixed(1)} H) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 330 ${curY + 2.5} Td (-) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 420 ${curY + 2.5} Td (-) Tj ET`);
   curY -= 9;
 
   // Total row
@@ -1657,10 +1705,10 @@ export function buildProtocoleDeReparationPdf(
   content.push("0.75 0.78 0.82 RG 0.4 w");
   content.push(`40 ${curY} 515 9 re s`);
   content.push(`BT 0.1 0.12 0.16 rg /F2 5.5 Tf 44 ${curY + 2.5} Td (Total) Tj ET`);
-  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 230 ${curY + 2.5} Td (141.00 EUR) Tj ET`);
-  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 320 ${curY + 2.5} Td (180.00 EUR) Tj ET`);
-  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 410 ${curY + 2.5} Td (180.00 EUR) Tj ET`);
-  content.push(`BT 0.1 0.12 0.16 rg /F2 5.5 Tf 485 ${curY + 2.5} Td (501.00 EUR) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 230 ${curY + 2.5} Td (${totalLaborPrice.toFixed(2)} EUR) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 320 ${curY + 2.5} Td (-) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 5.5 Tf 410 ${curY + 2.5} Td (-) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 5.5 Tf 485 ${curY + 2.5} Td (${totalLaborPrice.toFixed(2)} EUR) Tj ET`);
   curY -= 11;
 
   // Total Peinture/MO Bar
@@ -1668,7 +1716,7 @@ export function buildProtocoleDeReparationPdf(
   content.push("0.1 0.12 0.16 rg");
   content.push(`40 ${curY} 515 10 re f`);
   content.push(`BT 1 1 1 rg /F2 6 Tf 44 ${curY + 2.5} Td (${pdfEscapeWinAnsi(lblPaintBar)}) Tj ET`);
-  content.push(`BT 1 1 1 rg /F2 6 Tf 485 ${curY + 2.5} Td (501.00 EUR) Tj ET`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 485 ${curY + 2.5} Td (${totalLaborPrice.toFixed(2)} EUR) Tj ET`);
   curY -= 14;
 
   // 5. SUMMARY 4 BOXES

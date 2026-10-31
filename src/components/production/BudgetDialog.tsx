@@ -1236,13 +1236,16 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const langDisplay = resolveInterventionDisplayLang(lang);
   const { data: catalogItems = [], isLoading: isCatalogLoading } = useServiceCatalogItems();
 
-  const [pdfLang, setPdfLang] = useState<"pt" | "fr" | "en">(() => {
-    return (lang as any) === "fr" ? "fr" : (lang as any) === "en" ? "en" : "pt";
+  const [pdfLang, setPdfLang] = useState<string>(() => {
+    const raw = (typeof window !== "undefined" ? localStorage.getItem("qwork-lang") : null) || (lang as string) || "pt";
+    const code = raw.toLowerCase().slice(0, 2);
+    return ["pt", "fr", "en", "es", "de", "it", "pl", "ru"].includes(code) ? code : "pt";
   });
 
   useEffect(() => {
-    if (lang === "fr" || lang === "pt" || lang === "en") {
-      setPdfLang(lang);
+    const code = ((lang as string) || "").toLowerCase().slice(0, 2);
+    if (["pt", "fr", "en", "es", "de", "it", "pl", "ru"].includes(code)) {
+      setPdfLang(code);
     }
   }, [lang]);
 
@@ -2287,40 +2290,19 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const viewBudgetPreview = async () => {
     setIsGeneratingPdf(true);
     try {
-      const isPdr =
-        form.budget_type === "pdr" ||
-        (form as any).budgetType === "pdr" ||
-        inspectionPoints.length > 0 ||
-        Boolean((form as any).vehicle_body_type) ||
-        (Array.isArray((form as any).services) && (form as any).services.some((s: any) => {
-          const d = String(s.description || s.name || "").toLowerCase();
-          return d.includes("dsp") || d.includes("pdr") || d.includes("mossa") || d.includes("bosse") || d.includes("grele") || d.includes("granizo");
-        }));
-
-      if (isPdr) {
-        // Visualização instantânea em tempo real com os dados correntes do formulário e idioma selecionado
-        openBudgetPreview(form as any, pdfLang, {
-          name: workspaceName,
-          logoUrl: logoUrl,
-          brandConfig: brandConfig,
-        });
-        // Salva estado em segundo plano sem interromper a visualização
-        persistCurrentState(false).catch((e) => console.error("Auto-save na visualização:", e));
-      } else {
-        const targetId = await persistCurrentState(false);
-        if (!targetId || targetId.startsWith("local-")) {
-          toast.error(
-            langDisplay === "fr"
-              ? "Impossible d'enregistrer le devis pour l'aperçu."
-              : "Não foi possível salvar o orçamento para visualização.",
-          );
-          return;
-        }
-        const blob = await getBudgetPdf(targetId, pdfLang);
-        const url = URL.createObjectURL(blob);
-        window.open(url, "_blank", "noopener,noreferrer");
-        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const targetId = await persistCurrentState(false);
+      if (!targetId || targetId.startsWith("local-")) {
+        toast.error(
+          langDisplay === "fr"
+            ? "Impossible d'enregistrer le devis pour l'aperçu."
+            : "Não foi possível salvar o orçamento para visualização.",
+        );
+        return;
       }
+      const blob = await getBudgetPdf(targetId, pdfLang);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error: any) {
       toast.error(error?.message || (langDisplay === "fr" ? "Impossible d'ouvrir l'aperçu." : "Não foi possível abrir a visualização."));
     } finally {
@@ -2461,27 +2443,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   };
 
   const downloadPDF = async () => {
-    const isPdr =
-      form.budget_type === "pdr" ||
-      (form as any).budgetType === "pdr" ||
-      inspectionPoints.length > 0 ||
-      Boolean((form as any).vehicle_body_type);
-
-    if (isPdr) {
-      downloadBudgetHtml(form as any, pdfLang, {
-        name: workspaceName,
-        logoUrl: logoUrl,
-        brandConfig: brandConfig,
-      });
-      toast.success(langDisplay === "fr" ? "Document téléchargé." : "Documento do orçamento baixado.");
-      persistCurrentState(false).catch(() => {});
-      return;
-    }
-
-    const downloaded = await triggerBudgetBlobDownload();
-    if (downloaded) {
-      toast.success(langDisplay === "fr" ? "PDF téléchargé." : "PDF baixado.");
-    }
+    await triggerBudgetBlobDownload();
   };
 
   const computeTotalsFor = (b: Budget) => {
@@ -4282,9 +4244,9 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                 </Button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {/* Seletor rápido de idioma do documento PDF (PT | FR | EN) */}
+                {/* Seletor rápido de idioma do documento PDF */}
                 <div className="flex items-center gap-0.5 bg-muted/60 p-0.5 rounded-md border border-slate-700/60 h-9" title="Idioma do documento PDF emitido">
-                  {(["pt", "fr", "en"] as const).map((l) => (
+                  {(["pt", "fr", "en", "es", "de", "it"] as const).map((l) => (
                     <Button
                       key={l}
                       type="button"

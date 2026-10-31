@@ -772,11 +772,10 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
 
     const isApproveInternalManager =
       ctx.platformRole === "platform_admin" ||
-      ctx.membershipRole === "owner" ||
-      ctx.membershipRole === "admin";
+      ctx.membershipRole !== "client";
 
-    // Apenas colaboradores externos do cliente exigem ClientAccessGrant explícito.
-    // Gestores internos do workspace (owner, admin, plataforma) têm autoridade comercial direta para aprovação.
+    // Apenas colaboradores externos do cliente (portal do cliente) exigem ClientAccessGrant explícito.
+    // Administradores e operadores internos do workspace têm autoridade comercial direta para aprovação.
     if (!isApproveInternalManager) {
       if (!budget.clientId) {
         throw new ForbiddenError("VALIDATOR_GRANT_REQUIRED: Orçamento sem cliente vinculado.");
@@ -873,8 +872,7 @@ budgetsRouter.post("/:id/revisions/:revisionId/reject", async (req: Request, res
 
     const isRejectInternalManager =
       ctx.platformRole === "platform_admin" ||
-      ctx.membershipRole === "owner" ||
-      ctx.membershipRole === "admin";
+      ctx.membershipRole !== "client";
 
     if (!isRejectInternalManager) {
       if (!budget.clientId) {

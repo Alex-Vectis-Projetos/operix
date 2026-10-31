@@ -36,6 +36,7 @@ export const WeeklogSignatureCanvas = forwardRef<
   const [hasDrawn, setHasDrawn] = useState(false);
   const hasDrawnRef = useRef(false);
   const lastCoordRef = useRef<{ x: number; y: number } | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
 
   // Resize canvas according to display width and devicePixelRatio
   const setupCanvas = useCallback(() => {
@@ -123,6 +124,11 @@ export const WeeklogSignatureCanvas = forwardRef<
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (disabled || e.button !== 0) return;
+    if (activePointerIdRef.current !== null && activePointerIdRef.current !== e.pointerId) {
+      return; // Ignore secondary touch / palm contact
+    }
+    activePointerIdRef.current = e.pointerId;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -160,6 +166,9 @@ export const WeeklogSignatureCanvas = forwardRef<
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing || disabled) return;
+    if (activePointerIdRef.current !== null && activePointerIdRef.current !== e.pointerId) {
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -178,13 +187,9 @@ export const WeeklogSignatureCanvas = forwardRef<
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 2.5;
 
-    // Use smooth continuous stroke
-    const midX = (last.x + x) / 2;
-    const midY = (last.y + y) / 2;
-
+    // Use direct continuous line segment between samples (prevents polygon artifacts)
     ctx.beginPath();
     ctx.moveTo(last.x, last.y);
-    ctx.quadraticCurveTo(last.x, last.y, midX, midY);
     ctx.lineTo(x, y);
     ctx.stroke();
 
@@ -192,6 +197,10 @@ export const WeeklogSignatureCanvas = forwardRef<
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activePointerIdRef.current !== null && activePointerIdRef.current !== e.pointerId) {
+      return;
+    }
+    activePointerIdRef.current = null;
     if (!isDrawing) return;
     setIsDrawing(false);
     lastCoordRef.current = null;
