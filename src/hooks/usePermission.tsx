@@ -58,7 +58,7 @@ function useMyPermissionsMap() {
 
   return useQuery({
     queryKey: [...PERMS_QUERY_KEY, permUserId, dbRole, isImpersonating, workspaceId],
-    enabled: !!permUserId && !authLoading && !roleLoading && !isWorkspaceLoading,
+    enabled: !!permUserId && !authLoading && !roleLoading && !isWorkspaceLoading && !!workspaceId,
     staleTime: 30_000,
     retry: 0,
     placeholderData: keepPreviousData,
@@ -100,10 +100,11 @@ export function usePermission(key: string): { allowed: boolean; isLoading: boole
   const { user, loading: authLoading } = useAuth();
   const workspace = useWorkspaceOptional();
   const isWorkspaceLoading = workspace?.isLoading ?? false;
-  const { data, isLoading, isPending } = useMyPermissionsMap();
+  const workspaceId = workspace?.workspaceId ?? null;
+  const { data, isLoading, isPending, isFetching } = useMyPermissionsMap();
 
   if (isAdmin) return { allowed: true, isLoading: false };
-  if (authLoading || !user || roleLoading || isWorkspaceLoading || isPending || (isLoading && !data) || !data) {
+  if (authLoading || !user || roleLoading || isWorkspaceLoading || !workspaceId || isPending || isFetching || (isLoading && !data) || !data) {
     return { allowed: false, isLoading: true };
   }
   if (data.admin) return { allowed: true, isLoading: false };
@@ -117,13 +118,14 @@ export function usePermissions(keys: string[]): { allowed: boolean; isLoading: b
   const { user, loading: authLoading } = useAuth();
   const workspace = useWorkspaceOptional();
   const isWorkspaceLoading = workspace?.isLoading ?? false;
-  const { data, isLoading, isPending } = useMyPermissionsMap();
+  const workspaceId = workspace?.workspaceId ?? null;
+  const { data, isLoading, isPending, isFetching } = useMyPermissionsMap();
 
   if (isAdmin) {
     const map = Object.fromEntries(keys.map((k) => [k, true]));
     return { allowed: true, isLoading: false, map };
   }
-  if (authLoading || !user || roleLoading || isWorkspaceLoading || isPending || (isLoading && !data) || !data) {
+  if (authLoading || !user || roleLoading || isWorkspaceLoading || !workspaceId || isPending || isFetching || (isLoading && !data) || !data) {
     return { allowed: false, isLoading: true, map: {} };
   }
   if (data.admin) {
@@ -152,14 +154,15 @@ export function useCan(): {
   const { user, loading: authLoading } = useAuth();
   const workspace = useWorkspaceOptional();
   const isWorkspaceLoading = workspace?.isLoading ?? false;
-  const { data, isLoading, isPending } = useMyPermissionsMap();
+  const workspaceId = workspace?.workspaceId ?? null;
+  const { data, isLoading, isPending, isFetching } = useMyPermissionsMap();
 
   const isResolving =
     authLoading ||
     !user ||
     roleLoading ||
     isWorkspaceLoading ||
-    (!isAdmin && (isPending || (isLoading && !data) || !data));
+    (!isAdmin && (!workspaceId || isPending || isFetching || (isLoading && !data) || !data));
 
   const can = (module: string, action: string): PermissionResult => {
     if (isAdmin) return { allowed: true, scope: "all" };

@@ -387,7 +387,7 @@ function formatBudget(b: any) {
     id: b.id,
     workspace_id: b.workspaceId,
     workspaceId: b.workspaceId,
-    status: b.approvedRevisionId || b.currentRevision?.status === "approved" ? "approved" : (b.currentRevision?.status || b.status || "draft"),
+    status: b.approvedRevisionId || b.currentRevision?.status === "approved" || (b.currentRevision?.signature as any)?.signed ? "approved" : (b.currentRevision?.status || b.status || "draft"),
     code: b.code,
     client_id: b.clientId,
     clientId: b.clientId,
@@ -464,6 +464,7 @@ budgetsRouter.get("/", async (req: Request, res: Response, next: NextFunction) =
       include: {
         currentRevision: true,
         approvedRevision: true,
+        productionOrder: true,
       },
       orderBy: { createdAt: "desc" },
     });
@@ -564,6 +565,7 @@ budgetsRouter.get("/:id/sign-link", async (req: Request, res: Response, next: Ne
       include: {
         currentRevision: true,
         approvedRevision: true,
+        productionOrder: true,
       },
     });
 
@@ -680,6 +682,7 @@ budgetsRouter.post("/", async (req: Request, res: Response, next: NextFunction) 
       include: {
         currentRevision: true,
         approvedRevision: true,
+        productionOrder: true,
       },
     });
 
@@ -764,8 +767,8 @@ budgetsRouter.post("/:id/revisions/:revisionId/approve", async (req: Request, re
     assertObjectAccess(ctx, budget);
 
     if (
-      (budget.technicianUserId && budget.technicianUserId === ctx.actorUserId) ||
-      ctx.membershipRole === "technician"
+      ctx.membershipRole === "technician" ||
+      (ctx.platformRole !== "platform_admin" && ctx.membershipRole !== "admin" && ctx.membershipRole !== "owner" && budget.technicianUserId === ctx.actorUserId)
     ) {
       throw new ForbiddenError(
         "TECH_SELF_APPROVAL_FORBIDDEN: O técnico executor não pode aprovar o próprio orçamento."
@@ -865,8 +868,8 @@ budgetsRouter.post("/:id/revisions/:revisionId/reject", async (req: Request, res
     assertObjectAccess(ctx, budget);
 
     if (
-      (budget.technicianUserId && budget.technicianUserId === ctx.actorUserId) ||
-      ctx.membershipRole === "technician"
+      ctx.membershipRole === "technician" ||
+      (ctx.platformRole !== "platform_admin" && ctx.membershipRole !== "admin" && ctx.membershipRole !== "owner" && budget.technicianUserId === ctx.actorUserId)
     ) {
       throw new ForbiddenError(
         "TECH_SELF_APPROVAL_FORBIDDEN: O técnico executor não pode rejeitar o próprio orçamento."
@@ -1194,6 +1197,7 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
       include: {
         currentRevision: true,
         approvedRevision: true,
+        productionOrder: true,
       },
     });
 

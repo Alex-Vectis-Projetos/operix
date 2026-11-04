@@ -1486,10 +1486,14 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const getAllowedInterventionsFor = (type: BudgetType | string | null | undefined): string[] => {
     if (!type || !isValidBudgetType(type)) return [];
     const legacyList = [...getInterventionsListFor(type, langDisplay)];
-    if (!catalogItems || catalogItems.length === 0) return legacyList;
+    const pdrGeneric = langDisplay === "fr" ? "Réparation PDR" : "Reparação PDR";
+    const baseList = type === "pdr"
+      ? [pdrGeneric, ...legacyList.filter((item) => item !== pdrGeneric)]
+      : legacyList;
+    if (!catalogItems || catalogItems.length === 0) return baseList;
     const cats = BUDGET_TYPE_TO_CATEGORIES[String(type)] || [];
     const matched = catalogItems.filter((it) => cats.includes(it.categoryCode)).map((it) => it.name);
-    return Array.from(new Set([...matched, ...legacyList]));
+    return Array.from(new Set([...baseList, ...matched]));
   };
 
   const interventionsCatalogue = useMemo(() => {
@@ -2089,72 +2093,34 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     }
     const signedAt = new Date().toISOString();
 
-    let resolvedSignatureData = dataUrl;
-    if (form.id && !form.id.startsWith("local-") && dataUrl) {
-      try {
-        const parts = dataUrl.split(",");
-        const mime = parts[0].match(/:(.*?);/)?.[1] || "image/png";
-        const bstr = atob(parts[1]);
-        let n = bstr.length;
-        const u8arr = new Uint8Array(n);
-        while (n--) u8arr[n] = bstr.charCodeAt(n);
-        const blob = new Blob([u8arr], { type: mime });
-        const resPhoto = await uploadBudgetPhoto(form.id, blob, {
-          category: "signature",
-          caption: `Assinatura de ${name}`,
-        });
-        if (resPhoto.photo?.url || resPhoto.photo?.download_url) {
-          resolvedSignatureData = resPhoto.photo.url || resPhoto.photo.download_url || resPhoto.photo.storagePath;
-        }
-      } catch (err) {
-        console.warn("Upload de foto de assinatura no MinIO não concluído:", err);
-      }
-    }
+    const signedData: BudgetSignature = {
+      signed: true,
+      signerName: name,
+      signerType: resolvedSignerType,
+      signedAt,
+      signatureData: dataUrl,
+      confirmationMethod: "DRAWN_SIGNATURE",
+      budgetNumberAtMoment: form.number || null,
+      finalValueAtMoment: totals.total,
+    };
 
-    const finalDraft: Budget = {
-      ...form,
+    setFormSafe((prev) => ({
+      ...prev,
       status: "approved",
       pdf_lang: pdfLang,
       dossier_snapshot: {
-        ...((form as any).dossier_snapshot || {}),
+        ...((prev as any).dossier_snapshot || {}),
         pdfLang: pdfLang,
       },
-      signature: {
-        signed: true,
-        signerName: name,
-        signerType: resolvedSignerType,
-        signedAt,
-        signatureData: resolvedSignatureData,
-        confirmationMethod: "DRAWN_SIGNATURE",
-        budgetNumberAtMoment: form.number || null,
-        finalValueAtMoment: totals.total,
-      },
+      signature: signedData,
       updated_at: signedAt,
-    };
-    try {
-      const savedRes: any = await onSave({ ...finalDraft, updated_at: new Date().toISOString() });
-      const targetId =
-        savedRes?.budget?.id ||
-        savedRes?.id ||
-        savedRes?.revision?.budgetId ||
-        form.id ||
-        initial?.id;
+    }));
 
-      if (targetId && !targetId.startsWith("local-")) {
-        try {
-          await apiRequest(`/budgets/${targetId}/inspection`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ damage_points: inspectionPoints }),
-          });
-        } catch {}
-      }
-      setFormSafe(finalDraft);
-      toast.success(langDisplay === "fr" ? "Devis approuvé et envoyé en production !" : "Orçamento aprovado e enviado para a Produção!");
-      onOpenChange(false);
-    } catch (error: any) {
-      toast.error(error?.message || (langDisplay === "fr" ? "Échec de l'approbation." : "Falha ao aprovar o orçamento."));
-    }
+    toast.success(
+      langDisplay === "fr"
+        ? "Signature attachée ! Cliquez sur 'Enregistrer le devis' pour confirmer et envoyer en production."
+        : "Assinatura anexada com sucesso! Clique em 'Salvar Orçamento' para confirmar e enviar para a Produção."
+    );
   };
 
   const approveWithExplicitConfirmation = async () => {
@@ -2170,31 +2136,35 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     }
     const resolvedSignerType = confirmNoSignatureType || signatureSignerType || "client";
     const signedAt = new Date().toISOString();
-    const finalDraft: Budget = {
-      ...form,
-      status: "approved",
-      signature: {
-        signed: true,
-        signerName: name,
-        signerType: resolvedSignerType,
-        signedAt,
-        signatureData: null,
-        confirmationMethod: "EXPLICIT_CONFIRMATION",
-        budgetNumberAtMoment: form.number || null,
-        finalValueAtMoment: totals.total,
-      },
-      updated_at: signedAt,
+    const confirmedData: BudgetSignature = {
+      signed: true,
+      signerName: name,
+      signerType: resolvedSignerType,
+      signedAt,
+      signatureData: "CONFIRMED_WITHOUT_SIGNATURE",
+      confirmationMethod: "EXPLICIT_CONFIRMATION",
+      budgetNumberAtMoment: form.number || null,
+      finalValueAtMoment: totals.total,
     };
-    try {
-      await onSave({ ...finalDraft, updated_at: new Date().toISOString() });
-      setFormSafe(finalDraft);
-      setConfirmNoSignatureOpen(false);
-      setConfirmNoSignatureChecked(false);
-      toast.success(langDisplay === "fr" ? "Devis approuvé · Bloqué" : "Orçamento aprovado com sucesso!");
-      onOpenChange(false);
-    } catch (error: any) {
-      toast.error(error?.message || (langDisplay === "fr" ? "Échec de l'approbation." : "Falha ao aprovar o orçamento."));
-    }
+
+    setFormSafe((prev) => ({
+      ...prev,
+      status: "approved",
+      pdf_lang: pdfLang,
+      dossier_snapshot: {
+        ...((prev as any).dossier_snapshot || {}),
+        pdfLang: pdfLang,
+      },
+      signature: confirmedData,
+      updated_at: signedAt,
+    }));
+    setConfirmNoSignatureOpen(false);
+    setConfirmNoSignatureChecked(false);
+    toast.success(
+      langDisplay === "fr"
+        ? "Approbation confirmée ! Cliquez sur 'Enregistrer le devis' pour finaliser et envoyer en production."
+        : "Aprovação confirmada! Clique em 'Salvar Orçamento' para finalizar e enviar para a Produção."
+    );
   };
 
   const rawPhone = (form.client_phone ?? "").trim();
@@ -2345,6 +2315,10 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         updated_at: new Date().toISOString(),
       };
 
+      if (draftToSave.signature?.signed) {
+        draftToSave.status = "approved";
+      }
+
       // Se há assinatura desenhada no canvas mas ainda não confirmada em estado, salva como aprovado
       const sigCanvas = signatureCanvasRef.current;
       if (!draftToSave.signature?.signed && sigCanvas && !sigCanvas.isEmpty()) {
@@ -2378,7 +2352,12 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         initial?.id;
 
       if (targetId && !targetId.startsWith("local-")) {
-        setFormSafe((prev) => ({ ...prev, id: targetId, ...draftToSave }));
+        setFormSafe((prev) => ({
+          ...prev,
+          id: targetId,
+          ...draftToSave,
+          status: (draftToSave.status === "approved" || draftToSave.signature?.signed) ? "approved" : draftToSave.status,
+        }));
         try {
           await apiRequest(`/budgets/${targetId}/inspection`, {
             method: "POST",
@@ -4384,7 +4363,17 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                         "h-7 px-2 text-[11px] font-bold uppercase transition-all",
                         pdfLang === l && "bg-cyan-600 text-white shadow-sm"
                       )}
-                      onClick={() => setPdfLang(l)}
+                      onClick={() => {
+                        setPdfLang(l);
+                        setFormSafe((prev) => ({
+                          ...prev,
+                          pdf_lang: l,
+                          dossier_snapshot: {
+                            ...(prev.dossier_snapshot || {}),
+                            pdfLang: l,
+                          },
+                        }));
+                      }}
                     >
                       {l}
                     </Button>

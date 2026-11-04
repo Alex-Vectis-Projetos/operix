@@ -1440,13 +1440,11 @@ export function VehicleBlueprint5Views({
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
               <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded border border-cyan-800">
                 <span className="text-[11px] text-muted-foreground whitespace-nowrap">Total Conjunto:</span>
-                <Input
-                  type="number"
-                  step="0.01"
-                  className="h-7 w-24 text-xs font-bold bg-transparent border-0 text-cyan-300 focus-visible:ring-0 p-0"
+                <DecimalInput
+                  className="h-7 w-24 text-xs font-bold bg-transparent border-0 text-cyan-300 focus-visible:ring-0 p-0 text-right"
                   placeholder="Ex: 500.00"
                   value={globalPackageAmount}
-                  onChange={(e) => setGlobalPackageAmount(e.target.value)}
+                  onChangeValue={(val) => setGlobalPackageAmount(String(val))}
                 />
                 <span className="text-xs text-cyan-400 font-bold">€</span>
               </div>

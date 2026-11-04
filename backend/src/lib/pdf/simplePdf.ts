@@ -1561,7 +1561,8 @@ export function buildProtocoleDeReparationPdf(
       let sommeUt = 0;
       let linePrix = 0;
 
-      if (dents > 0 || svc) {
+      // Substituição de peça não gera UT de DSP nem preço de DSP
+      if (!isNew && (dents > 0 || svc)) {
         baseUt = calculateBaremoUTBackend(dents || 10, "2");
         const mult = 1.0 + (isAlu ? 0.25 : 0) + (isColle ? 0.25 : 0) - (isDap ? 0.40 : 0);
         sommeUt = Math.round(baseUt * mult * 100) / 100;
@@ -1583,7 +1584,7 @@ export function buildProtocoleDeReparationPdf(
       content.push(`40 ${curY} 515 ${rowH} re s`);
 
       content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 44 ${curY + 2.5} Td (${pdfEscapeWinAnsi(partLabel)}) Tj ET`);
-      content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 175 ${curY + 2.5} Td (${dents > 0 ? dents : "-"}) Tj ET`);
+      content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 175 ${curY + 2.5} Td (${dents > 0 ? (isNew ? `(${dents})` : dents) : "-"}) Tj ET`);
       content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 225 ${curY + 2.5} Td (${dents > 0 ? "20" : "-"}) Tj ET`);
       content.push(`BT 0.1 0.12 0.16 rg /F1 6 Tf 265 ${curY + 2.5} Td (${baseUt > 0 ? baseUt.toFixed(2) : "-"}) Tj ET`);
       content.push(`BT 0.1 0.12 0.16 rg /F2 6 Tf 308 ${curY + 2.5} Td (${isAlu ? "X" : ""}) Tj ET`);

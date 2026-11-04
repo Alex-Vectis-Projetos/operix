@@ -96,12 +96,9 @@ export function PermissionGuard({
 
   if (isGuardedLoading && !timedOut) {
     return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-          <span>{t("guard.checkingPermissions", "A verificar permissões…")}</span>
-        </div>
-        <PermissionLoadingSkeleton pathname={location.pathname} />
+      <div className="flex flex-col items-center justify-center py-24 text-center px-6 gap-3 animate-fade-in">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">{t("common.loading", "A carregar…")} Operix…</p>
       </div>
     );
   }

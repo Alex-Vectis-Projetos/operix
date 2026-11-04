@@ -46,9 +46,9 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const workspaceId = workspace?.workspaceId ?? null;
   const isWorkspaceLoading = workspace?.isLoading ?? false;
 
-  const { data, isLoading, isPending } = useQuery({
+  const { data, isLoading, isPending, isFetching } = useQuery({
     queryKey: ["my-role", lookupId, isImpersonating, workspaceId],
-    enabled: !!lookupId,
+    enabled: !!lookupId && !authLoading && !isWorkspaceLoading,
     retry: 0,
     staleTime: 5 * 60_000,
     queryFn: async () => {
@@ -78,7 +78,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
   const isResolving = isOwnerEmail
     ? false
-    : (authLoading || !user || isWorkspaceLoading || (!!lookupId && (isPending || (isLoading && !data))));
+    : (authLoading || !user || isWorkspaceLoading || !workspaceId || (!!lookupId && (isPending || isFetching || !data)));
 
   return (
     <RoleCtx.Provider

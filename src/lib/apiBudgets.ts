@@ -356,7 +356,11 @@ export function apiBudgetToLocalBudget(api: ApiBudget): any {
     issued_at: rev?.createdAt || rev?.created_at || api.createdAt || api.created_at || new Date().toISOString(),
     status: (canonicalStatus === "submitted" ? "sent" : canonicalStatus) as any,
     budget_type: (rev?.budgetType || rev?.budget_type || "pdr") as any,
-    pdf_lang: dossierSnap.pdfLang || dossierSnap.lang || undefined,
+    pdf_lang: dossierSnap.pdfLang || dossierSnap.lang || (api as any).pdf_lang || undefined,
+    dossier_snapshot: {
+      ...dossierSnap,
+      pdfLang: dossierSnap.pdfLang || dossierSnap.lang || (api as any).pdf_lang || undefined,
+    },
 
     client_id: api.clientId || api.client_id || clientSnap.id || undefined,
     client_display_id: clientSnap.display_id || clientSnap.customer_display_id || undefined,

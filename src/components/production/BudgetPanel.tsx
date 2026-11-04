@@ -245,12 +245,14 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         savedResult = updated;
         const targetRevisionId = updated.revision.id;
 
-        if (b.status === "approved") {
+        if (b.status === "approved" || b.signature?.signed) {
           const res = await approveBudgetMutation.mutateAsync({
             budgetId: b.id,
             revisionId: targetRevisionId,
             options: { notes: b.diagnosis || undefined, signature: b.signature },
           });
+          queryClient.invalidateQueries({ queryKey: ["budgets"] });
+          queryClient.invalidateQueries({ queryKey: ["production_orders"] });
           if (res?.productionOrder && onOpenOrder) {
             onOpenOrder(res.productionOrder);
           }
@@ -260,18 +262,21 @@ export function BudgetPanel({ onOpenOrder }: Props) {
             revisionId: targetRevisionId,
             reason: b.rejection?.reason || "Orçamento recusado pelo cliente",
           });
+          queryClient.invalidateQueries({ queryKey: ["budgets"] });
         }
       } else {
         const created = await createBudgetMutation.mutateAsync(payload);
         savedResult = created;
         const createdBudgetId = created.budget.id;
         const createdRevId = created.budget.currentRevisionId || created.revision.id;
-        if (b.status === "approved" && createdRevId) {
+        if ((b.status === "approved" || b.signature?.signed) && createdRevId) {
           const res = await approveBudgetMutation.mutateAsync({
             budgetId: createdBudgetId,
             revisionId: createdRevId,
             options: { notes: b.diagnosis || undefined, signature: b.signature },
           });
+          queryClient.invalidateQueries({ queryKey: ["budgets"] });
+          queryClient.invalidateQueries({ queryKey: ["production_orders"] });
           if (res?.productionOrder && onOpenOrder) {
             onOpenOrder(res.productionOrder);
           }
@@ -281,9 +286,15 @@ export function BudgetPanel({ onOpenOrder }: Props) {
             revisionId: createdRevId,
             reason: b.rejection?.reason || "Orçamento recusado pelo cliente",
           });
+          queryClient.invalidateQueries({ queryKey: ["budgets"] });
         }
       }
-      setEditing(b);
+      const finalBudget = {
+        ...b,
+        id: savedResult?.budget?.id || b.id,
+        status: (b.status === "approved" || b.signature?.signed) ? ("approved" as const) : b.status,
+      };
+      setEditing(finalBudget);
       return savedResult;
     } catch (err: any) {
       toast.error(err?.message || "Erro ao salvar orçamento.");
@@ -386,7 +397,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
 
   const sendToProduction = async (b: Budget) => {
     try {
-      if (b.status !== "approved") {
+      if (b.status !== "approved" && !b.signature?.signed) {
         toast.warning("Orçamento precisa estar Aprovado para enviar à Produção.");
         return;
       }
@@ -591,15 +602,6 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                             onClick={() => openPreview(b)}
                           >
                             <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                            title={langDisplay === "fr" ? "Télécharger PDF" : "Baixar PDF"}
-                            onClick={() => downloadBudgetFile(b)}
-                          >
-                            <FileDown className="h-4 w-4" />
                           </Button>
                           <Button
                             size="icon"
