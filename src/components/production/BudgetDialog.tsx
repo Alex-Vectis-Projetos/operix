@@ -1,6 +1,13 @@
-import { VehicleBlueprint5Views, type DamagePointData, type ValidatedPartSummary } from "./VehicleBlueprint5Views";
+import {
+  VehicleBlueprint5Views,
+  CAR_PARTS,
+  PART_MATERIALS,
+  DENT_SIZES,
+  type DamagePointData,
+  type ValidatedPartSummary,
+} from "./VehicleBlueprint5Views";
 import { Eye } from "lucide-react";
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getBudget, apiBudgetToLocalBudget, getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto, markBudgetSent, getBudgetSignLink } from "@/lib/apiBudgets";
 import {
@@ -1730,12 +1737,22 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
 
   const totals = useMemo(() => {
     const parts = form.parts.reduce((sum, p) => {
+      const isIncluded =
+        (p as any).pricing_mode === "global" ||
+        (p as any).pricingMode === "global" ||
+        (p.description && p.description.includes("Incluso no Conjunto"));
+      if (isIncluded) return sum;
       const q = Math.max(0, Number(p.quantity) || 0);
       const u = Math.max(0, Number(p.unit_price) || 0);
       const isFixed = (p as any).pricing_mode === "fixed" || (p as any).pricingMode === "fixed";
       return sum + (isFixed ? u : q * u);
     }, 0);
     const services = form.services.reduce((sum, s) => {
+      const isIncluded =
+        (s as any).pricing_mode === "global" ||
+        (s as any).pricingMode === "global" ||
+        (s.description && s.description.includes("Incluso no Conjunto"));
+      if (isIncluded) return sum;
       const q = Math.max(0, Number(s.quantity) || 0);
       const u = Math.max(0, Number(s.unit_price) || 0);
       const isFixed = (s as any).pricing_mode === "fixed" || (s as any).pricingMode === "fixed";
@@ -2230,12 +2247,214 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
 
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
+  const syncInspectionPointsToForm = useCallback(
+    (points: DamagePointData[], explicitPkgAmount?: number) => {
+      if (form.budget_type !== "pdr" || !points || points.length === 0) return;
+
+      const map = new Map<
+        string,
+        {
+          partCode: string;
+          partLabel: string;
+          totalDents: number;
+          materialTag: string;
+          dentSizeLabel?: string;
+          damageType: string;
+          pricingMode: "fixed" | "unit" | "global";
+          estimatedAmount: number;
+        }
+      >();
+
+      const hasGlobal = points.some((p) => p.pricingMode === "global");
+      const globalPkg =
+        explicitPkgAmount ??
+        (points.find((p) => p.pricingMode === "global" && Number(p.estimatedAmount) > 0)?.estimatedAmount as
+          | number
+          | undefined);
+
+      points.forEach((pt) => {
+        const pCode = pt.carPartCode || "general";
+        const partObj = CAR_PARTS.find((p) => p.code === pCode);
+        const pLabel = partObj?.label || pCode;
+        const count = Number(pt.dentCount) || 1;
+        const matCode = pt.partMaterial || "steel";
+        const matObj = PART_MATERIALS.find((m) => m.code === matCode) || PART_MATERIALS[0];
+        const sizeObj = DENT_SIZES.find((s) => s.code === pt.dentSize);
+        const est = Number(pt.estimatedAmount) || 0;
+
+        if (!map.has(pCode)) {
+          map.set(pCode, {
+            partCode: pCode,
+            partLabel: pLabel,
+            totalDents: count,
+            materialTag: matObj.tag ? `[${matObj.tag}]` : "",
+            dentSizeLabel: sizeObj?.shortLabel,
+            damageType: pt.damageType,
+            pricingMode: pt.pricingMode || "fixed",
+            estimatedAmount: est,
+          });
+        } else {
+          const entry = map.get(pCode)!;
+          entry.totalDents += count;
+          entry.estimatedAmount += est;
+          if (pt.pricingMode) entry.pricingMode = pt.pricingMode;
+        }
+      });
+
+      const pieces = Array.from(map.values());
+      if (pieces.length === 0) return;
+
+      setFormSafe((prev) => {
+        const manualParts = prev.parts.filter(
+          (p) => p.description && !CAR_PARTS.some((cp) => p.description.includes(cp.label)),
+        );
+
+        const newPartLines: BudgetPartLine[] = pieces.map((piece) => {
+          const isReplace = piece.damageType === "replace" || piece.damageType === "crack";
+          const isGlobal = hasGlobal || piece.pricingMode === "global";
+          const sizeText = piece.dentSizeLabel ? ` (${piece.dentSizeLabel})` : "";
+          const desc = isReplace
+            ? `Substituição - ${piece.partLabel} ${piece.materialTag} (${piece.totalDents} mossas informativas)`.trim()
+            : `${piece.partLabel} ${piece.materialTag}${sizeText}${isGlobal ? " [Incluso no Conjunto]" : ""}`.trim();
+
+          const existing = prev.parts.find((p) => p.description.includes(piece.partLabel));
+          return {
+            id: existing?.id || uid(),
+            description: desc,
+            quantity: isReplace ? 1 : piece.totalDents,
+            unit_price: isGlobal ? 0 : (existing?.unit_price ?? piece.estimatedAmount ?? 0),
+            pricing_mode: isGlobal ? "global" : (existing?.pricing_mode || piece.pricingMode || "fixed"),
+          };
+        });
+
+        let nextServices = [...prev.services];
+
+        if (hasGlobal) {
+          const pkgAmt = Number(globalPkg) || 0;
+          const masterPkgDesc = "PDR - Pacote Conjunto Global (Preço Fechado do Veículo)";
+          const masterIdx = nextServices.findIndex((s) => s.description.startsWith("PDR - Pacote Conjunto Global"));
+          if (masterIdx >= 0) {
+            if (pkgAmt > 0 && Number(nextServices[masterIdx].unit_price) === 0) {
+              nextServices[masterIdx] = { ...nextServices[masterIdx], unit_price: pkgAmt };
+            }
+          } else if (pkgAmt > 0) {
+            nextServices = nextServices.filter((s) => s.description || s.unit_price > 0);
+            nextServices.unshift({
+              id: uid(),
+              description: masterPkgDesc,
+              quantity: 1,
+              unit_price: pkgAmt,
+              pricing_mode: "fixed",
+            });
+          }
+          // Remove linhas individuais de peças duplicadas em serviços
+          nextServices = nextServices.filter((s) => {
+            const isMaster = s.description.startsWith("PDR - Pacote Conjunto Global");
+            const isCarPiece = pieces.some((pc) => s.description.includes(pc.partLabel));
+            return isMaster || !isCarPiece;
+          });
+        }
+
+        return {
+          ...prev,
+          parts: [...newPartLines, ...manualParts],
+          services: nextServices,
+          updated_at: new Date().toISOString(),
+        };
+      });
+    },
+    [form.budget_type],
+  );
+
+  // Auto-sincroniza avarias mapeadas do Blueprint para a tabela Áreas / Danos sempre que houver avarias no PDR
+  useEffect(() => {
+    if (form.budget_type === "pdr" && inspectionPoints.length > 0) {
+      const hasRealParts = form.parts.some((p) => p.description && p.description.trim().length > 0);
+      if (!hasRealParts) {
+        syncInspectionPointsToForm(inspectionPoints);
+      }
+    }
+  }, [inspectionPoints, form.budget_type, syncInspectionPointsToForm, form.parts]);
+
   const handleValidatePartFromBlueprint = (summary: ValidatedPartSummary) => {
     const isReplace = summary.damageType === "replace" || summary.damageType === "crack";
     const isPaint = summary.damageType === "paint_damage" || summary.damageType === "scratch";
     const materialTag = summary.materialTag ? `[${summary.materialTag}]` : "";
     const sizeText = summary.dentSizeLabel ? ` (${summary.dentSizeLabel})` : "";
+    const isGlobal = summary.pricingMode === "global";
 
+    if (form.budget_type === "pdr") {
+      // No modo PDR, todas as avarias do veículo populam a tabela de Áreas / Danos (parts)
+      const baseDesc = isReplace
+        ? `Substituição - ${summary.partLabel} ${materialTag} (${summary.dentCount} mossas informativas)`.trim()
+        : isPaint
+        ? `Pintura - ${summary.partLabel} ${materialTag}`.trim()
+        : `${summary.partLabel} ${materialTag} — ${summary.dentCount} ${summary.dentCount === 1 ? "mossa" : "mossas"}${sizeText}`.trim();
+
+      const desc = isGlobal ? `${baseDesc} [Incluso no Conjunto]` : baseDesc;
+      const isFixed = summary.pricingMode === "fixed" || isGlobal || isReplace;
+
+      const newPartLine: BudgetPartLine = {
+        id: uid(),
+        description: desc,
+        quantity: isFixed ? 1 : summary.dentCount,
+        unit_price: isGlobal ? 0 : (summary.estimatedAmount || 0),
+        pricing_mode: isGlobal ? "global" : (summary.pricingMode || "fixed"),
+      };
+
+      setFormSafe((prev) => {
+        const existingIdx = prev.parts.findIndex((p) => p.description.includes(summary.partLabel));
+        let nextParts = [...prev.parts];
+        if (existingIdx >= 0) {
+          nextParts[existingIdx] = { ...nextParts[existingIdx], ...newPartLine, id: nextParts[existingIdx].id };
+        } else {
+          if (nextParts.some((p) => !p.description && !p.unit_price)) {
+            nextParts = nextParts.map((p, idx) => (idx === 0 && !p.description ? newPartLine : p));
+          } else {
+            nextParts.push(newPartLine);
+          }
+        }
+
+        let nextServices = [...prev.services];
+
+        // Se veio valor total do conjunto global, cria ou atualiza a linha mestra em serviços
+        if (isGlobal && summary.packageTotalAmount && summary.packageTotalAmount > 0) {
+          const masterPkgDesc = "PDR - Pacote Conjunto Global (Preço Fechado do Veículo)";
+          const masterIdx = nextServices.findIndex((s) => s.description.startsWith("PDR - Pacote Conjunto Global"));
+          const masterLine: BudgetServiceLine = {
+            id: masterIdx >= 0 ? nextServices[masterIdx].id : uid(),
+            description: masterPkgDesc,
+            quantity: 1,
+            unit_price: summary.packageTotalAmount,
+            pricing_mode: "fixed",
+          };
+          if (masterIdx >= 0) {
+            nextServices[masterIdx] = masterLine;
+          } else {
+            nextServices = nextServices.filter((s) => s.description || s.unit_price > 0);
+            nextServices.unshift(masterLine);
+          }
+        }
+
+        // Limpa qualquer duplicata individual da peça que estivesse em serviços
+        nextServices = nextServices.filter((s) => {
+          if (s.description.startsWith("PDR - Pacote Conjunto Global")) return true;
+          return !s.description.includes(summary.partLabel);
+        });
+
+        return {
+          ...prev,
+          parts: nextParts,
+          services: nextServices,
+          updated_at: new Date().toISOString(),
+        };
+      });
+
+      toast.success(`Peça "${summary.partLabel}" vinculada à tabela de Áreas / Danos.`);
+      return;
+    }
+
+    // Fluxo para outros tipos de orçamento (Mecânica / Funilaria e Pintura)
     if (isReplace) {
       const desc = `Substituição - ${summary.partLabel} ${materialTag}`.trim();
       setFormSafe((prev) => {
@@ -2262,7 +2481,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       });
       toast.success(`Peça "${summary.partLabel}" vinculada à tabela de Peças/Materiais.`);
     } else {
-      const isGlobal = summary.pricingMode === "global";
       const prefix = isPaint ? "Pintura" : "PDR";
       const baseDesc = isPaint
         ? `${prefix} - ${summary.partLabel} ${materialTag}`.trim()
@@ -2281,7 +2499,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       setFormSafe((prev) => {
         let nextServices = [...prev.services];
 
-        // Se veio valor total do conjunto global, cria ou atualiza a linha mestra do pacote global
         if (isGlobal && summary.packageTotalAmount && summary.packageTotalAmount > 0) {
           const masterPkgDesc = "PDR - Pacote Conjunto Global (Preço Fechado do Veículo)";
           const masterIdx = nextServices.findIndex((s) => s.description.startsWith("PDR - Pacote Conjunto Global"));
@@ -2295,7 +2512,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
           if (masterIdx >= 0) {
             nextServices[masterIdx] = masterLine;
           } else {
-            // Remove linha vazia se existir
             nextServices = nextServices.filter((s) => s.description || s.unit_price > 0);
             nextServices.unshift(masterLine);
           }
@@ -3410,6 +3626,9 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                   onValidatePart={handleValidatePartFromBlueprint}
                   onChange={async (newPoints) => {
                     setInspectionPoints(newPoints);
+                    if (form.budget_type === "pdr") {
+                      syncInspectionPointsToForm(newPoints);
+                    }
                     const currentId = form.id || initial?.id;
                     if (currentId) {
                       try {
@@ -3725,91 +3944,117 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {form.parts.map((p) => (
-                            <TableRow key={p.id}>
-                              <TableCell>
-                                <Input
-                                  placeholder={
-                                    form.budget_type === "mechanics"
-                                      ? "Ex.: Filtro de óleo"
-                                      : form.budget_type === "body_paint"
-                                        ? "Ex.: Parachoque dianteiro / tinta base"
-                                        : "Ex.: Porta traseira esquerda · amassado central · 3 cm"
-                                  }
-                                  value={p.description}
-                                  onChange={(e) => updatePart(p.id, { description: e.target.value })}
-                                  disabled={isLocked}
-                                />
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-1">
+                          {form.parts.map((p) => {
+                            const isIncluded =
+                              (p as any).pricing_mode === "global" ||
+                              (p as any).pricingMode === "global" ||
+                              (p.description && p.description.includes("Incluso no Conjunto"));
+
+                            return (
+                              <TableRow key={p.id}>
+                                <TableCell>
                                   <Input
-                                    type="number"
-                                    min={0}
-                                    step={1}
-                                    className="tabular-nums"
-                                    value={String(p.quantity)}
-                                    onChange={(e) =>
-                                      updatePart(p.id, {
-                                        quantity: Math.max(0, Number(e.target.value) || 0),
-                                      })
+                                    placeholder={
+                                      form.budget_type === "mechanics"
+                                        ? "Ex.: Filtro de óleo"
+                                        : form.budget_type === "body_paint"
+                                          ? "Ex.: Parachoque dianteiro / tinta base"
+                                          : "Ex.: Porta traseira esquerda · amassado central · 3 cm"
                                     }
+                                    value={p.description}
+                                    onChange={(e) => updatePart(p.id, { description: e.target.value })}
                                     disabled={isLocked}
                                   />
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant={(p as any).pricing_mode === "fixed" ? "default" : "outline"}
-                                    className={cn(
-                                      "h-8 px-1.5 text-[10px] font-medium shrink-0",
-                                      (p as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      step={1}
+                                      className="tabular-nums"
+                                      value={String(p.quantity)}
+                                      onChange={(e) =>
+                                        updatePart(p.id, {
+                                          quantity: Math.max(0, Number(e.target.value) || 0),
+                                        })
+                                      }
+                                      disabled={isLocked}
+                                    />
+                                    {isIncluded ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="h-8 px-2 bg-cyan-950/40 text-cyan-300 border-cyan-700/60 text-[10px] font-semibold shrink-0"
+                                      >
+                                        Incluso
+                                      </Badge>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant={(p as any).pricing_mode === "fixed" ? "default" : "outline"}
+                                        className={cn(
+                                          "h-8 px-1.5 text-[10px] font-medium shrink-0",
+                                          (p as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
+                                        )}
+                                        onClick={() =>
+                                          updatePart(p.id, {
+                                            pricing_mode: (p as any).pricing_mode === "fixed" ? "unit" : "fixed",
+                                          } as any)
+                                        }
+                                        title={(p as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
+                                        disabled={isLocked}
+                                      >
+                                        {(p as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
+                                      </Button>
                                     )}
-                                    onClick={() =>
-                                      updatePart(p.id, {
-                                        pricing_mode: (p as any).pricing_mode === "fixed" ? "unit" : "fixed",
-                                      } as any)
-                                    }
-                                    title={(p as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {isIncluded ? (
+                                    <div className="flex items-center justify-end h-9 px-3 text-xs text-muted-foreground font-mono bg-muted/20 rounded border border-border/40">
+                                      0,00 €
+                                    </div>
+                                  ) : (
+                                    <DecimalInput
+                                      className="tabular-nums text-right h-9"
+                                      placeholder="0.00"
+                                      value={p.unit_price}
+                                      onChangeValue={(val) =>
+                                        updatePart(p.id, {
+                                          unit_price: val,
+                                        })
+                                      }
+                                      disabled={isLocked}
+                                    />
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums font-medium">
+                                  {isIncluded ? (
+                                    <span className="text-cyan-400 font-medium text-xs">0,00 €</span>
+                                  ) : (
+                                    formatBRL(
+                                      (p as any).pricing_mode === "fixed"
+                                        ? Math.max(0, Number(p.unit_price) || 0)
+                                        : Math.max(0, Number(p.quantity) || 0) * Math.max(0, Number(p.unit_price) || 0),
+                                    )
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                    type="button"
+                                    onClick={() => removePart(p.id)}
                                     disabled={isLocked}
                                   >
-                                    {(p as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
+                                    <Trash2 className="h-4 w-4" />
                                   </Button>
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <DecimalInput
-                                  className="tabular-nums text-right h-9"
-                                  placeholder="0.00"
-                                  value={p.unit_price}
-                                  onChangeValue={(val) =>
-                                    updatePart(p.id, {
-                                      unit_price: val,
-                                    })
-                                  }
-                                  disabled={isLocked}
-                                />
-                              </TableCell>
-                              <TableCell className="text-right tabular-nums font-medium">
-                                {formatBRL(
-                                  (p as any).pricing_mode === "fixed"
-                                    ? Math.max(0, Number(p.unit_price) || 0)
-                                    : Math.max(0, Number(p.quantity) || 0) * Math.max(0, Number(p.unit_price) || 0),
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                  type="button"
-                                  onClick={() => removePart(p.id)}
-                                  disabled={isLocked}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                         <TableFooter>
                           <TableRow>
@@ -3848,123 +4093,149 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {form.services.map((s) => (
-                            <TableRow key={s.id}>
-                              <TableCell>
-                                <Input
-                                  list={`service-catalog-dl-${s.id}`}
-                                  placeholder={
-                                    form.budget_type === "mechanics"
-                                      ? "Ex.: Diagnóstico eletrônico / Geometria"
-                                      : form.budget_type === "body_paint"
-                                        ? "Ex.: Pintura / Polimento / Tratamento"
-                                        : "Ex.: Avaliação detalhada de áreas"
-                                  }
-                                  value={s.description}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    const matched = catalogItems.find(
-                                      (it) => it.name.trim().toLowerCase() === val.trim().toLowerCase(),
-                                    );
-                                    if (matched) {
-                                      const patch: Partial<BudgetServiceLine> = {
-                                        description: matched.name,
-                                        catalogItemId: matched.id,
-                                        catalogItemCode: matched.code,
-                                        categoryCode: matched.categoryCode,
-                                      };
-                                      if (matched.suggestedPrice && (!s.unit_price || s.unit_price === 0)) {
-                                        patch.unit_price = Number(matched.suggestedPrice);
-                                      }
-                                      updateService(s.id, patch);
-                                    } else {
-                                      updateService(s.id, { description: val });
-                                    }
-                                  }}
-                                  disabled={isLocked}
-                                />
-                                <datalist id={`service-catalog-dl-${s.id}`}>
-                                  {catalogItems.map((item) => (
-                                    <option key={item.id} value={item.name}>
-                                      {item.categoryName ? `${item.categoryName} — ` : ""}{item.code}
-                                    </option>
-                                  ))}
-                                </datalist>
-                                {s.catalogItemCode ? (
-                                  <span className="text-[10px] text-muted-foreground font-mono mt-0.5 block">
-                                    {s.categoryCode ? `${s.categoryCode} · ` : ""}{s.catalogItemCode}
-                                  </span>
-                                ) : null}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-1">
+                          {form.services.map((s) => {
+                            const isIncluded =
+                              (s as any).pricing_mode === "global" ||
+                              (s as any).pricingMode === "global" ||
+                              (s.description && s.description.includes("Incluso no Conjunto"));
+
+                            return (
+                              <TableRow key={s.id}>
+                                <TableCell>
                                   <Input
-                                    type="number"
-                                    min={0}
-                                    step={1}
-                                    className="tabular-nums"
-                                    value={String(s.quantity)}
-                                    onChange={(e) =>
-                                      updateService(s.id, {
-                                        quantity: Math.max(0, Number(e.target.value) || 0),
-                                      })
+                                    list={`service-catalog-dl-${s.id}`}
+                                    placeholder={
+                                      form.budget_type === "mechanics"
+                                        ? "Ex.: Diagnóstico eletrônico / Geometria"
+                                        : form.budget_type === "body_paint"
+                                          ? "Ex.: Pintura / Polimento / Tratamento"
+                                          : "Ex.: Avaliação detalhada de áreas"
                                     }
+                                    value={s.description}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      const matched = catalogItems.find(
+                                        (it) => it.name.trim().toLowerCase() === val.trim().toLowerCase(),
+                                      );
+                                      if (matched) {
+                                        const patch: Partial<BudgetServiceLine> = {
+                                          description: matched.name,
+                                          catalogItemId: matched.id,
+                                          catalogItemCode: matched.code,
+                                          categoryCode: matched.categoryCode,
+                                        };
+                                        if (matched.suggestedPrice && (!s.unit_price || s.unit_price === 0)) {
+                                          patch.unit_price = Number(matched.suggestedPrice);
+                                        }
+                                        updateService(s.id, patch);
+                                      } else {
+                                        updateService(s.id, { description: val });
+                                      }
+                                    }}
                                     disabled={isLocked}
                                   />
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant={(s as any).pricing_mode === "fixed" ? "default" : "outline"}
-                                    className={cn(
-                                      "h-8 px-1.5 text-[10px] font-medium shrink-0",
-                                      (s as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
+                                  <datalist id={`service-catalog-dl-${s.id}`}>
+                                    {catalogItems.map((item) => (
+                                      <option key={item.id} value={item.name}>
+                                        {item.categoryName ? `${item.categoryName} — ` : ""}{item.code}
+                                      </option>
+                                    ))}
+                                  </datalist>
+                                  {s.catalogItemCode ? (
+                                    <span className="text-[10px] text-muted-foreground font-mono mt-0.5 block">
+                                      {s.categoryCode ? `${s.categoryCode} · ` : ""}{s.catalogItemCode}
+                                    </span>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      step={1}
+                                      className="tabular-nums"
+                                      value={String(s.quantity)}
+                                      onChange={(e) =>
+                                        updateService(s.id, {
+                                          quantity: Math.max(0, Number(e.target.value) || 0),
+                                        })
+                                      }
+                                      disabled={isLocked}
+                                    />
+                                    {isIncluded ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="h-8 px-2 bg-cyan-950/40 text-cyan-300 border-cyan-700/60 text-[10px] font-semibold shrink-0"
+                                      >
+                                        Incluso
+                                      </Badge>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant={(s as any).pricing_mode === "fixed" ? "default" : "outline"}
+                                        className={cn(
+                                          "h-8 px-1.5 text-[10px] font-medium shrink-0",
+                                          (s as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
+                                        )}
+                                        onClick={() =>
+                                          updateService(s.id, {
+                                            pricing_mode: (s as any).pricing_mode === "fixed" ? "unit" : "fixed",
+                                          } as any)
+                                        }
+                                        title={(s as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
+                                        disabled={isLocked}
+                                      >
+                                        {(s as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
+                                      </Button>
                                     )}
-                                    onClick={() =>
-                                      updateService(s.id, {
-                                        pricing_mode: (s as any).pricing_mode === "fixed" ? "unit" : "fixed",
-                                      } as any)
-                                    }
-                                    title={(s as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {isIncluded ? (
+                                    <div className="flex items-center justify-end h-9 px-3 text-xs text-muted-foreground font-mono bg-muted/20 rounded border border-border/40">
+                                      0,00 €
+                                    </div>
+                                  ) : (
+                                    <DecimalInput
+                                      className="tabular-nums text-right h-9"
+                                      placeholder="0.00"
+                                      value={s.unit_price}
+                                      onChangeValue={(val) =>
+                                        updateService(s.id, {
+                                          unit_price: val,
+                                        })
+                                      }
+                                      disabled={isLocked}
+                                    />
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums font-medium">
+                                  {isIncluded ? (
+                                    <span className="text-cyan-400 font-medium text-xs">0,00 €</span>
+                                  ) : (
+                                    formatBRL(
+                                      (s as any).pricing_mode === "fixed"
+                                        ? Math.max(0, Number(s.unit_price) || 0)
+                                        : Math.max(0, Number(s.quantity) || 0) * Math.max(0, Number(s.unit_price) || 0),
+                                    )
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                    type="button"
+                                    onClick={() => removeService(s.id)}
                                     disabled={isLocked}
                                   >
-                                    {(s as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
+                                    <Trash2 className="h-4 w-4" />
                                   </Button>
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <DecimalInput
-                                  className="tabular-nums text-right h-9"
-                                  placeholder="0.00"
-                                  value={s.unit_price}
-                                  onChangeValue={(val) =>
-                                    updateService(s.id, {
-                                      unit_price: val,
-                                    })
-                                  }
-                                  disabled={isLocked}
-                                />
-                              </TableCell>
-                              <TableCell className="text-right tabular-nums font-medium">
-                                {formatBRL(
-                                  (s as any).pricing_mode === "fixed"
-                                    ? Math.max(0, Number(s.unit_price) || 0)
-                                    : Math.max(0, Number(s.quantity) || 0) * Math.max(0, Number(s.unit_price) || 0),
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                  type="button"
-                                  onClick={() => removeService(s.id)}
-                                  disabled={isLocked}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                         <TableFooter>
                           <TableRow>

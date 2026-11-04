@@ -58,6 +58,15 @@ export function calculateRevisionTotals(input: {
             sum = sum.add(toDecimal(declaredTotal));
             continue;
           }
+          // Linhas marcadas como global ou Incluso no Conjunto têm valor 0 para não duplicar cobrança do pacote global
+          const isIncluded =
+            it?.pricing_mode === "global" ||
+            it?.pricingMode === "global" ||
+            (typeof it?.description === "string" && it.description.includes("Incluso no Conjunto"));
+          if (isIncluded) {
+            continue;
+          }
+
           const quantityValue = quantityKeys
             .map((key) => it?.[key])
             .find((value) => value !== undefined && value !== null && value !== "");
@@ -565,9 +574,17 @@ function buildStructuredProductionServices(
       }
 
       const isFixed = item.pricing_mode === "fixed" || item.pricingMode === "fixed";
+      const isIncluded =
+        item.pricing_mode === "global" ||
+        item.pricingMode === "global" ||
+        (typeof name === "string" && name.includes("Incluso no Conjunto"));
+
       let unitPrice: Prisma.Decimal;
       let total: Prisma.Decimal;
-      if (unitPriceRaw !== undefined) {
+      if (isIncluded) {
+        unitPrice = new Prisma.Decimal(0);
+        total = new Prisma.Decimal(0);
+      } else if (unitPriceRaw !== undefined) {
         unitPrice = strictDecimal(unitPriceRaw, `BUDGET_SERVICE_VALUE_INVALID: ${source.category}[${index}]`);
         total = isFixed ? unitPrice : quantity.mul(unitPrice);
         if (totalRaw !== undefined && totalRaw !== null && totalRaw !== "") {

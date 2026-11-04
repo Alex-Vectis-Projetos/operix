@@ -51,14 +51,16 @@ export function formatDate(iso: string | null | undefined): string {
 }
 
 export function computeTotalsFor(b: {
-  parts?: Array<{ quantity?: number; unit_price?: number; pricing_mode?: string }> | null;
-  services?: Array<{ quantity?: number; unit_price?: number; pricing_mode?: string }> | null;
+  parts?: Array<{ quantity?: number; unit_price?: number; pricing_mode?: string; description?: string }> | null;
+  services?: Array<{ quantity?: number; unit_price?: number; pricing_mode?: string; description?: string }> | null;
   labor?: Array<{ hours?: number; hourly_rate?: number; pricing_mode?: string }> | null;
   discount_pct?: number | null;
   iva_pct?: number | null;
 }) {
   const p = (b.parts || []).reduce(
     (s, x) => {
+      const isIncluded = x?.pricing_mode === "global" || (x?.description && String(x.description).includes("Incluso no Conjunto"));
+      if (isIncluded) return s;
       const q = Math.max(0, Number(x?.quantity) || 0);
       const u = Math.max(0, Number(x?.unit_price) || 0);
       const isFixed = x?.pricing_mode === "fixed";
@@ -69,6 +71,8 @@ export function computeTotalsFor(b: {
   const sv = Array.isArray(b.services)
     ? (b.services as Array<any>).reduce(
         (s: number, x: any) => {
+          const isIncluded = x?.pricing_mode === "global" || (x?.description && String(x.description).includes("Incluso no Conjunto"));
+          if (isIncluded) return s;
           const q = Math.max(0, Number(x?.quantity) || 0);
           const u = Math.max(0, Number(x?.unit_price) || 0);
           const isFixed = x?.pricing_mode === "fixed";
@@ -506,9 +510,27 @@ export function buildProtocoleDeReparationHtml(
       }
 
       if (matchedPart) {
-        isNew = true;
-        if (!customPrice && Number(matchedPart.unit_price) > 0) {
-          customPrice = Number(matchedPart.unit_price);
+        const pDesc = (matchedPart.description || "").toLowerCase();
+        const isActuallyReplace = pDesc.includes("substitui") || pDesc.includes("remplace") || pDesc.includes("neuf");
+        if (isActuallyReplace) {
+          isNew = true;
+        } else {
+          // Linha de Dano/Área PDR vinculada na tabela de Áreas/Danos
+          const mCount = (matchedPart.description || "").match(/(\d+)\s*mossa/i);
+          if (mCount) {
+            dents = parseInt(mCount[1], 10);
+          } else if (Number(matchedPart.quantity) > 0) {
+            dents = Number(matchedPart.quantity);
+          }
+          if (pDesc.includes("[alu]") || pDesc.includes("aluminium")) isAlu = true;
+          if (pDesc.includes("colle") || pDesc.includes("cola")) isColle = true;
+          if (pDesc.includes("dap")) isDap = true;
+          if (pDesc.includes("pintura") || pDesc.includes("peint")) isPaint = true;
+        }
+        if (!customPrice && Number(matchedPart.unit_price) > 0 && !matchedPart.description?.includes("Incluso no Conjunto")) {
+          customPrice = (matchedPart.pricing_mode === "fixed" || matchedPart.pricingMode === "fixed")
+            ? Number(matchedPart.unit_price)
+            : Number(matchedPart.quantity || 1) * Number(matchedPart.unit_price);
         }
       }
 

@@ -312,7 +312,7 @@ export function getBudgetPdf(id: string, lang?: string): Promise<Blob> {
   if (!resolvedLang && typeof window !== "undefined") {
     try {
       resolvedLang = localStorage.getItem("qwork-lang") || undefined;
-    } catch {}
+    } catch { }
   }
   const query = resolvedLang ? `?lang=${encodeURIComponent(resolvedLang)}` : "";
   return apiBlobRequest(`/budgets/${id}/pdf${query}`);
@@ -402,8 +402,20 @@ export function apiBudgetToLocalBudget(api: ApiBudget): any {
     discount_pct: Number(rev?.discountPct ?? rev?.discount_pct ?? 0),
     iva_pct: Number(rev?.taxPct ?? rev?.tax_pct ?? 0),
 
-    parts: rev?.parts || [],
-    services: rev?.services || [],
+    parts: (rev?.parts || []).map((p: any) => {
+      const isIncluded =
+        p?.pricing_mode === "global" ||
+        p?.pricingMode === "global" ||
+        (typeof p?.description === "string" && p.description.includes("Incluso no Conjunto"));
+      return isIncluded ? { ...p, unit_price: 0, pricing_mode: "global" } : p;
+    }),
+    services: (rev?.services || []).map((s: any) => {
+      const isIncluded =
+        s?.pricing_mode === "global" ||
+        s?.pricingMode === "global" ||
+        (typeof s?.description === "string" && s.description.includes("Incluso no Conjunto"));
+      return isIncluded ? { ...s, unit_price: 0, pricing_mode: "global" } : s;
+    }),
     labor: rev?.labor || [],
 
     vehicle_view_state: null,
