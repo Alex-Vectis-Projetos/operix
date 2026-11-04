@@ -171,34 +171,41 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const totals = useMemo(() => {
     return items.reduce(
       (acc, b) => {
-        const p = (b.parts || []).reduce(
-          (s, x) =>
-            s +
-            Math.max(0, Number(x?.quantity) || 0) *
-            Math.max(0, Number(x?.unit_price) || 0),
-          0,
-        );
-        const sv = Array.isArray((b as any).services)
-          ? (b as any).services.reduce(
-            (s: number, x: any) =>
-              s +
-              Math.max(0, Number(x?.quantity) || 0) *
-              Math.max(0, Number(x?.unit_price) || 0),
-            0,
-          )
-          : 0;
-        const l = (b.labor || []).reduce(
-          (s, x) =>
-            s +
-            Math.max(0, Number(x?.hours) || 0) *
-            Math.max(0, Number(x?.hourly_rate) || 0),
-          0,
-        );
-        const gross = p + sv + l;
-        const disc = (gross * Math.max(0, Math.min(100, Number(b.discount_pct) || 0))) / 100;
-        const net = Math.max(0, gross - disc);
-        const iva = (net * Math.max(0, Number(b.iva_pct) || 0)) / 100;
-        const total = net + iva;
+        const total =
+          (b as any).final_total != null &&
+          !isNaN(Number((b as any).final_total)) &&
+          (!b.parts?.length && !b.services?.length && !b.labor?.length)
+            ? Number((b as any).final_total)
+            : (() => {
+                const p = (b.parts || []).reduce(
+                  (s, x) =>
+                    s +
+                    Math.max(0, Number(x?.quantity) || 0) *
+                    Math.max(0, Number(x?.unit_price) || 0),
+                  0,
+                );
+                const sv = Array.isArray((b as any).services)
+                  ? (b as any).services.reduce(
+                      (s: number, x: any) =>
+                        s +
+                        Math.max(0, Number(x?.quantity) || 0) *
+                        Math.max(0, Number(x?.unit_price) || 0),
+                      0,
+                    )
+                  : 0;
+                const l = (b.labor || []).reduce(
+                  (s, x) =>
+                    s +
+                    Math.max(0, Number(x?.hours) || 0) *
+                    Math.max(0, Number(x?.hourly_rate) || 0),
+                  0,
+                );
+                const gross = p + sv + l;
+                const disc = (gross * Math.max(0, Math.min(100, Number(b.discount_pct) || 0))) / 100;
+                const net = Math.max(0, gross - disc);
+                const iva = (net * Math.max(0, Number(b.iva_pct) || 0)) / 100;
+                return net + iva;
+              })();
         if (b.status === "approved") {
           acc.approved += 1;
           return acc;
@@ -365,6 +372,15 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   };
 
   const computeTotalsFor = (b: Budget) => {
+    if (
+      (b as any).final_total != null &&
+      !isNaN(Number((b as any).final_total)) &&
+      (!b.parts?.length && !b.services?.length && !b.labor?.length)
+    ) {
+      const total = Number((b as any).final_total);
+      const gross = Number((b as any).gross_total ?? total);
+      return { parts: 0, services: 0, labor: 0, gross, disc: 0, net: gross, iva: total - gross, total };
+    }
     const p = (b.parts || []).reduce(
       (s, x) =>
         s +

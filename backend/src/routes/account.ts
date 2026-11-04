@@ -113,6 +113,8 @@ async function resolveEffectiveAccessContext(
                 select: {
                   ownerUserId: true,
                   name: true,
+                  brandConfig: true,
+                  logoUrl: true,
                 },
               },
             },
@@ -323,6 +325,63 @@ accountRouter.get("/role", async (req: AuthenticatedRequest, res: Response, next
       membership_role: access.membershipRole,
       is_workspace_owner: access.isWorkspaceOwner,
       workspace_id: access.currentWorkspaceId,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+accountRouter.get("/bootstrap", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const authUserId = req.auth!.userId;
+    const requestedWorkspaceId =
+      (req.headers["x-workspace-id"] as string | undefined) ||
+      (req.query.workspaceId as string | undefined) ||
+      null;
+
+    const access = await resolveEffectiveAccessContext(authUserId, requestedWorkspaceId);
+    if (!access) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    const { user } = access;
+    const rawMemberships = user.appUser?.memberships ?? [];
+    const workspaces = rawMemberships.map((m: any) => ({
+      workspaceId: m.workspaceId,
+      workspaceName: m.workspace.name,
+      ownerAppUserId: m.workspace.ownerUserId,
+      membershipRole: m.role,
+      membershipStatus: "active",
+      brandConfig: m.workspace.brandConfig ?? null,
+      logoUrl: m.workspace.logoUrl ?? null,
+    }));
+
+    const permissions = buildPermissionsForRole(
+      access.effectiveDbRole,
+      access.currentMembership?.permissionsOverrides as Record<string, boolean> | null
+    );
+
+    const activeWs = workspaces.find((w: any) => w.workspaceId === access.currentWorkspaceId) ?? (workspaces[0] ?? null);
+
+    return res.json({
+      appUserId: user.appUser?.id ?? null,
+      authUserId,
+      email: user.email,
+      role: access.effectiveDbRole,
+      membershipRole: access.membershipRole,
+      isWorkspaceOwner: access.isWorkspaceOwner,
+      activeWorkspaceId: access.currentWorkspaceId,
+      activeWorkspace: activeWs,
+      workspaces,
+      permissions: {
+        role: access.effectiveDbRole,
+        membership_role: access.membershipRole,
+        is_workspace_owner: access.isWorkspaceOwner,
+        workspace_id: access.currentWorkspaceId,
+        permissions_overrides: access.currentMembership?.permissionsOverrides ?? null,
+        ...permissions,
+      },
+      computedAt: new Date().toISOString(),
     });
   } catch (error) {
     return next(error);

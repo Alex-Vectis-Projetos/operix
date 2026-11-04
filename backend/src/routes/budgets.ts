@@ -381,6 +381,99 @@ function formatProductionOrder(po: any) {
   };
 }
 
+function formatRevisionSummary(r: any) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    revision_number: r.revisionNumber,
+    revisionNumber: r.revisionNumber,
+    status: r.status,
+    currency_code: r.currencyCode,
+    currencyCode: r.currencyCode,
+    budget_type: r.budgetType,
+    budgetType: r.budgetType,
+    gross_total: r.grossTotal?.toString?.() ?? r.grossTotal,
+    grossTotal: r.grossTotal?.toString?.() ?? r.grossTotal,
+    discount_pct: r.discountPct?.toString?.() ?? r.discountPct,
+    discountPct: r.discountPct?.toString?.() ?? r.discountPct,
+    discount_total: r.discountTotal?.toString?.() ?? r.discountTotal,
+    discountTotal: r.discountTotal?.toString?.() ?? r.discountTotal,
+    net_total: r.netTotal?.toString?.() ?? r.netTotal,
+    netTotal: r.netTotal?.toString?.() ?? r.netTotal,
+    tax_pct: r.taxPct?.toString?.() ?? r.taxPct,
+    taxPct: r.taxPct?.toString?.() ?? r.taxPct,
+    tax_total: r.taxTotal?.toString?.() ?? r.taxTotal,
+    taxTotal: r.taxTotal?.toString?.() ?? r.taxTotal,
+    final_total: r.finalTotal?.toString?.() ?? r.finalTotal,
+    finalTotal: r.finalTotal?.toString?.() ?? r.finalTotal,
+    signature: r.signature ? { signed: !!r.signature.signed } : null,
+    dossier_snapshot: r.dossierSnapshot ? { pdfLang: r.dossierSnapshot.pdfLang || r.dossierSnapshot.lang } : null,
+    dossierSnapshot: r.dossierSnapshot ? { pdfLang: r.dossierSnapshot.pdfLang || r.dossierSnapshot.lang } : null,
+    parts: [],
+    services: [],
+    labor: [],
+    created_at: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+  };
+}
+
+function formatBudgetSummary(b: any) {
+  if (!b) return null;
+  const activeRev = b.approvedRevision || b.currentRevision;
+  const isApproved =
+    !!b.approvedRevisionId ||
+    b.currentRevision?.status === "approved" ||
+    !!(b.currentRevision?.signature as any)?.signed;
+
+  return {
+    id: b.id,
+    workspace_id: b.workspaceId,
+    workspaceId: b.workspaceId,
+    status: isApproved ? "approved" : (b.currentRevision?.status || b.status || "draft"),
+    code: b.code,
+    client_id: b.clientId,
+    clientId: b.clientId,
+    client_name: b.clientName,
+    clientName: b.clientName,
+    vehicle_plate: b.vehiclePlate,
+    vehiclePlate: b.vehiclePlate,
+    vehicle_vin: b.vehicleVin,
+    vehicleVin: b.vehicleVin,
+    vehicle_brand: b.vehicleBrand,
+    vehicleBrand: b.vehicleBrand,
+    vehicle_model: b.vehicleModel,
+    vehicleModel: b.vehicleModel,
+    current_revision_number: b.currentRevisionNumber,
+    currentRevisionNumber: b.currentRevisionNumber,
+    current_revision_id: b.currentRevisionId,
+    currentRevisionId: b.currentRevisionId,
+    approved_revision_id: b.approvedRevisionId,
+    approvedRevisionId: b.approvedRevisionId,
+    technician_user_id: b.technicianUserId,
+    technicianUserId: b.technicianUserId,
+    created_by_id: b.createdById,
+    createdById: b.createdById,
+    legacy_local_id: b.legacyLocalId,
+    legacyLocalId: b.legacyLocalId,
+    created_at: b.createdAt instanceof Date ? b.createdAt.toISOString() : b.createdAt,
+    createdAt: b.createdAt instanceof Date ? b.createdAt.toISOString() : b.createdAt,
+    updated_at: b.updatedAt instanceof Date ? b.updatedAt.toISOString() : b.updatedAt,
+    updatedAt: b.updatedAt instanceof Date ? b.updatedAt.toISOString() : b.updatedAt,
+    current_revision: formatRevisionSummary(b.currentRevision),
+    currentRevision: formatRevisionSummary(b.currentRevision),
+    approved_revision: formatRevisionSummary(b.approvedRevision),
+    approvedRevision: formatRevisionSummary(b.approvedRevision),
+    revisions: Array.isArray(b.revisions) ? b.revisions.map(formatRevisionSummary) : undefined,
+    production_order: formatProductionOrder(b.productionOrder),
+    productionOrder: formatProductionOrder(b.productionOrder),
+    final_total: activeRev?.finalTotal?.toString?.() ?? "0.00",
+    finalTotal: activeRev?.finalTotal?.toString?.() ?? "0.00",
+    gross_total: activeRev?.grossTotal?.toString?.() ?? "0.00",
+    grossTotal: activeRev?.grossTotal?.toString?.() ?? "0.00",
+    is_summary: true,
+  };
+}
+
 function formatBudget(b: any) {
   if (!b) return null;
   return {
@@ -469,8 +562,9 @@ budgetsRouter.get("/", async (req: Request, res: Response, next: NextFunction) =
       orderBy: { createdAt: "desc" },
     });
 
+    const isFull = req.query.full === "true";
     return res.status(200).json({
-      budgets: budgets.map(formatBudget),
+      budgets: budgets.map(isFull ? formatBudget : formatBudgetSummary),
     });
   } catch (error) {
     return next(error);

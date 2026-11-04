@@ -5,7 +5,7 @@ import { RealtimeHub } from "@/lib/realtime/RealtimeHub";
 import { useAuth } from "./useAuth";
 import { useRole } from "./useRole";
 import { useImpersonation } from "./useImpersonation";
-import { useWorkspaceOptional } from "./useWorkspace";
+import { useWorkspaceOptional, useSessionBootstrap, BOOTSTRAP_QUERY_KEY } from "./useWorkspace";
 
 /**
  * Permission key format: "module.action"
@@ -44,21 +44,26 @@ function useMyPermissionsMap() {
   const workspaceId = workspace?.workspaceId ?? null;
   const isWorkspaceLoading = workspace?.isLoading ?? false;
 
+  const { data: bootstrap, isLoading: bootstrapLoading } = useSessionBootstrap();
+
   useEffect(() => {
     if (!permUserId) {
       return;
     }
 
-    const invalidate = () => qc.invalidateQueries({ queryKey: PERMS_QUERY_KEY });
+    const invalidate = () => {
+      qc.invalidateQueries({ queryKey: PERMS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: BOOTSTRAP_QUERY_KEY });
+    };
     const off = RealtimeHub.subscribe({ table: "user_roles" }, invalidate);
     return () => {
       off();
     };
   }, [permUserId, qc]);
 
-  return useQuery({
+  const query = useQuery({
     queryKey: [...PERMS_QUERY_KEY, permUserId, dbRole, isImpersonating, workspaceId],
-    enabled: !!permUserId && !authLoading && !roleLoading && !isWorkspaceLoading && !!workspaceId,
+    enabled: !!isImpersonating && !!permUserId && !authLoading && !roleLoading && !isWorkspaceLoading && !!workspaceId,
     staleTime: 30_000,
     retry: 0,
     placeholderData: keepPreviousData,
@@ -87,6 +92,20 @@ function useMyPermissionsMap() {
       }
     },
   });
+
+  if (!isImpersonating && bootstrap?.permissions) {
+    return {
+      data: {
+        admin: bootstrap.permissions.admin || isAdmin,
+        map: (bootstrap.permissions.map as Record<string, Entry>) || {},
+      },
+      isLoading: authLoading || (!bootstrap && bootstrapLoading),
+      isPending: false,
+      isFetching: false,
+    };
+  }
+
+  return query;
 }
 
 /** Manually invalidate the permissions cache (call after toggling perms in UI). */

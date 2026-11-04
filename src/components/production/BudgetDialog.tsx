@@ -2,7 +2,7 @@ import { VehicleBlueprint5Views, type DamagePointData, type ValidatedPartSummary
 import { Eye } from "lucide-react";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto, markBudgetSent, getBudgetSignLink } from "@/lib/apiBudgets";
+import { getBudget, apiBudgetToLocalBudget, getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto, markBudgetSent, getBudgetSignLink } from "@/lib/apiBudgets";
 import {
   Dialog,
   DialogContent,
@@ -1614,92 +1614,112 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     if (loadedPdfLang && ["pt", "fr", "en", "es", "de", "it", "pl", "ru"].includes(loadedPdfLang.toLowerCase().slice(0, 2))) {
       setPdfLang(loadedPdfLang.toLowerCase().slice(0, 2));
     }
-      const type = normalizeBudgetType(
-        (base as unknown as Record<string, unknown>)?.budget_type as string | undefined,
-        undefined,
-      );
-      const normalizedSelections: unknown[] = Array.isArray((base as any).mechanical_selections)
-        ? (base as any).mechanical_selections.filter(Boolean)
-        : [];
-      const legacyIntervs = getBudgetInterventions(base);
-      const baseServices: BudgetServiceLine[] = Array.isArray((base as any).services)
-        ? ((base as any).services as BudgetServiceLine[]).filter(Boolean)
-        : [{ id: uid(), description: "", quantity: 1, unit_price: 0 }];
-      const baseParts: BudgetPartLine[] = Array.isArray(base.parts) && base.parts.length > 0
-        ? base.parts.filter(Boolean)
-        : [{ id: uid(), description: "", quantity: 1, unit_price: 0 }];
-      const baseLabor: BudgetLaborLine[] = Array.isArray(base.labor) && base.labor.length > 0
-        ? base.labor.filter(Boolean)
-        : [{ id: uid(), description: "", hours: 1, hourly_rate: 0 }];
-      const baseSignature: BudgetSignature =
-        (base as any).signature && typeof (base as any).signature === "object"
-          ? { ...emptySignature(), ...(base as any).signature }
-          : emptySignature();
-      const baseRejection: BudgetRejection =
-        (base as any).rejection && typeof (base as any).rejection === "object"
-          ? { ...emptyRejection(), ...(base as any).rejection }
-          : emptyRejection();
-      const next: Budget = {
-        ...emptyBudget(type),
-        ...base,
-        budget_type: type ?? ("" as any),
-        parts: baseParts,
-        services: baseServices,
-        labor: baseLabor,
-        signature: baseSignature,
-        rejection: baseRejection,
-        address_country:
-          (base as Budget).address_country ?? DEFAULT_CLIENT_COUNTRY,
-        dossier_claim_number: (base as Budget).dossier_claim_number ?? "",
-        dossier_expert_number: (base as Budget).dossier_expert_number ?? "",
-        dossier_insurance_company: (base as Budget).dossier_insurance_company ?? "",
-        dossier_garage_name: (base as Budget).dossier_garage_name ?? "",
-        address_number: (base as Budget).address_number ?? "",
-        address_street: (base as Budget).address_street ?? "",
-        address_postal: (base as Budget).address_postal ?? "",
-        address_city: (base as Budget).address_city ?? "",
-        vehicle_view_state: (base as any).vehicle_view_state ?? null,
-        mechanical_selections: normalizedSelections,
+    const type = normalizeBudgetType(
+      (base as unknown as Record<string, unknown>)?.budget_type as string | undefined,
+      undefined,
+    );
+    const normalizedSelections: unknown[] = Array.isArray((base as any).mechanical_selections)
+      ? (base as any).mechanical_selections.filter(Boolean)
+      : [];
+    const legacyIntervs = getBudgetInterventions(base);
+    const baseServices: BudgetServiceLine[] = Array.isArray((base as any).services)
+      ? ((base as any).services as BudgetServiceLine[]).filter(Boolean)
+      : [{ id: uid(), description: "", quantity: 1, unit_price: 0 }];
+    const baseParts: BudgetPartLine[] = Array.isArray(base.parts) && base.parts.length > 0
+      ? base.parts.filter(Boolean)
+      : [{ id: uid(), description: "", quantity: 1, unit_price: 0 }];
+    const baseLabor: BudgetLaborLine[] = Array.isArray(base.labor) && base.labor.length > 0
+      ? base.labor.filter(Boolean)
+      : [{ id: uid(), description: "", hours: 1, hourly_rate: 0 }];
+    const baseSignature: BudgetSignature =
+      (base as any).signature && typeof (base as any).signature === "object"
+        ? { ...emptySignature(), ...(base as any).signature }
+        : emptySignature();
+    const baseRejection: BudgetRejection =
+      (base as any).rejection && typeof (base as any).rejection === "object"
+        ? { ...emptyRejection(), ...(base as any).rejection }
+        : emptyRejection();
+    const next: Budget = {
+      ...emptyBudget(type),
+      ...base,
+      budget_type: type ?? ("" as any),
+      parts: baseParts,
+      services: baseServices,
+      labor: baseLabor,
+      signature: baseSignature,
+      rejection: baseRejection,
+      address_country:
+        (base as Budget).address_country ?? DEFAULT_CLIENT_COUNTRY,
+      dossier_claim_number: (base as Budget).dossier_claim_number ?? "",
+      dossier_expert_number: (base as Budget).dossier_expert_number ?? "",
+      dossier_insurance_company: (base as Budget).dossier_insurance_company ?? "",
+      dossier_garage_name: (base as Budget).dossier_garage_name ?? "",
+      address_number: (base as Budget).address_number ?? "",
+      address_street: (base as Budget).address_street ?? "",
+      address_postal: (base as Budget).address_postal ?? "",
+      address_city: (base as Budget).address_city ?? "",
+      vehicle_view_state: (base as any).vehicle_view_state ?? null,
+      mechanical_selections: normalizedSelections,
+    };
+    next.intervention_types = [...legacyIntervs];
+    next.intervention_type = legacyIntervs.length > 0 ? legacyIntervs.join(", ") : "";
+    if (!next.number) {
+      next.number = generateBudgetNumber();
+    }
+    setForm((prev) => {
+      const keepClientId = prev.client_id || next.client_id;
+      const keepClientDisplayId = prev.client_display_id || next.client_display_id;
+      const keepClientName = prev.client_name || next.client_name;
+      const keepClientPhone = prev.client_phone || next.client_phone;
+      const keepClientEmail = prev.client_email || next.client_email;
+      const keepClientDoc = prev.client_document || next.client_document;
+
+      return {
+        ...next,
+        client_id: keepClientId || "",
+        client_display_id: keepClientDisplayId || "",
+        client_name: keepClientName || "",
+        client_phone: keepClientPhone || "",
+        client_email: keepClientEmail || "",
+        client_document: keepClientDoc || "",
+        address_street: prev.address_street || next.address_street,
+        address_complement: prev.address_complement || next.address_complement,
+        address_postal: prev.address_postal || next.address_postal,
+        address_city: prev.address_city || next.address_city,
+        address_country: prev.address_country || next.address_country,
       };
-      next.intervention_types = [...legacyIntervs];
-      next.intervention_type = legacyIntervs.length > 0 ? legacyIntervs.join(", ") : "";
-      if (!next.number) {
-        next.number = generateBudgetNumber();
-      }
-      setForm((prev) => {
-        const keepClientId = prev.client_id || next.client_id;
-        const keepClientDisplayId = prev.client_display_id || next.client_display_id;
-        const keepClientName = prev.client_name || next.client_name;
-        const keepClientPhone = prev.client_phone || next.client_phone;
-        const keepClientEmail = prev.client_email || next.client_email;
-        const keepClientDoc = prev.client_document || next.client_document;
+    });
 
-        return {
-          ...next,
-          client_id: keepClientId || "",
-          client_display_id: keepClientDisplayId || "",
-          client_name: keepClientName || "",
-          client_phone: keepClientPhone || "",
-          client_email: keepClientEmail || "",
-          client_document: keepClientDoc || "",
-          address_street: prev.address_street || next.address_street,
-          address_complement: prev.address_complement || next.address_complement,
-          address_postal: prev.address_postal || next.address_postal,
-          address_city: prev.address_city || next.address_city,
-          address_country: prev.address_country || next.address_country,
-        };
-      });
+    if (initial) {
+      setStep("form");
+      setShowBackToType(true);
+    } else {
+      setStep("choose_type");
+      setShowBackToType(false);
+    }
+    setIntervQuery("");
+    setIntervPopoverOpen(false);
+    setConfirmBudgetType({ open: false, pending: null, source: "choose_step" });
 
-      if (initial) {
-        setStep("form");
-        setShowBackToType(true);
-      } else {
-        setStep("choose_type");
-        setShowBackToType(false);
-      }
-      setIntervQuery("");
-      setIntervPopoverOpen(false);
-      setConfirmBudgetType({ open: false, pending: null, source: "choose_step" });
+    if (
+      initial?.id &&
+      !initial.id.startsWith("local-") &&
+      ((initial as any)?.is_summary || (!initial.parts?.length && !initial.services?.length && !initial.labor?.length))
+    ) {
+      getBudget(initial.id)
+        .then((res) => {
+          if (res?.budget) {
+            const fullLocal = apiBudgetToLocalBudget(res.budget);
+            setFormSafe((prev) => ({
+              ...prev,
+              ...fullLocal,
+            }));
+          }
+        })
+        .catch((err) => {
+          console.warn("Erro ao carregar detalhes completos do orçamento:", err);
+        });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial?.id]);
 
@@ -1884,7 +1904,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
               new Date(iso).toISOString();
             }
             if (iso) next.issued_at = iso;
-          } catch {}
+          } catch { }
         }
       }
       if (sel.vehicle_brand) maybeSet("vehicle_brand", ocrExtraction.vehicle_brand);
@@ -2142,7 +2162,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       signerType: resolvedSignerType,
       signedAt,
       signatureData: "CONFIRMED_WITHOUT_SIGNATURE",
-      confirmationMethod: "EXPLICIT_CONFIRMATION",
+      confirmationMethod: "NO_SIGNATURE_EXPLICIT_CONFIRMATION",
       budgetNumberAtMoment: form.number || null,
       finalValueAtMoment: totals.total,
     };
@@ -2476,8 +2496,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
 
     const signPart = signLink
       ? (langDisplay === "fr"
-          ? `\n\n✍️ Vous pouvez consulter les détails et signer directement sur votre smartphone via ce lien sécurisé :\n${signLink}`
-          : `\n\n✍️ Você pode visualizar os detalhes e assinar diretamente pelo celular no link abaixo:\n${signLink}`)
+        ? `\n\n✍️ Vous pouvez consulter les détails et signer directement sur votre smartphone via ce lien sécurisé :\n${signLink}`
+        : `\n\n✍️ Você pode visualizar os detalhes e assinar diretamente pelo celular no link abaixo:\n${signLink}`)
       : "";
 
     const text = encodeURIComponent(
@@ -2491,7 +2511,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         : "\n\nO documento PDF foi baixado e está pronto para envio."),
     );
     const url = `https://wa.me/${digits}?text=${text}`;
-    try { window.open(url, "_blank", "noopener,noreferrer"); } catch {}
+    try { window.open(url, "_blank", "noopener,noreferrer"); } catch { }
 
     try {
       if (form.id && !form.id.startsWith("local-")) {
@@ -2580,23 +2600,23 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       (s, x) =>
         s +
         Math.max(0, Number(x?.quantity) || 0) *
-          Math.max(0, Number(x?.unit_price) || 0),
+        Math.max(0, Number(x?.unit_price) || 0),
       0,
     );
     const sv = Array.isArray((b as any).services)
       ? (b as any).services.reduce(
-          (s: number, x: any) =>
-            s +
-            Math.max(0, Number(x?.quantity) || 0) *
-              Math.max(0, Number(x?.unit_price) || 0),
-          0,
-        )
+        (s: number, x: any) =>
+          s +
+          Math.max(0, Number(x?.quantity) || 0) *
+          Math.max(0, Number(x?.unit_price) || 0),
+        0,
+      )
       : 0;
     const l = (b.labor || []).reduce(
       (s, x) =>
         s +
         Math.max(0, Number(x?.hours) || 0) *
-          Math.max(0, Number(x?.hourly_rate) || 0),
+        Math.max(0, Number(x?.hourly_rate) || 0),
       0,
     );
     const gross = p + sv + l;
@@ -2714,2501 +2734,2501 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-1.5rem)] sm:w-full max-w-6xl max-h-[92vh] overflow-y-auto overflow-x-hidden">
-        <DialogHeader>
-          <DialogTitle className="flex flex-wrap items-center gap-3">
-            {step === "form" && showBackToType && !initial ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 -ml-2 text-muted-foreground"
-                type="button"
-                onClick={() => setStep("choose_type")}
-              >
-                <ArrowLeft className="h-4 w-4 mr-1" /> Trocar tipo
-              </Button>
-            ) : null}
-            <CalculatorIcon className={`h-5 w-5 ${meta.dot.replace("bg-", "text-")}`} />
-            <span>
-              {initial
-                ? langDisplay === "fr"
-                  ? "Modifier le devis"
-                  : "Editar Orçamento"
-                : step === "choose_type"
-                  ? langDisplay === "fr"
-                    ? "Nouveau devis · Type"
-                    : "Novo Orçamento · Tipo"
-                  : langDisplay === "fr"
-                    ? "Nouveau devis"
-                    : "Novo Orçamento"}
-            </span>
-            <Badge variant="outline" className="text-xs">
-              {form.number || (langDisplay === "fr" ? "Brouillon" : "Rascunho")}
-            </Badge>
-            {step === "form" && isValidBudgetType(form.budget_type) ? (
-              <Badge variant="outline" className={`gap-1 ${meta.accent}`}>
-                <meta.icon className="h-3.5 w-3.5" />
-                {btLabel(form.budget_type, langDisplay)}
-              </Badge>
-            ) : null}
-            <StatusBadge status={form.status} />
-            {step === "form" && !isLocked ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="gap-1.5 ml-2 h-8 border-dashed text-muted-foreground hover:text-foreground"
-                onClick={() => {
-                  setOcrSelectedBudgetType(form.budget_type || "pdr");
-                  setOcrErrorMessage(null);
-                  setOcrExtraction(null);
-                  setOcrApplySelections({});
-                  setOcrDamageSelections({});
-                  setOcrLaborSelections({});
-                  setOcrDialogOpen(true);
-                }}
-                disabled={ocrIsExtracting || _ocrLoading1}
-              >
-                <ScanIcon className="h-3.5 w-3.5" />
-                {langDisplay === "fr" ? "Numériser document" : "Escanear documento"}
-              </Button>
-            ) : null}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            {langDisplay === "fr"
-              ? "Formulaire technique de devis avec données du client, véhicule, articles et totaux."
-              : "Formulário técnico de orçamento com dados do cliente, veículo, itens e totais."}
-          </DialogDescription>
-        </DialogHeader>
-
-        {isLocked ? (
-          <div
-            className={cn(
-              "mb-3 mt-1 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs",
-              form.status === "rejected"
-                ? "bg-destructive/5 border-destructive/30 text-destructive"
-                : "bg-emerald-500/5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400",
-            )}
-          >
-            <LockIcon className="h-4 w-4 shrink-0 mt-0.5" />
-            <div className="leading-relaxed flex-1">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <strong className="font-semibold">
-                  {form.status === "rejected"
-                    ? langDisplay === "fr"
-                      ? "Devis rejeté · Bloqué en écriture"
-                      : "Orçamento rejeitado · Bloqueado para edição"
-                    : langDisplay === "fr"
-                      ? "Devis approuvé · Bloqué en écriture"
-                      : "Orçamento aprovado · Bloqueado para edição"}
-                </strong>
-                {form.status === "rejected" && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
-                    onClick={() => {
-                      setFormSafe((prev) => ({
-                        ...prev,
-                        status: "draft",
-                        rejection: { rejected: false, rejectedAt: null, rejectedBy: null, reason: null },
-                      }));
-                      toast.info("Orçamento reaberto como rascunho para renegociação. Salve as alterações para registrar uma nova revisão.");
-                    }}
-                  >
-                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                    {langDisplay === "fr" ? "Rouvrir / Nouvelle révision" : "Reabrir / Nova Revisão"}
-                  </Button>
-                )}
-              </div>
-              <span className="block opacity-90 mt-0.5">
-                {form.status === "rejected" && form.rejection?.reason
-                  ? `Motivo do descarte: ${form.rejection.reason}`
-                  : langDisplay === "fr"
-                    ? "Aucune modification n'est autorisée. Les valeurs financières sont figées."
-                    : "Nenhuma alteração é permitida. Os valores financeiros estão congelados."}
-                {form.signature.signed && form.signature.finalValueAtMoment != null
-                  ? ` ${langDisplay === "fr" ? "Valeur finale approuvée :" : "Valor final aprovado:"} ${formatBRL(form.signature.finalValueAtMoment)}`
-                  : ""}
-              </span>
-            </div>
-          </div>
-        ) : null}
-
-        {form.status === "correction_needed" ? (
-          <div className="mb-3 mt-1 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-            <div className="leading-relaxed">
-              <strong className="font-semibold">
-                {langDisplay === "fr" ? "Correction demandée par la Production" : "Correção solicitada pela Produção"}
-              </strong>
-              <span className="block opacity-90 mt-0.5">
-                {langDisplay === "fr"
-                  ? "Modifiez les données requises puis approuvez à nouveau pour renvoyer vers la Production."
-                  : "Edite os dados solicitados e depois aprove novamente para reenviar à Produção."}
-              </span>
-            </div>
-          </div>
-        ) : null}
-
-        {step === "choose_type" ? (
-          <div className="space-y-5 pt-2">
-            <Section title={langDisplay === "fr" ? "Type de devis" : "Tipo de Orçamento"}>
-              <p className="text-xs text-muted-foreground">
-                {langDisplay === "fr"
-                  ? "Sélectionnez le type de devis. Ce choix définit la structure et les interventions disponibles ci-dessous."
-                  : "Selecione o tipo de orçamento. Esta escolha determina a estrutura e as intervenções disponíveis abaixo."}
-              </p>
-              <div className="pt-2 max-w-md">
-                <Select
-                  value={isValidBudgetType(form.budget_type) ? form.budget_type : ""}
-                  onValueChange={(v) => {
-                    const t = normalizeBudgetType(v);
-                    if (t) setFormSafe((f) => ({ ...f, budget_type: t as any }));
-                  }}
+        <DialogContent className="w-[calc(100vw-1.5rem)] sm:w-full max-w-6xl max-h-[92vh] overflow-y-auto overflow-x-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex flex-wrap items-center gap-3">
+              {step === "form" && showBackToType && !initial ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 -ml-2 text-muted-foreground"
+                  type="button"
+                  onClick={() => setStep("choose_type")}
                 >
-                  <SelectTrigger className="h-10">
-                    <SelectValue placeholder={langDisplay === "fr" ? "Sélectionner le type de devis" : "Selecionar tipo de orçamento"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="mechanics">Mecânica</SelectItem>
-                    <SelectItem value="body_paint">Funilaria</SelectItem>
-                    <SelectItem value="pdr">Martelinho / PDR</SelectItem>
-                    <SelectItem value="assembly_disassembly">Montagem / Desmontagem</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </Section>
-            <DialogFooter className="pt-1">
-              <div className="flex w-full flex-wrap justify-between gap-2">
-                <Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
-                  <X className="h-4 w-4 mr-1" /> {langDisplay === "fr" ? "Annuler" : "Cancelar"}
+                  <ArrowLeft className="h-4 w-4 mr-1" /> Trocar tipo
                 </Button>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      const t = normalizeBudgetType(form.budget_type);
-                      if (t) chooseType(t);
-                    }}
-                    variant="default"
-                    disabled={!isValidBudgetType(form.budget_type)}
-                  >
-                    {langDisplay === "fr" ? "Continuer" : "Continuar"}
-                  </Button>
-                </div>
-              </div>
-            </DialogFooter>
-          </div>
-        ) : (
-          <div className="space-y-6 pt-2">
-            <Section
-              title={
-                <span className="inline-flex items-center gap-2">
-                  <Users className="h-3.5 w-3.5 text-slate-500" />
-                  Cliente
-                </span>
-              }
-            >
-              {/* Seleção / pesquisa do cliente cadastrado */}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
-                <div className="sm:col-span-10">
-                  <Label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {langDisplay === "fr" ? "Sélectionner un client" : "Selecionar cliente cadastrado"}
-                    <span className="ml-2 font-sans normal-case tracking-normal text-[10px] text-slate-500">
-                      (C-00001 · nome · SIREN · telefone · documento)
-                    </span>
-                  </Label>
-                  <Popover
-                    open={clientSearchOpen}
-                    onOpenChange={(val) => {
-                      setClientSearchOpen(val);
-                      if (val) refetchClients();
-                    }}
-                  >
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="w-full justify-start font-normal text-left h-10 px-3"
-                        disabled={isLocked}
-                      >
-                        {(selectedClient?.name || form.client_name || form.client_id) ? (
-                          <span className="inline-flex items-center gap-2 overflow-hidden">
-                            {(form.client_display_id || selectedClient?.customer_display_id) && (
-                              <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/40 bg-primary/10 shrink-0">
-                                {form.client_display_id || selectedClient?.customer_display_id}
-                              </Badge>
-                            )}
-                            <span className="truncate font-medium">{selectedClient?.name || form.client_name}</span>
-                            {([form.client_phone || selectedClient?.phone, form.client_email || selectedClient?.email].filter(Boolean).length > 0) && (
-                              <span className="text-muted-foreground truncate text-[11px]">
-                                {[form.client_phone || selectedClient?.phone, form.client_email || selectedClient?.email].filter(Boolean).join(" · ")}
-                              </span>
-                            )}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground flex items-center gap-2 w-full">
-                            <SearchIcon className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">
-                              {langDisplay === "fr"
-                                ? "Rechercher un client (C-00001, nom, SIREN, téléphone…)"
-                                : "Pesquisar cliente (C-00001, nome, SIREN, telefone…)"}
-                            </span>
-                          </span>
-                        )}
-                        <ChevronDown className="h-3.5 w-3.5 ml-auto shrink-0 text-muted-foreground" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      className="w-[calc(100vw-48px)] sm:w-[640px] p-0 shadow-2xl border border-slate-700 bg-slate-900 z-[1200]"
-                      align="start"
-                      sideOffset={4}
-                      onWheel={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex items-center border-b border-slate-800 px-3 py-2 gap-2">
-                        <SearchIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <Input
-                          className="h-9 border-0 bg-transparent focus-visible:ring-0 text-sm placeholder:text-muted-foreground p-0 flex-1"
-                          placeholder={
-                            langDisplay === "fr"
-                              ? "Rechercher par ID, nom, SIREN, SIRET, téléphone, document…"
-                              : "Pesquisar por ID, nome, SIREN, SIRET, telefone, documento…"
-                          }
-                          value={clientSearchQuery}
-                          onChange={(e) => setClientSearchQuery(e.target.value)}
-                          autoFocus
-                        />
-                        {clientSearchQuery && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                            onClick={() => setClientSearchQuery("")}
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </div>
-
-                      <div
-                        ref={(el) => {
-                          if (!el) return;
-                          const handleWheel = (e: WheelEvent) => {
-                            e.stopPropagation();
-                            el.scrollTop += e.deltaY;
-                          };
-                          el.addEventListener("wheel", handleWheel, { passive: true });
-                        }}
-                        onWheelCapture={(e) => {
-                          e.stopPropagation();
-                          e.currentTarget.scrollTop += e.deltaY;
-                        }}
-                        className="max-h-[380px] overflow-y-scroll overflow-x-hidden p-1 space-y-0.5 [scrollbar-width:thin] [scrollbar-color:#64748b_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-slate-800/40 [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-500"
-                        style={{ overscrollBehavior: "contain" }}
-                      >
-                        {filteredClients.length === 0 ? (
-                          <div className="p-6 text-center text-xs text-muted-foreground space-y-3">
-                            <p>
-                              {langDisplay === "fr"
-                                ? "Aucun client trouvé."
-                                : "Nenhum cliente encontrado."}
-                            </p>
-                            {clientSearchQuery.trim() ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                className="w-full text-xs gap-1.5"
-                                onClick={() => handleQuickCreateClient(clientSearchQuery)}
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                                {langDisplay === "fr"
-                                  ? `Créer le client "${clientSearchQuery.trim()}"`
-                                  : `Cadastrar cliente "${clientSearchQuery.trim()}"`}
-                              </Button>
-                            ) : null}
-                          </div>
-                        ) : (
-                          filteredClients.map((c) => {
-                            const isSelected = form.client_id === c.id;
-                            return (
-                              <div
-                                key={c.id}
-                                onClick={() => {
-                                  applyClientToBudget(c);
-                                  setClientSearchOpen(false);
-                                }}
-                                className={cn(
-                                  "flex items-center justify-between p-2.5 rounded-md cursor-pointer transition-colors text-left select-none",
-                                  isSelected
-                                    ? "bg-primary/20 text-primary border border-primary/40"
-                                    : "hover:bg-slate-800/80 text-foreground"
-                                )}
-                              >
-                                <div className="flex w-full flex-col gap-0.5 min-w-0 pr-2">
-                                  <div className="flex items-center gap-2">
-                                    <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/30 bg-primary/10 shrink-0">
-                                      {c.customer_display_id ?? (
-                                        <span className="text-muted-foreground/70 font-normal">—</span>
-                                      )}
-                                    </Badge>
-                                    <span className="font-medium text-sm truncate">{c.name}</span>
-                                    <Badge variant="outline" className="text-[10px] ml-auto shrink-0">
-                                      {c.kind === "professional"
-                                        ? (langDisplay === "fr" ? "Professionnel" : "Profissional")
-                                        : (langDisplay === "fr" ? "Particulier" : "Particular")}
-                                    </Badge>
-                                  </div>
-                                  <div className="text-[11px] text-muted-foreground truncate">
-                                    {[c.siret, c.siren, c.tva_intracom, c.tax_id, c.phone, c.email, c.city]
-                                      .filter(Boolean)
-                                      .join(" · ")}
-                                  </div>
-                                </div>
-                                <CheckIcon
-                                  className={cn(
-                                    "ml-auto h-4 w-4 shrink-0 transition-opacity",
-                                    isSelected ? "opacity-100 text-primary" : "opacity-0"
-                                  )}
-                                />
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                <div className="sm:col-span-2 flex items-end">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={unlinkClient}
-                    disabled={isLocked || !form.client_id}
-                    className="w-full text-xs text-muted-foreground border border-dashed border-slate-600/40 hover:text-rose-400 hover:border-rose-500/50"
-                  >
-                    <XCircle className="h-3.5 w-3.5 mr-1.5" />
-                    {langDisplay === "fr" ? "Délier" : "Desvincular"}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Dados do cliente: readonly se vinculado, editável legacy se não */}
-              {!form.client_id && (form.client_name || form.client_phone || form.client_email || form.client_document) ? (
-                <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                  <div className="mb-2 text-[10px] uppercase tracking-wider text-amber-400 font-medium flex items-center gap-1.5">
-                    <AlertTriangle className="h-3 w-3" />
-                    {langDisplay === "fr"
-                      ? "Client lié manuellement (ancien)"
-                      : "Cliente preenchido manualmente (compatibilidade)"}
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <Field label={langDisplay === "fr" ? "Nom / Raison sociale" : "Nome / Razão Social"}>
-                      <Input
-                        placeholder="Nome completo / Empresa"
-                        value={form.client_name}
-                        onChange={(e) => set("client_name", e.target.value)}
-                        disabled={isLocked}
-                      />
-                    </Field>
-                    <Field label={langDisplay === "fr" ? "Téléphone" : "Telefone"}>
-                      <Input
-                        placeholder="(11) 9 9999-9999"
-                        value={form.client_phone ?? ""}
-                        onChange={(e) => set("client_phone", e.target.value)}
-                        disabled={isLocked}
-                      />
-                    </Field>
-                    <Field label={langDisplay === "fr" ? "E-mail" : "E-mail"}>
-                      <Input
-                        type="email"
-                        placeholder="cliente@exemplo.com"
-                        value={form.client_email ?? ""}
-                        onChange={(e) => set("client_email", e.target.value)}
-                        disabled={isLocked}
-                      />
-                    </Field>
-                    <Field label={countryCfg.documentLabel}>
-                      <Input
-                        placeholder={countryCfg.documentPlaceholder}
-                        value={form.client_document ?? ""}
-                        onChange={(e) => set("client_document", e.target.value)}
-                        disabled={isLocked}
-                      />
-                    </Field>
-                  </div>
-                </div>
-              ) : form.client_id || form.client_name ? (
-                <div className="mt-4 rounded-lg border border-slate-700/40 bg-slate-900/30 p-4 space-y-3">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                        {langDisplay === "fr" ? "Nom / Raison sociale" : "Nome / Razão Social"}
-                      </div>
-                      <div className="font-medium">{form.client_name || "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                        {langDisplay === "fr" ? "Téléphone" : "Telefone"}
-                      </div>
-                      <div>{form.client_phone || "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                        {langDisplay === "fr" ? "E-mail" : "E-mail"}
-                      </div>
-                      <div className="truncate">{form.client_email || "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                        {countryCfg.documentLabel}
-                      </div>
-                      <div className="font-mono text-[11px]">{form.client_document || "—"}</div>
-                    </div>
-                  </div>
-                </div>
               ) : null}
-            </Section>
+              <CalculatorIcon className={`h-5 w-5 ${meta.dot.replace("bg-", "text-")}`} />
+              <span>
+                {initial
+                  ? langDisplay === "fr"
+                    ? "Modifier le devis"
+                    : "Editar Orçamento"
+                  : step === "choose_type"
+                    ? langDisplay === "fr"
+                      ? "Nouveau devis · Type"
+                      : "Novo Orçamento · Tipo"
+                    : langDisplay === "fr"
+                      ? "Nouveau devis"
+                      : "Novo Orçamento"}
+              </span>
+              <Badge variant="outline" className="text-xs">
+                {form.number || (langDisplay === "fr" ? "Brouillon" : "Rascunho")}
+              </Badge>
+              {step === "form" && isValidBudgetType(form.budget_type) ? (
+                <Badge variant="outline" className={`gap-1 ${meta.accent}`}>
+                  <meta.icon className="h-3.5 w-3.5" />
+                  {btLabel(form.budget_type, langDisplay)}
+                </Badge>
+              ) : null}
+              <StatusBadge status={form.status} />
+              {step === "form" && !isLocked ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 ml-2 h-8 border-dashed text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setOcrSelectedBudgetType(form.budget_type || "pdr");
+                    setOcrErrorMessage(null);
+                    setOcrExtraction(null);
+                    setOcrApplySelections({});
+                    setOcrDamageSelections({});
+                    setOcrLaborSelections({});
+                    setOcrDialogOpen(true);
+                  }}
+                  disabled={ocrIsExtracting || _ocrLoading1}
+                >
+                  <ScanIcon className="h-3.5 w-3.5" />
+                  {langDisplay === "fr" ? "Numériser document" : "Escanear documento"}
+                </Button>
+              ) : null}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              {langDisplay === "fr"
+                ? "Formulaire technique de devis avec données du client, véhicule, articles et totaux."
+                : "Formulário técnico de orçamento com dados do cliente, veículo, itens e totais."}
+            </DialogDescription>
+          </DialogHeader>
 
-            <Section
-              title={
-                <span className="inline-flex items-center gap-2">
-                  <MapPin className="h-3.5 w-3.5 text-slate-500" />
-                  Endereço
-                  {form.client_id && (
-                    <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-slate-700/50">
-                      {langDisplay === "fr" ? "Lié au client" : "Vinculado ao cliente"}
-                    </Badge>
-                  )}
-                </span>
-              }
+          {isLocked ? (
+            <div
+              className={cn(
+                "mb-3 mt-1 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs",
+                form.status === "rejected"
+                  ? "bg-destructive/5 border-destructive/30 text-destructive"
+                  : "bg-emerald-500/5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400",
+              )}
             >
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
-                <Field label="Número">
-                  <Input
-                    placeholder="123"
-                    value={form.address_number ?? ""}
-                    onChange={(e) => set("address_number", e.target.value)}
-                    disabled={isLocked || !!form.client_id}
-                  />
-                </Field>
-                <Field label="Rua / Logradouro" className="lg:col-span-2">
-                  <Input
-                    placeholder="Rua, avenida, praça, travessa…"
-                    value={form.address_street ?? ""}
-                    onChange={(e) => set("address_street", e.target.value)}
-                    disabled={isLocked || !!form.client_id}
-                  />
-                </Field>
-                <Field label={langDisplay === "fr" ? "Complément" : "Complemento"} className="lg:col-span-1">
-                  <Input
-                    placeholder={langDisplay === "fr" ? "Appt, étage, lieu-dit…" : "Apto, bloco, ponto de referência…"}
-                    value={form.address_complement ?? ""}
-                    onChange={(e) => set("address_complement", e.target.value)}
-                    disabled={isLocked || !!form.client_id}
-                  />
-                </Field>
-                <Field label={countryCfg.postalLabel}>
-                  <Input
-                    placeholder={countryCfg.postalPlaceholder || "Código postal"}
-                    value={form.address_postal ?? ""}
-                    onChange={(e) => set("address_postal", e.target.value)}
-                    disabled={isLocked || !!form.client_id}
-                  />
-                </Field>
-                <Field label="Cidade">
-                  <Input
-                    placeholder="Cidade / Localidade"
-                    value={form.address_city ?? ""}
-                    onChange={(e) => set("address_city", e.target.value)}
-                    disabled={isLocked || !!form.client_id}
-                  />
-                </Field>
-              </div>
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="País">
-                  <Select
-                    value={form.address_country ?? DEFAULT_CLIENT_COUNTRY}
-                    onValueChange={(v) => set("address_country", v)}
-                    disabled={isLocked || !!form.client_id}
-                  >
-                    <SelectTrigger>
-                      <SelectValue>
-                        {form.address_country ?? DEFAULT_CLIENT_COUNTRY}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent className="max-h-72">
-                      {COUNTRIES.map((c) => (
-                        <SelectItem key={c.code} value={c.code}>
-                          {c.code} — {c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-            </Section>
-
-            <Section title="Veículo">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="Marca">
-                  <Input
-                    placeholder="Volkswagen"
-                    value={form.vehicle_brand ?? ""}
-                    onChange={(e) => set("vehicle_brand", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="Modelo">
-                  <Input
-                    placeholder="Gol 1.6"
-                    value={form.vehicle_model ?? ""}
-                    onChange={(e) => set("vehicle_model", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="Placa / Matrícula">
-                  <Input
-                    placeholder="ABC1D23"
-                    value={form.vehicle_plate ?? ""}
-                    onChange={(e) => set("vehicle_plate", e.target.value.toUpperCase())}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="VIN">
-                  <Input
-                    placeholder="9BW VW 375 4 T 4123456"
-                    value={form.vehicle_vin ?? ""}
-                    onChange={(e) => set("vehicle_vin", e.target.value.toUpperCase())}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="Ano / Modelo">
-                  <Input
-                    placeholder="2020/2021"
-                    value={form.vehicle_year ?? ""}
-                    onChange={(e) => set("vehicle_year", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="Cor">
-                  <Input
-                    placeholder="Prata"
-                    value={form.vehicle_color ?? ""}
-                    onChange={(e) => set("vehicle_color", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="KM atual">
-                  <Input
-                    type="number"
-                    min={0}
-                    placeholder="0"
-                    value={form.vehicle_km ?? ""}
-                    onChange={(e) => set("vehicle_km", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="Data de emissão">
-                  <Input
-                    type="date"
-                    value={form.issued_at}
-                    onChange={(e) => set("issued_at", e.target.value || todayISO())}
-                    disabled={isLocked}
-                  />
-                </Field>
-              </div>
-              <p className="pt-1 text-[11px] text-muted-foreground">
-                Placa / Matrícula e VIN são opcionais. Preencha apenas se disponíveis.
-              </p>
-            </Section>
-
-            {/* SELETOR UNIFICADO DE TIPO DE ORÇAMENTO (Logo acima do Mapeamento Visual) */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border bg-muted/20 border-slate-700/60 shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className={cn("p-2 rounded-lg border shadow-sm", meta.accent)}>
-                  <meta.icon className="h-5 w-5" />
+              <LockIcon className="h-4 w-4 shrink-0 mt-0.5" />
+              <div className="leading-relaxed flex-1">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <strong className="font-semibold">
+                    {form.status === "rejected"
+                      ? langDisplay === "fr"
+                        ? "Devis rejeté · Bloqué en écriture"
+                        : "Orçamento rejeitado · Bloqueado para edição"
+                      : langDisplay === "fr"
+                        ? "Devis approuvé · Bloqué en écriture"
+                        : "Orçamento aprovado · Bloqueado para edição"}
+                  </strong>
+                  {form.status === "rejected" && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                      onClick={() => {
+                        setFormSafe((prev) => ({
+                          ...prev,
+                          status: "draft",
+                          rejection: { rejected: false, rejectedAt: null, rejectedBy: null, reason: null },
+                        }));
+                        toast.info("Orçamento reaberto como rascunho para renegociação. Salve as alterações para registrar uma nova revisão.");
+                      }}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                      {langDisplay === "fr" ? "Rouvrir / Nouvelle révision" : "Reabrir / Nova Revisão"}
+                    </Button>
+                  )}
                 </div>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {langDisplay === "fr" ? "Type de devis actif" : "Tipo de orçamento ativo"}
-                  </div>
-                  <div className="text-sm font-bold text-foreground flex items-center gap-2">
-                    <span>{btLabel(form.budget_type, langDisplay)}</span>
-                    <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", meta.accent)}>
-                      {form.budget_type === "pdr" ? "Baremo Pericial UT" : "Itens Comerciais"}
-                    </Badge>
-                  </div>
-                </div>
+                <span className="block opacity-90 mt-0.5">
+                  {form.status === "rejected" && form.rejection?.reason
+                    ? `Motivo do descarte: ${form.rejection.reason}`
+                    : langDisplay === "fr"
+                      ? "Aucune modification n'est autorisée. Les valeurs financières sont figées."
+                      : "Nenhuma alteração é permitida. Os valores financeiros estão congelados."}
+                  {form.signature.signed && form.signature.finalValueAtMoment != null
+                    ? ` ${langDisplay === "fr" ? "Valeur finale approuvée :" : "Valor final aprovado:"} ${formatBRL(form.signature.finalValueAtMoment)}`
+                    : ""}
+                </span>
               </div>
+            </div>
+          ) : null}
 
-              {!isLocked && (
-                <div className="flex items-center gap-2">
+          {form.status === "correction_needed" ? (
+            <div className="mb-3 mt-1 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <strong className="font-semibold">
+                  {langDisplay === "fr" ? "Correction demandée par la Production" : "Correção solicitada pela Produção"}
+                </strong>
+                <span className="block opacity-90 mt-0.5">
+                  {langDisplay === "fr"
+                    ? "Modifiez les données requises puis approuvez à nouveau pour renvoyer vers la Production."
+                    : "Edite os dados solicitados e depois aprove novamente para reenviar à Produção."}
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          {step === "choose_type" ? (
+            <div className="space-y-5 pt-2">
+              <Section title={langDisplay === "fr" ? "Type de devis" : "Tipo de Orçamento"}>
+                <p className="text-xs text-muted-foreground">
+                  {langDisplay === "fr"
+                    ? "Sélectionnez le type de devis. Ce choix définit la structure et les interventions disponibles ci-dessous."
+                    : "Selecione o tipo de orçamento. Esta escolha determina a estrutura e as intervenções disponíveis abaixo."}
+                </p>
+                <div className="pt-2 max-w-md">
                   <Select
-                    value={isValidBudgetType(form.budget_type) ? form.budget_type : "pdr"}
+                    value={isValidBudgetType(form.budget_type) ? form.budget_type : ""}
                     onValueChange={(v) => {
                       const t = normalizeBudgetType(v);
-                      if (t) requestBudgetTypeChange(t, "form_step");
+                      if (t) setFormSafe((f) => ({ ...f, budget_type: t as any }));
                     }}
                   >
-                    <SelectTrigger className="h-8 text-xs w-[200px] border-slate-700 bg-background/80">
-                      <SelectValue placeholder={langDisplay === "fr" ? "Changer type de devis" : "Alterar tipo de orçamento"} />
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder={langDisplay === "fr" ? "Sélectionner le type de devis" : "Selecionar tipo de orçamento"} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="pdr">Martelinho / PDR</SelectItem>
-                      <SelectItem value="body_paint">Funilaria e Pintura</SelectItem>
                       <SelectItem value="mechanics">Mecânica</SelectItem>
+                      <SelectItem value="body_paint">Funilaria</SelectItem>
+                      <SelectItem value="pdr">Martelinho / PDR</SelectItem>
                       <SelectItem value="assembly_disassembly">Montagem / Desmontagem</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-              )}
-            </div>
-
-            <Section
-              title={
-                <span className="inline-flex items-center gap-2">
-                  <Eye className="h-4 w-4 text-primary" />
-                  Mapeamento Visual do Veículo & Checklist de Entrada (5 Vistas)
-                </span>
-              }
-            >
-              <p className="mt-1 mb-3 text-xs leading-relaxed text-muted-foreground">
-                Clique nas vistas do veículo para mapear avarias. Identifique danos orçados (PDR) e danos pré-existentes (não cobrados) para resguardo jurídico.
-              </p>
-              <VehicleBlueprint5Views
-                damagePoints={inspectionPoints}
-                initialBodyType={((form as any).vehicle_body_type || (initial as any)?.vehicle_body_type || "sedan") as any}
-                onBodyTypeChange={(newType) => {
-                  set("vehicle_body_type" as any, newType);
-                }}
-                onValidatePart={handleValidatePartFromBlueprint}
-                onChange={async (newPoints) => {
-                  setInspectionPoints(newPoints);
-                  const currentId = form.id || initial?.id;
-                  if (currentId) {
-                    try {
-                      await apiRequest(`/budgets/${currentId}/inspection`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ damage_points: newPoints }),
-                      });
-                    } catch {}
-                  }
-                }}
-                readOnly={isLocked}
-              />
-            </Section>
-
-            <Section
-              title={
-                <span className="inline-flex items-center gap-2">
-                  <ShieldCheck className="h-3.5 w-3.5 text-slate-500" />
-                  Dados Complementares do Dossiê
-                </span>
-              }
-            >
-              <p className="text-xs text-muted-foreground -mt-1.5 mb-3">
-                Informações opcionais de sinistro, perícia, seguradora e oficina.
-              </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="Nº do sinistro">
-                  <Input
-                    placeholder="Referência do sinistro"
-                    value={form.dossier_claim_number ?? ""}
-                    onChange={(e) => set("dossier_claim_number", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="Nº da perícia / Expertise">
-                  <Input
-                    placeholder="Número da perícia / laudo"
-                    value={form.dossier_expert_number ?? ""}
-                    onChange={(e) => set("dossier_expert_number", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="Seguradora / Empresa">
-                  <Input
-                    placeholder="Nome da seguradora ou empresa"
-                    value={form.dossier_insurance_company ?? ""}
-                    onChange={(e) => set("dossier_insurance_company", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label="Nome da oficina / Garage">
-                  <Input
-                    placeholder="Oficina responsável"
-                    value={form.dossier_garage_name ?? ""}
-                    onChange={(e) => set("dossier_garage_name", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-              </div>
-            </Section>
-
-            <Section title={langDisplay === "fr" ? "Diagnostic / Intervention" : "Diagnóstico / Intervenção"}>
-              <p className="mt-1 mb-3 text-xs leading-relaxed text-muted-foreground">
-                {langDisplay === "fr"
-                  ? "Informations opérationnelles, type de devis et interventions sélectionnées."
-                  : "Dados operacionais, tipo de orçamento e intervenções selecionadas."}
-              </p>
-              <div className="mb-4 flex items-center gap-3">
-                <Badge variant="outline" className="tabular-nums font-bold tracking-wide text-foreground px-3 py-1 border-border/70 bg-muted/20">
-                  <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground/80">
-                    {langDisplay === "fr" ? "OS" : "OS"}
-                  </span>
-                  <span className="align-middle">
-                    {form.number || (langDisplay === "fr" ? "Brouillon" : "Rascunho")}
-                  </span>
-                </Badge>
-                <div className="text-xs text-muted-foreground">
-                  {langDisplay === "fr" ? "Type actif :" : "Tipo ativo :"}{" "}
-                  <strong className="text-foreground">{btLabel(form.budget_type, langDisplay)}</strong>
+              </Section>
+              <DialogFooter className="pt-1">
+                <div className="flex w-full flex-wrap justify-between gap-2">
+                  <Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
+                    <X className="h-4 w-4 mr-1" /> {langDisplay === "fr" ? "Annuler" : "Cancelar"}
+                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        const t = normalizeBudgetType(form.budget_type);
+                        if (t) chooseType(t);
+                      }}
+                      variant="default"
+                      disabled={!isValidBudgetType(form.budget_type)}
+                    >
+                      {langDisplay === "fr" ? "Continuer" : "Continuar"}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              <div className="mt-2 space-y-2">
-                <Field
-                  label={
-                    <span className="inline-flex items-center justify-between gap-2 w-full text-xs">
-                      <span>{langDisplay === "fr" ? "Type(s) d'intervention" : "Tipo(s) de Intervenção"}</span>
-                      <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground">
-                        {selectedInterventions.length} {langDisplay === "fr"
-                          ? "sélectionnée(s)"
-                          : "selecionada(s)"}
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-6 pt-2">
+              <Section
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <Users className="h-3.5 w-3.5 text-slate-500" />
+                    Cliente
+                  </span>
+                }
+              >
+                {/* Seleção / pesquisa do cliente cadastrado */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
+                  <div className="sm:col-span-10">
+                    <Label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground">
+                      {langDisplay === "fr" ? "Sélectionner un client" : "Selecionar cliente cadastrado"}
+                      <span className="ml-2 font-sans normal-case tracking-normal text-[10px] text-slate-500">
+                        (C-00001 · nome · SIREN · telefone · documento)
                       </span>
-                    </span>
-                  }
-                >
-                  <div className="space-y-2">
+                    </Label>
                     <Popover
-                      open={isLocked ? false : intervPopoverOpen}
-                      onOpenChange={(nextOpen) => {
-                        if (isLocked) return;
-                        setIntervPopoverOpen(nextOpen);
+                      open={clientSearchOpen}
+                      onOpenChange={(val) => {
+                        setClientSearchOpen(val);
+                        if (val) refetchClients();
                       }}
                     >
                       <PopoverTrigger asChild>
                         <Button
                           type="button"
                           variant="outline"
-                          role="combobox"
-                          aria-expanded={intervPopoverOpen}
-                          className="w-full justify-between font-normal h-8 text-xs"
+                          size="sm"
+                          className="w-full justify-start font-normal text-left h-10 px-3"
                           disabled={isLocked}
                         >
-                          <span className="truncate">
-                            {interventionsCatalogue.length === 0
-                              ? (langDisplay === "fr"
-                                ? "Chargement du catalogue…"
-                                : "Carregando catálogo…")
-                              : selectedInterventions.length === 0
-                                ? (langDisplay === "fr"
-                                  ? "Sélectionner interventions ▼"
-                                  : "Selecionar intervenções ▼")
-                                : (langDisplay === "fr"
-                                  ? `${selectedInterventions.length} intervention(s) ▼`
-                                  : `${selectedInterventions.length} intervenção(ões) ▼`)}
-                          </span>
-                          <ChevronDown className="h-4 w-4 opacity-60 text-muted-foreground" />
+                          {(selectedClient?.name || form.client_name || form.client_id) ? (
+                            <span className="inline-flex items-center gap-2 overflow-hidden">
+                              {(form.client_display_id || selectedClient?.customer_display_id) && (
+                                <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/40 bg-primary/10 shrink-0">
+                                  {form.client_display_id || selectedClient?.customer_display_id}
+                                </Badge>
+                              )}
+                              <span className="truncate font-medium">{selectedClient?.name || form.client_name}</span>
+                              {([form.client_phone || selectedClient?.phone, form.client_email || selectedClient?.email].filter(Boolean).length > 0) && (
+                                <span className="text-muted-foreground truncate text-[11px]">
+                                  {[form.client_phone || selectedClient?.phone, form.client_email || selectedClient?.email].filter(Boolean).join(" · ")}
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground flex items-center gap-2 w-full">
+                              <SearchIcon className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">
+                                {langDisplay === "fr"
+                                  ? "Rechercher un client (C-00001, nom, SIREN, téléphone…)"
+                                  : "Pesquisar cliente (C-00001, nome, SIREN, telefone…)"}
+                              </span>
+                            </span>
+                          )}
+                          <ChevronDown className="h-3.5 w-3.5 ml-auto shrink-0 text-muted-foreground" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[min(calc(100vw-2rem),420px] p-0" align="start">
-                        <div className="border-b p-2 px-3 py-2">
-                          <div className="relative">
-                            <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70" />
-                            <Input
-                              value={intervQuery}
-                              onChange={(e) => setIntervQuery(e.target.value)}
-                              placeholder={
-                                langDisplay === "fr"
-                                  ? "Rechercher une intervention…"
-                                  : "Buscar intervenção…"
-                              }
-                              className="pl-8 h-9"
-                            />
-                          </div>
+                      <PopoverContent
+                        className="w-[calc(100vw-48px)] sm:w-[640px] p-0 shadow-2xl border border-slate-700 bg-slate-900 z-[1200]"
+                        align="start"
+                        sideOffset={4}
+                        onWheel={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center border-b border-slate-800 px-3 py-2 gap-2">
+                          <SearchIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <Input
+                            className="h-9 border-0 bg-transparent focus-visible:ring-0 text-sm placeholder:text-muted-foreground p-0 flex-1"
+                            placeholder={
+                              langDisplay === "fr"
+                                ? "Rechercher par ID, nom, SIREN, SIRET, téléphone, document…"
+                                : "Pesquisar por ID, nome, SIREN, SIRET, telefone, documento…"
+                            }
+                            value={clientSearchQuery}
+                            onChange={(e) => setClientSearchQuery(e.target.value)}
+                            autoFocus
+                          />
+                          {clientSearchQuery && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                              onClick={() => setClientSearchQuery("")}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                         </div>
-                        <ScrollArea className="max-h-72">
-                          <div className="p-2 space-y-0.5">
-                            {(() => {
-                              const q = intervQuery.trim().toLowerCase();
-                              const list = interventionsCatalogue.filter(
-                                (v) => q.length === 0 || v.toLowerCase().includes(q),
-                              );
-                              if (list.length === 0) {
-                                return (
-                                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                                    {langDisplay === "fr"
-                                      ? "Aucune intervention ne correspond."
-                                      : "Nenhuma intervenção correspondente."}
+
+                        <div
+                          ref={(el) => {
+                            if (!el) return;
+                            const handleWheel = (e: WheelEvent) => {
+                              e.stopPropagation();
+                              el.scrollTop += e.deltaY;
+                            };
+                            el.addEventListener("wheel", handleWheel, { passive: true });
+                          }}
+                          onWheelCapture={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.scrollTop += e.deltaY;
+                          }}
+                          className="max-h-[380px] overflow-y-scroll overflow-x-hidden p-1 space-y-0.5 [scrollbar-width:thin] [scrollbar-color:#64748b_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-slate-800/40 [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-500"
+                          style={{ overscrollBehavior: "contain" }}
+                        >
+                          {filteredClients.length === 0 ? (
+                            <div className="p-6 text-center text-xs text-muted-foreground space-y-3">
+                              <p>
+                                {langDisplay === "fr"
+                                  ? "Aucun client trouvé."
+                                  : "Nenhum cliente encontrado."}
+                              </p>
+                              {clientSearchQuery.trim() ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="secondary"
+                                  className="w-full text-xs gap-1.5"
+                                  onClick={() => handleQuickCreateClient(clientSearchQuery)}
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                  {langDisplay === "fr"
+                                    ? `Créer le client "${clientSearchQuery.trim()}"`
+                                    : `Cadastrar cliente "${clientSearchQuery.trim()}"`}
+                                </Button>
+                              ) : null}
+                            </div>
+                          ) : (
+                            filteredClients.map((c) => {
+                              const isSelected = form.client_id === c.id;
+                              return (
+                                <div
+                                  key={c.id}
+                                  onClick={() => {
+                                    applyClientToBudget(c);
+                                    setClientSearchOpen(false);
+                                  }}
+                                  className={cn(
+                                    "flex items-center justify-between p-2.5 rounded-md cursor-pointer transition-colors text-left select-none",
+                                    isSelected
+                                      ? "bg-primary/20 text-primary border border-primary/40"
+                                      : "hover:bg-slate-800/80 text-foreground"
+                                  )}
+                                >
+                                  <div className="flex w-full flex-col gap-0.5 min-w-0 pr-2">
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="outline" className="font-mono text-[10px] font-semibold text-primary border-primary/30 bg-primary/10 shrink-0">
+                                        {c.customer_display_id ?? (
+                                          <span className="text-muted-foreground/70 font-normal">—</span>
+                                        )}
+                                      </Badge>
+                                      <span className="font-medium text-sm truncate">{c.name}</span>
+                                      <Badge variant="outline" className="text-[10px] ml-auto shrink-0">
+                                        {c.kind === "professional"
+                                          ? (langDisplay === "fr" ? "Professionnel" : "Profissional")
+                                          : (langDisplay === "fr" ? "Particulier" : "Particular")}
+                                      </Badge>
+                                    </div>
+                                    <div className="text-[11px] text-muted-foreground truncate">
+                                      {[c.siret, c.siren, c.tva_intracom, c.tax_id, c.phone, c.email, c.city]
+                                        .filter(Boolean)
+                                        .join(" · ")}
+                                    </div>
                                   </div>
+                                  <CheckIcon
+                                    className={cn(
+                                      "ml-auto h-4 w-4 shrink-0 transition-opacity",
+                                      isSelected ? "opacity-100 text-primary" : "opacity-0"
+                                    )}
+                                  />
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div className="sm:col-span-2 flex items-end">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={unlinkClient}
+                      disabled={isLocked || !form.client_id}
+                      className="w-full text-xs text-muted-foreground border border-dashed border-slate-600/40 hover:text-rose-400 hover:border-rose-500/50"
+                    >
+                      <XCircle className="h-3.5 w-3.5 mr-1.5" />
+                      {langDisplay === "fr" ? "Délier" : "Desvincular"}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Dados do cliente: readonly se vinculado, editável legacy se não */}
+                {!form.client_id && (form.client_name || form.client_phone || form.client_email || form.client_document) ? (
+                  <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                    <div className="mb-2 text-[10px] uppercase tracking-wider text-amber-400 font-medium flex items-center gap-1.5">
+                      <AlertTriangle className="h-3 w-3" />
+                      {langDisplay === "fr"
+                        ? "Client lié manuellement (ancien)"
+                        : "Cliente preenchido manualmente (compatibilidade)"}
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <Field label={langDisplay === "fr" ? "Nom / Raison sociale" : "Nome / Razão Social"}>
+                        <Input
+                          placeholder="Nome completo / Empresa"
+                          value={form.client_name}
+                          onChange={(e) => set("client_name", e.target.value)}
+                          disabled={isLocked}
+                        />
+                      </Field>
+                      <Field label={langDisplay === "fr" ? "Téléphone" : "Telefone"}>
+                        <Input
+                          placeholder="(11) 9 9999-9999"
+                          value={form.client_phone ?? ""}
+                          onChange={(e) => set("client_phone", e.target.value)}
+                          disabled={isLocked}
+                        />
+                      </Field>
+                      <Field label={langDisplay === "fr" ? "E-mail" : "E-mail"}>
+                        <Input
+                          type="email"
+                          placeholder="cliente@exemplo.com"
+                          value={form.client_email ?? ""}
+                          onChange={(e) => set("client_email", e.target.value)}
+                          disabled={isLocked}
+                        />
+                      </Field>
+                      <Field label={countryCfg.documentLabel}>
+                        <Input
+                          placeholder={countryCfg.documentPlaceholder}
+                          value={form.client_document ?? ""}
+                          onChange={(e) => set("client_document", e.target.value)}
+                          disabled={isLocked}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                ) : form.client_id || form.client_name ? (
+                  <div className="mt-4 rounded-lg border border-slate-700/40 bg-slate-900/30 p-4 space-y-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                          {langDisplay === "fr" ? "Nom / Raison sociale" : "Nome / Razão Social"}
+                        </div>
+                        <div className="font-medium">{form.client_name || "—"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                          {langDisplay === "fr" ? "Téléphone" : "Telefone"}
+                        </div>
+                        <div>{form.client_phone || "—"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                          {langDisplay === "fr" ? "E-mail" : "E-mail"}
+                        </div>
+                        <div className="truncate">{form.client_email || "—"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                          {countryCfg.documentLabel}
+                        </div>
+                        <div className="font-mono text-[11px]">{form.client_document || "—"}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </Section>
+
+              <Section
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <MapPin className="h-3.5 w-3.5 text-slate-500" />
+                    Endereço
+                    {form.client_id && (
+                      <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-slate-700/50">
+                        {langDisplay === "fr" ? "Lié au client" : "Vinculado ao cliente"}
+                      </Badge>
+                    )}
+                  </span>
+                }
+              >
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                  <Field label="Número">
+                    <Input
+                      placeholder="123"
+                      value={form.address_number ?? ""}
+                      onChange={(e) => set("address_number", e.target.value)}
+                      disabled={isLocked || !!form.client_id}
+                    />
+                  </Field>
+                  <Field label="Rua / Logradouro" className="lg:col-span-2">
+                    <Input
+                      placeholder="Rua, avenida, praça, travessa…"
+                      value={form.address_street ?? ""}
+                      onChange={(e) => set("address_street", e.target.value)}
+                      disabled={isLocked || !!form.client_id}
+                    />
+                  </Field>
+                  <Field label={langDisplay === "fr" ? "Complément" : "Complemento"} className="lg:col-span-1">
+                    <Input
+                      placeholder={langDisplay === "fr" ? "Appt, étage, lieu-dit…" : "Apto, bloco, ponto de referência…"}
+                      value={form.address_complement ?? ""}
+                      onChange={(e) => set("address_complement", e.target.value)}
+                      disabled={isLocked || !!form.client_id}
+                    />
+                  </Field>
+                  <Field label={countryCfg.postalLabel}>
+                    <Input
+                      placeholder={countryCfg.postalPlaceholder || "Código postal"}
+                      value={form.address_postal ?? ""}
+                      onChange={(e) => set("address_postal", e.target.value)}
+                      disabled={isLocked || !!form.client_id}
+                    />
+                  </Field>
+                  <Field label="Cidade">
+                    <Input
+                      placeholder="Cidade / Localidade"
+                      value={form.address_city ?? ""}
+                      onChange={(e) => set("address_city", e.target.value)}
+                      disabled={isLocked || !!form.client_id}
+                    />
+                  </Field>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Field label="País">
+                    <Select
+                      value={form.address_country ?? DEFAULT_CLIENT_COUNTRY}
+                      onValueChange={(v) => set("address_country", v)}
+                      disabled={isLocked || !!form.client_id}
+                    >
+                      <SelectTrigger>
+                        <SelectValue>
+                          {form.address_country ?? DEFAULT_CLIENT_COUNTRY}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        {COUNTRIES.map((c) => (
+                          <SelectItem key={c.code} value={c.code}>
+                            {c.code} — {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              </Section>
+
+              <Section title="Veículo">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Field label="Marca">
+                    <Input
+                      placeholder="Volkswagen"
+                      value={form.vehicle_brand ?? ""}
+                      onChange={(e) => set("vehicle_brand", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="Modelo">
+                    <Input
+                      placeholder="Gol 1.6"
+                      value={form.vehicle_model ?? ""}
+                      onChange={(e) => set("vehicle_model", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="Placa / Matrícula">
+                    <Input
+                      placeholder="ABC1D23"
+                      value={form.vehicle_plate ?? ""}
+                      onChange={(e) => set("vehicle_plate", e.target.value.toUpperCase())}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="VIN">
+                    <Input
+                      placeholder="9BW VW 375 4 T 4123456"
+                      value={form.vehicle_vin ?? ""}
+                      onChange={(e) => set("vehicle_vin", e.target.value.toUpperCase())}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="Ano / Modelo">
+                    <Input
+                      placeholder="2020/2021"
+                      value={form.vehicle_year ?? ""}
+                      onChange={(e) => set("vehicle_year", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="Cor">
+                    <Input
+                      placeholder="Prata"
+                      value={form.vehicle_color ?? ""}
+                      onChange={(e) => set("vehicle_color", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="KM atual">
+                    <Input
+                      type="number"
+                      min={0}
+                      placeholder="0"
+                      value={form.vehicle_km ?? ""}
+                      onChange={(e) => set("vehicle_km", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="Data de emissão">
+                    <Input
+                      type="date"
+                      value={form.issued_at}
+                      onChange={(e) => set("issued_at", e.target.value || todayISO())}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                </div>
+                <p className="pt-1 text-[11px] text-muted-foreground">
+                  Placa / Matrícula e VIN são opcionais. Preencha apenas se disponíveis.
+                </p>
+              </Section>
+
+              {/* SELETOR UNIFICADO DE TIPO DE ORÇAMENTO (Logo acima do Mapeamento Visual) */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border bg-muted/20 border-slate-700/60 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className={cn("p-2 rounded-lg border shadow-sm", meta.accent)}>
+                    <meta.icon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {langDisplay === "fr" ? "Type de devis actif" : "Tipo de orçamento ativo"}
+                    </div>
+                    <div className="text-sm font-bold text-foreground flex items-center gap-2">
+                      <span>{btLabel(form.budget_type, langDisplay)}</span>
+                      <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", meta.accent)}>
+                        {form.budget_type === "pdr" ? "Baremo Pericial UT" : "Itens Comerciais"}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+
+                {!isLocked && (
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={isValidBudgetType(form.budget_type) ? form.budget_type : "pdr"}
+                      onValueChange={(v) => {
+                        const t = normalizeBudgetType(v);
+                        if (t) requestBudgetTypeChange(t, "form_step");
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs w-[200px] border-slate-700 bg-background/80">
+                        <SelectValue placeholder={langDisplay === "fr" ? "Changer type de devis" : "Alterar tipo de orçamento"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pdr">Martelinho / PDR</SelectItem>
+                        <SelectItem value="body_paint">Funilaria e Pintura</SelectItem>
+                        <SelectItem value="mechanics">Mecânica</SelectItem>
+                        <SelectItem value="assembly_disassembly">Montagem / Desmontagem</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              <Section
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <Eye className="h-4 w-4 text-primary" />
+                    Mapeamento Visual do Veículo & Checklist de Entrada (5 Vistas)
+                  </span>
+                }
+              >
+                <p className="mt-1 mb-3 text-xs leading-relaxed text-muted-foreground">
+                  Clique nas vistas do veículo para mapear avarias. Identifique danos orçados (PDR) e danos pré-existentes (não cobrados) para resguardo jurídico.
+                </p>
+                <VehicleBlueprint5Views
+                  damagePoints={inspectionPoints}
+                  initialBodyType={((form as any).vehicle_body_type || (initial as any)?.vehicle_body_type || "sedan") as any}
+                  onBodyTypeChange={(newType) => {
+                    set("vehicle_body_type" as any, newType);
+                  }}
+                  onValidatePart={handleValidatePartFromBlueprint}
+                  onChange={async (newPoints) => {
+                    setInspectionPoints(newPoints);
+                    const currentId = form.id || initial?.id;
+                    if (currentId) {
+                      try {
+                        await apiRequest(`/budgets/${currentId}/inspection`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ damage_points: newPoints }),
+                        });
+                      } catch { }
+                    }
+                  }}
+                  readOnly={isLocked}
+                />
+              </Section>
+
+              <Section
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <ShieldCheck className="h-3.5 w-3.5 text-slate-500" />
+                    Dados Complementares do Dossiê
+                  </span>
+                }
+              >
+                <p className="text-xs text-muted-foreground -mt-1.5 mb-3">
+                  Informações opcionais de sinistro, perícia, seguradora e oficina.
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Field label="Nº do sinistro">
+                    <Input
+                      placeholder="Referência do sinistro"
+                      value={form.dossier_claim_number ?? ""}
+                      onChange={(e) => set("dossier_claim_number", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="Nº da perícia / Expertise">
+                    <Input
+                      placeholder="Número da perícia / laudo"
+                      value={form.dossier_expert_number ?? ""}
+                      onChange={(e) => set("dossier_expert_number", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="Seguradora / Empresa">
+                    <Input
+                      placeholder="Nome da seguradora ou empresa"
+                      value={form.dossier_insurance_company ?? ""}
+                      onChange={(e) => set("dossier_insurance_company", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label="Nome da oficina / Garage">
+                    <Input
+                      placeholder="Oficina responsável"
+                      value={form.dossier_garage_name ?? ""}
+                      onChange={(e) => set("dossier_garage_name", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                </div>
+              </Section>
+
+              <Section title={langDisplay === "fr" ? "Diagnostic / Intervention" : "Diagnóstico / Intervenção"}>
+                <p className="mt-1 mb-3 text-xs leading-relaxed text-muted-foreground">
+                  {langDisplay === "fr"
+                    ? "Informations opérationnelles, type de devis et interventions sélectionnées."
+                    : "Dados operacionais, tipo de orçamento e intervenções selecionadas."}
+                </p>
+                <div className="mb-4 flex items-center gap-3">
+                  <Badge variant="outline" className="tabular-nums font-bold tracking-wide text-foreground px-3 py-1 border-border/70 bg-muted/20">
+                    <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground/80">
+                      {langDisplay === "fr" ? "OS" : "OS"}
+                    </span>
+                    <span className="align-middle">
+                      {form.number || (langDisplay === "fr" ? "Brouillon" : "Rascunho")}
+                    </span>
+                  </Badge>
+                  <div className="text-xs text-muted-foreground">
+                    {langDisplay === "fr" ? "Type actif :" : "Tipo ativo :"}{" "}
+                    <strong className="text-foreground">{btLabel(form.budget_type, langDisplay)}</strong>
+                  </div>
+                </div>
+                <div className="mt-2 space-y-2">
+                  <Field
+                    label={
+                      <span className="inline-flex items-center justify-between gap-2 w-full text-xs">
+                        <span>{langDisplay === "fr" ? "Type(s) d'intervention" : "Tipo(s) de Intervenção"}</span>
+                        <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground">
+                          {selectedInterventions.length} {langDisplay === "fr"
+                            ? "sélectionnée(s)"
+                            : "selecionada(s)"}
+                        </span>
+                      </span>
+                    }
+                  >
+                    <div className="space-y-2">
+                      <Popover
+                        open={isLocked ? false : intervPopoverOpen}
+                        onOpenChange={(nextOpen) => {
+                          if (isLocked) return;
+                          setIntervPopoverOpen(nextOpen);
+                        }}
+                      >
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={intervPopoverOpen}
+                            className="w-full justify-between font-normal h-8 text-xs"
+                            disabled={isLocked}
+                          >
+                            <span className="truncate">
+                              {interventionsCatalogue.length === 0
+                                ? (langDisplay === "fr"
+                                  ? "Chargement du catalogue…"
+                                  : "Carregando catálogo…")
+                                : selectedInterventions.length === 0
+                                  ? (langDisplay === "fr"
+                                    ? "Sélectionner interventions ▼"
+                                    : "Selecionar intervenções ▼")
+                                  : (langDisplay === "fr"
+                                    ? `${selectedInterventions.length} intervention(s) ▼`
+                                    : `${selectedInterventions.length} intervenção(ões) ▼`)}
+                            </span>
+                            <ChevronDown className="h-4 w-4 opacity-60 text-muted-foreground" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[min(calc(100vw-2rem),420px] p-0" align="start">
+                          <div className="border-b p-2 px-3 py-2">
+                            <div className="relative">
+                              <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70" />
+                              <Input
+                                value={intervQuery}
+                                onChange={(e) => setIntervQuery(e.target.value)}
+                                placeholder={
+                                  langDisplay === "fr"
+                                    ? "Rechercher une intervention…"
+                                    : "Buscar intervenção…"
+                                }
+                                className="pl-8 h-9"
+                              />
+                            </div>
+                          </div>
+                          <ScrollArea className="max-h-72">
+                            <div className="p-2 space-y-0.5">
+                              {(() => {
+                                const q = intervQuery.trim().toLowerCase();
+                                const list = interventionsCatalogue.filter(
+                                  (v) => q.length === 0 || v.toLowerCase().includes(q),
                                 );
-                              }
-                              return list.map((opt) => {
+                                if (list.length === 0) {
+                                  return (
+                                    <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                                      {langDisplay === "fr"
+                                        ? "Aucune intervention ne correspond."
+                                        : "Nenhuma intervenção correspondente."}
+                                    </div>
+                                  );
+                                }
+                                return list.map((opt) => {
                                   const checked = selectedInterventions.includes(opt);
                                   return (
                                     <label
                                       key={opt}
                                       className={cn(
-                                      "flex items-center gap-2.5 rounded-md px-2 py-1.5 cursor-pointer select-none hover:bg-accent hover:text-accent-foreground transition-colors",
-                                      checked ? "bg-accent/40" : "",
-                                    )}
-                                  >
-                                    <Checkbox
-                                      checked={checked}
-                                      onCheckedChange={() => toggleIntervention(opt)}
-                                      id={`interv-${opt}`}
-                                    />
-                                    <span className="text-sm leading-tight">{opt}</span>
-                                    {checked ? (
-                                      <CheckIcon className="ml-auto h-4 w-4 text-emerald-600" />
-                                    ) : null}
-                                  </label>
+                                        "flex items-center gap-2.5 rounded-md px-2 py-1.5 cursor-pointer select-none hover:bg-accent hover:text-accent-foreground transition-colors",
+                                        checked ? "bg-accent/40" : "",
+                                      )}
+                                    >
+                                      <Checkbox
+                                        checked={checked}
+                                        onCheckedChange={() => toggleIntervention(opt)}
+                                        id={`interv-${opt}`}
+                                      />
+                                      <span className="text-sm leading-tight">{opt}</span>
+                                      {checked ? (
+                                        <CheckIcon className="ml-auto h-4 w-4 text-emerald-600" />
+                                      ) : null}
+                                    </label>
                                   );
                                 });
-                            })()}
-                          </div>
-                        </ScrollArea>
-                        <div className="border-t p-2 flex items-center justify-between text-[11px] text-muted-foreground">
-                          <span>
-                            {langDisplay === "fr"
-                              ? `${interventionsCatalogue.length} au total`
-                              : `${interventionsCatalogue.length} no catálogo`}
-                          </span>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              type="button"
-                              onClick={() => {
-                                setForm((f) => {
-                                  const out: Budget = { ...f, updated_at: new Date().toISOString() };
-                                  setBudgetInterventions(
-                                    (p) => Object.assign(out, p),
-                                    [],
-                                  );
-                                  return out;
-                                });
-                              }}
-                              disabled={selectedInterventions.length === 0}
-                              className="h-7 px-2 text-[11px]"
-                            >
-                              {langDisplay === "fr" ? "Effacer" : "Limpar"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              type="button"
-                              onClick={() => setIntervPopoverOpen(false)}
-                              className="h-7 px-2 text-[11px]"
-                            >
-                              {langDisplay === "fr" ? "OK" : "OK"}
-                            </Button>
-                          </div>
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                    {selectedInterventions.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5 pt-1">
-                        {selectedInterventions.map((v) => (
-                          <Badge
-                            key={v}
-                            variant="secondary"
-                            className={cn(
-                              "gap-1 pr-1 h-6",
-                              meta.accent,
-                            )}
-                          >
-                            <span className="text-[11px]">{v}</span>
-                            <button
-                              type="button"
-                              onClick={() => toggleIntervention(v)}
-                              disabled={isLocked}
-                              className={cn(
-                                "ml-0.5 rounded-full p-0.5 inline-flex items-center justify-center hover:bg-black/10 dark:hover:bg-white/10 text-[9px] leading-none",
-                                isLocked ? "opacity-40 cursor-not-allowed" : "",
-                              )}
-                              aria-label={`${langDisplay === "fr" ? "Retirer" : "Remover"} ${v}`}
-                              title={langDisplay === "fr" ? "Retirer" : "Remover"}
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-[11px] text-muted-foreground pt-0.5 leading-tight">
-                        {langDisplay === "fr"
-                          ? "Aucune intervention sélectionnée. Sélectionnez celles compatibles avec votre type de devis."
-                          : "Nenhuma intervenção selecionada. Selecione as intervenções compatíveis com o tipo de orçamento."}
-                      </p>
-                    )}
-                  </div>
-                </Field>
-              </div>
-              <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-                <Field label={langDisplay === "fr" ? "Diagnostic initial" : "Diagnóstico inicial"}>
-                  <Textarea
-                    rows={4}
-                    placeholder={
-                      langDisplay === "fr"
-                        ? "Rapport client / symptômes / lecture codes erreurs…"
-                        : "Relato do cliente / sintomas / leitura de erros..."
-                    }
-                    value={form.diagnosis ?? ""}
-                    onChange={(e) => set("diagnosis", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-                <Field label={langDisplay === "fr" ? "Description technique du service" : "Descrição técnica do serviço"}>
-                  <Textarea
-                    rows={4}
-                    placeholder={
-                      langDisplay === "fr"
-                        ? "Décrivez en détail les services à réaliser…"
-                        : "Descreva detalhadamente os serviços a serem executados..."
-                    }
-                    value={form.technical_description ?? ""}
-                    onChange={(e) => set("technical_description", e.target.value)}
-                    disabled={isLocked}
-                  />
-                </Field>
-              </div>
-            </Section>
-
-            <Section
-              title={meta.partsLabel}
-              actions={
-                <Button variant="ghost" size="sm" type="button" onClick={addPart} className="h-8 px-2.5" disabled={isLocked}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              }
-            >
-              <Card className="border-border/50">
-                <CardContent className="pt-4">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="min-w-[180px] w-[44%]">
-                            {form.budget_type === "pdr" ? "Área / Localização do dano" : "Descrição"}
-                          </TableHead>
-                          <TableHead className="w-[14%] text-right">
-                            {form.budget_type === "pdr" ? "Nº amassados" : "Qtd"}
-                          </TableHead>
-                          <TableHead className="w-[22%] text-right">
-                            {form.budget_type === "pdr" ? "Valor por dano" : "Valor Unit."}
-                          </TableHead>
-                          <TableHead className="w-[14%] text-right">Subtotal</TableHead>
-                          <TableHead className="w-[6%]"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {form.parts.map((p) => (
-                          <TableRow key={p.id}>
-                            <TableCell>
-                              <Input
-                                placeholder={
-                                  form.budget_type === "mechanics"
-                                    ? "Ex.: Filtro de óleo"
-                                    : form.budget_type === "body_paint"
-                                      ? "Ex.: Parachoque dianteiro / tinta base"
-                                      : "Ex.: Porta traseira esquerda · amassado central · 3 cm"
-                                }
-                                value={p.description}
-                                onChange={(e) => updatePart(p.id, { description: e.target.value })}
-                                disabled={isLocked}
-                              />
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step={1}
-                                  className="tabular-nums"
-                                  value={String(p.quantity)}
-                                  onChange={(e) =>
-                                    updatePart(p.id, {
-                                      quantity: Math.max(0, Number(e.target.value) || 0),
-                                    })
-                                  }
-                                  disabled={isLocked}
-                                />
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant={(p as any).pricing_mode === "fixed" ? "default" : "outline"}
-                                  className={cn(
-                                    "h-8 px-1.5 text-[10px] font-medium shrink-0",
-                                    (p as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
-                                  )}
-                                  onClick={() =>
-                                    updatePart(p.id, {
-                                      pricing_mode: (p as any).pricing_mode === "fixed" ? "unit" : "fixed",
-                                    } as any)
-                                  }
-                                  title={(p as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
-                                  disabled={isLocked}
-                                >
-                                  {(p as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
-                                </Button>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <DecimalInput
-                                className="tabular-nums text-right h-9"
-                                placeholder="0.00"
-                                value={p.unit_price}
-                                onChangeValue={(val) =>
-                                  updatePart(p.id, {
-                                    unit_price: val,
-                                  })
-                                }
-                                disabled={isLocked}
-                              />
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums font-medium">
-                              {formatBRL(
-                                (p as any).pricing_mode === "fixed"
-                                  ? Math.max(0, Number(p.unit_price) || 0)
-                                  : Math.max(0, Number(p.quantity) || 0) * Math.max(0, Number(p.unit_price) || 0),
-                              )}
-                            </TableCell>
-                            <TableCell>
+                              })()}
+                            </div>
+                          </ScrollArea>
+                          <div className="border-t p-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>
+                              {langDisplay === "fr"
+                                ? `${interventionsCatalogue.length} au total`
+                                : `${interventionsCatalogue.length} no catálogo`}
+                            </span>
+                            <div className="flex gap-2">
                               <Button
+                                size="sm"
                                 variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
                                 type="button"
-                                onClick={() => removePart(p.id)}
-                                disabled={isLocked}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                      <TableFooter>
-                        <TableRow>
-                          <TableCell colSpan={3}>{meta.totalPartsLabel}</TableCell>
-                          <TableCell className="text-right tabular-nums font-semibold">
-                            {formatBRL(totals.parts)}
-                          </TableCell>
-                          <TableCell />
-                        </TableRow>
-                      </TableFooter>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
-            </Section>
-
-            <Section
-              title={langDisplay === "fr" ? "Services" : "Serviços"}
-              actions={
-                <Button variant="ghost" size="sm" type="button" onClick={addService} className="h-8 px-2.5" disabled={isLocked}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              }
-            >
-              <Card className="border-border/50">
-                <CardContent className="pt-4">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="min-w-[180px] w-[44%]">Descrição</TableHead>
-                          <TableHead className="w-[14%] text-right">Qtd</TableHead>
-                          <TableHead className="w-[22%] text-right">Valor Unit.</TableHead>
-                          <TableHead className="w-[14%] text-right">Subtotal</TableHead>
-                          <TableHead className="w-[6%]"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {form.services.map((s) => (
-                          <TableRow key={s.id}>
-                            <TableCell>
-                              <Input
-                                list={`service-catalog-dl-${s.id}`}
-                                placeholder={
-                                  form.budget_type === "mechanics"
-                                    ? "Ex.: Diagnóstico eletrônico / Geometria"
-                                    : form.budget_type === "body_paint"
-                                      ? "Ex.: Pintura / Polimento / Tratamento"
-                                      : "Ex.: Avaliação detalhada de áreas"
-                                }
-                                value={s.description}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  const matched = catalogItems.find(
-                                    (it) => it.name.trim().toLowerCase() === val.trim().toLowerCase(),
-                                  );
-                                  if (matched) {
-                                    const patch: Partial<BudgetServiceLine> = {
-                                      description: matched.name,
-                                      catalogItemId: matched.id,
-                                      catalogItemCode: matched.code,
-                                      categoryCode: matched.categoryCode,
-                                    };
-                                    if (matched.suggestedPrice && (!s.unit_price || s.unit_price === 0)) {
-                                      patch.unit_price = Number(matched.suggestedPrice);
-                                    }
-                                    updateService(s.id, patch);
-                                  } else {
-                                    updateService(s.id, { description: val });
-                                  }
+                                onClick={() => {
+                                  setForm((f) => {
+                                    const out: Budget = { ...f, updated_at: new Date().toISOString() };
+                                    setBudgetInterventions(
+                                      (p) => Object.assign(out, p),
+                                      [],
+                                    );
+                                    return out;
+                                  });
                                 }}
-                                disabled={isLocked}
-                              />
-                              <datalist id={`service-catalog-dl-${s.id}`}>
-                                {catalogItems.map((item) => (
-                                  <option key={item.id} value={item.name}>
-                                    {item.categoryName ? `${item.categoryName} — ` : ""}{item.code}
-                                  </option>
-                                ))}
-                              </datalist>
-                              {s.catalogItemCode ? (
-                                <span className="text-[10px] text-muted-foreground font-mono mt-0.5 block">
-                                  {s.categoryCode ? `${s.categoryCode} · ` : ""}{s.catalogItemCode}
-                                </span>
-                              ) : null}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step={1}
-                                  className="tabular-nums"
-                                  value={String(s.quantity)}
-                                  onChange={(e) =>
-                                    updateService(s.id, {
-                                      quantity: Math.max(0, Number(e.target.value) || 0),
-                                    })
-                                  }
-                                  disabled={isLocked}
-                                />
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant={(s as any).pricing_mode === "fixed" ? "default" : "outline"}
-                                  className={cn(
-                                    "h-8 px-1.5 text-[10px] font-medium shrink-0",
-                                    (s as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
-                                  )}
-                                  onClick={() =>
-                                    updateService(s.id, {
-                                      pricing_mode: (s as any).pricing_mode === "fixed" ? "unit" : "fixed",
-                                    } as any)
-                                  }
-                                  title={(s as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
-                                  disabled={isLocked}
-                                >
-                                  {(s as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
-                                </Button>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <DecimalInput
-                                className="tabular-nums text-right h-9"
-                                placeholder="0.00"
-                                value={s.unit_price}
-                                onChangeValue={(val) =>
-                                  updateService(s.id, {
-                                    unit_price: val,
-                                  })
-                                }
-                                disabled={isLocked}
-                              />
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums font-medium">
-                              {formatBRL(
-                                (s as any).pricing_mode === "fixed"
-                                  ? Math.max(0, Number(s.unit_price) || 0)
-                                  : Math.max(0, Number(s.quantity) || 0) * Math.max(0, Number(s.unit_price) || 0),
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                type="button"
-                                onClick={() => removeService(s.id)}
-                                disabled={isLocked}
+                                disabled={selectedInterventions.length === 0}
+                                className="h-7 px-2 text-[11px]"
                               >
-                                <Trash2 className="h-4 w-4" />
+                                {langDisplay === "fr" ? "Effacer" : "Limpar"}
                               </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                      <TableFooter>
-                        <TableRow>
-                          <TableCell colSpan={3}>
-                            {langDisplay === "fr" ? "Total Services" : "Total Serviços"}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums font-semibold">
-                            {formatBRL(totals.services)}
-                          </TableCell>
-                          <TableCell />
-                        </TableRow>
-                      </TableFooter>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
-            </Section>
-
-            <Section
-              title={meta.laborLabel}
-              actions={
-                <Button variant="ghost" size="sm" type="button" onClick={addLabor} className="h-8 px-2.5" disabled={isLocked}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              }
-            >
-              <Card className="border-border/50">
-                <CardContent className="pt-4">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="min-w-[180px] w-[44%]">Descrição</TableHead>
-                          <TableHead className="w-[14%] text-right">Horas</TableHead>
-                          <TableHead className="w-[22%] text-right">Valor / Hora</TableHead>
-                          <TableHead className="w-[14%] text-right">Subtotal</TableHead>
-                          <TableHead className="w-[6%]"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {form.labor.map((l) => (
-                          <TableRow key={l.id}>
-                            <TableCell>
-                              <Input
-                                placeholder={
-                                  form.budget_type === "mechanics"
-                                    ? "Ex.: Troca de óleo e filtros"
-                                    : form.budget_type === "body_paint"
-                                      ? "Ex.: Desmontagem · Reparação · Primer · Pintura · Polimento"
-                                      : "Ex.: Acesso forro · Aquecimento · PDR · Acabamento"
-                                }
-                                value={l.description}
-                                onChange={(e) => updateLabor(l.id, { description: e.target.value })}
-                                disabled={isLocked}
-                              />
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <DecimalInput
-                                className="tabular-nums text-right h-9"
-                                placeholder="0.0"
-                                value={l.hours}
-                                onChangeValue={(val) =>
-                                  updateLabor(l.id, {
-                                    hours: val,
-                                  })
-                                }
-                                disabled={isLocked}
-                              />
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <DecimalInput
-                                className="tabular-nums text-right h-9"
-                                placeholder="0.00"
-                                value={l.hourly_rate}
-                                onChangeValue={(val) =>
-                                  updateLabor(l.id, {
-                                    hourly_rate: val,
-                                  })
-                                }
-                                disabled={isLocked}
-                              />
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums font-medium">
-                              {formatBRL(
-                                Math.max(0, Number(l.hours) || 0) *
-                                  Math.max(0, Number(l.hourly_rate) || 0),
-                              )}
-                            </TableCell>
-                            <TableCell>
                               <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                size="sm"
                                 type="button"
-                                onClick={() => removeLabor(l.id)}
-                                disabled={isLocked}
+                                onClick={() => setIntervPopoverOpen(false)}
+                                className="h-7 px-2 text-[11px]"
                               >
-                                <Trash2 className="h-4 w-4" />
+                                {langDisplay === "fr" ? "OK" : "OK"}
                               </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                      <TableFooter>
-                        <TableRow>
-                          <TableCell colSpan={3}>{meta.totalLaborLabel}</TableCell>
-                          <TableCell className="text-right tabular-nums font-semibold">
-                            {formatBRL(totals.labor)}
-                          </TableCell>
-                          <TableCell />
-                        </TableRow>
-                      </TableFooter>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
-            </Section>
-
-            <Section title="Totais">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                <Card className="lg:col-span-2 border-border/50">
-                  <CardHeader className="pb-3 pt-4">
-                    <CardTitle className="text-sm">Ajustes Fiscais</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3 pt-0">
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Desconto (%)">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.01}
-                          value={String(form.discount_pct)}
-                          onChange={(e) =>
-                            set(
-                              "discount_pct",
-                              Math.max(0, Math.min(100, Number(e.target.value) || 0)),
-                            )
-                          }
-                          disabled={isLocked}
-                        />
-                      </Field>
-                      <Field label="IVA / Impostos (%)">
-                        <Input
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          value={String(form.iva_pct)}
-                          onChange={(e) =>
-                            set("iva_pct", Math.max(0, Number(e.target.value) || 0))
-                          }
-                          disabled={isLocked}
-                        />
-                      </Field>
-                    </div>
-                    <div className="grid grid-cols-1 gap-1.5 rounded-lg bg-muted/40 p-3 text-sm">
-                      <Row
-                        label={
-                          langDisplay === "fr"
-                            ? "Sous-total (Pièces + Services + M.O.)"
-                            : "Subtotal (Peças + Serviços + M.O.)"
-                        }
-                        value={formatBRL(totals.gross)}
-                      />
-                      <Row
-                        label={`Desconto (${Number(form.discount_pct || 0).toFixed(2)}%)`}
-                        value={`- ${formatBRL(totals.disc)}`}
-                        muted
-                      />
-                      <Row label="Base Tributável" value={formatBRL(totals.net)} />
-                      <Row
-                        label={`IVA (${Number(form.iva_pct || 0).toFixed(2)}%)`}
-                        value={`+ ${formatBRL(totals.iva)}`}
-                        muted
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="border-emerald-500/40 bg-emerald-500/5">
-                  <CardHeader className="pb-2 pt-4">
-                    <CardTitle className="text-sm">Valor Total do Orçamento</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Total a pagar
-                    </p>
-                    <p className="mt-1 text-3xl font-bold tracking-tight tabular-nums text-emerald-700 dark:text-emerald-400">
-                      {formatBRL(totals.total)}
-                    </p>
-                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-                      Valor calculado automaticamente ({meta.partsLabel} + {langDisplay === "fr" ? "Services" : "Serviços"} + {meta.laborLabel}), com desconto
-                      e IVA aplicados.
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-            </Section>
-
-            <Section title={langDisplay === "fr" ? "Signature du Responsable" : "Assinatura do Responsável"}>
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-3 rounded-lg border border-border/60 bg-muted/10 p-3 sm:grid-cols-3">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{langDisplay === "fr" ? "Client / Entreprise" : "Cliente / Empresa"}</p>
-                    <p className="mt-1 text-sm font-semibold text-foreground truncate">{form.client_name || "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{langDisplay === "fr" ? "Nº OS" : "Nº OS"}</p>
-                    <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">{form.number}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{langDisplay === "fr" ? "Valeur finale" : "Valor final"}</p>
-                    <p className="mt-1 text-sm font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{formatBRL(totals.total)}</p>
-                  </div>
-                </div>
-
-                {form.signature.signed ? (
-                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-white">
-                        <CheckCircle2 className="h-5 w-5" />
-                      </div>
-                      <div className="flex-1 space-y-2">
-                        <div>
-                          <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
-                            {langDisplay === "fr" ? "Devis approuvé" : "Orçamento aprovado"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {langDisplay === "fr" ? "Signé par" : "Assinado por"}{" "}
-                            <strong className="text-foreground">{form.signature.signerName || "—"}</strong>
-                            {" · "}
-                            {form.signature.signerType ? signerTypeLabel(form.signature.signerType as BudgetSignerType, langDisplay) : "—"}
-                          </p>
-                          <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                            {form.signature.signedAt ? formatDateTime(form.signature.signedAt) : "—"}
-                          </p>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">
-                            {form.signature.confirmationMethod === "DRAWN_SIGNATURE"
-                              ? (langDisplay === "fr" ? "Méthode : signature dessinée" : "Método: assinatura desenhada")
-                              : (langDisplay === "fr" ? "Méthode : confirmation explicite (sans signature)" : "Método: confirmação explícita (sem assinatura)")}
-                          </p>
-                        </div>
-                        {form.signature.signatureData ? (
-                          <div className="mt-2">
-                            <div className="inline-block rounded-md border border-border bg-white p-2">
-                              <img src={form.signature.signatureData} alt={langDisplay === "fr" ? "Signature" : "Assinatura"} className="h-28 max-w-[320px] object-contain" />
                             </div>
                           </div>
-                        ) : null}
-                        {form.rejection.rejected ? (
-                          <p className="mt-1 text-[11px] text-destructive">{langDisplay === "fr" ? "Rejet enregistré également" : "Rejeição também registrada"}</p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                ) : form.rejection.rejected ? (
-                  <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white">
-                        <XCircle className="h-5 w-5" />
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <p className="text-sm font-semibold text-red-700 dark:text-red-400">
-                          {langDisplay === "fr" ? "Devis rejeté" : "Orçamento rejeitado"}
+                        </PopoverContent>
+                      </Popover>
+                      {selectedInterventions.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {selectedInterventions.map((v) => (
+                            <Badge
+                              key={v}
+                              variant="secondary"
+                              className={cn(
+                                "gap-1 pr-1 h-6",
+                                meta.accent,
+                              )}
+                            >
+                              <span className="text-[11px]">{v}</span>
+                              <button
+                                type="button"
+                                onClick={() => toggleIntervention(v)}
+                                disabled={isLocked}
+                                className={cn(
+                                  "ml-0.5 rounded-full p-0.5 inline-flex items-center justify-center hover:bg-black/10 dark:hover:bg-white/10 text-[9px] leading-none",
+                                  isLocked ? "opacity-40 cursor-not-allowed" : "",
+                                )}
+                                aria-label={`${langDisplay === "fr" ? "Retirer" : "Remover"} ${v}`}
+                                title={langDisplay === "fr" ? "Retirer" : "Remover"}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground pt-0.5 leading-tight">
+                          {langDisplay === "fr"
+                            ? "Aucune intervention sélectionnée. Sélectionnez celles compatibles avec votre type de devis."
+                            : "Nenhuma intervenção selecionada. Selecione as intervenções compatíveis com o tipo de orçamento."}
                         </p>
-                        {form.rejection.rejectedBy ? (
-                          <p className="text-xs text-muted-foreground">
-                            {langDisplay === "fr" ? "Responsable : " : "Responsável: "}
-                            <strong className="text-foreground">{form.rejection.rejectedBy}</strong>
-                          </p>
-                        ) : null}
-                        {form.rejection.rejectedAt ? (
-                          <p className="text-xs text-muted-foreground tabular-nums">
-                            {formatDateTime(form.rejection.rejectedAt)}
-                          </p>
-                        ) : null}
-                        {form.rejection.reason ? (
-                          <p className="text-xs text-muted-foreground">
-                            {langDisplay === "fr" ? "Motif : " : "Motivo: "}
-                            <span className="text-foreground">{form.rejection.reason}</span>
-                          </p>
-                        ) : null}
+                      )}
+                    </div>
+                  </Field>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  <Field label={langDisplay === "fr" ? "Diagnostic initial" : "Diagnóstico inicial"}>
+                    <Textarea
+                      rows={4}
+                      placeholder={
+                        langDisplay === "fr"
+                          ? "Rapport client / symptômes / lecture codes erreurs…"
+                          : "Relato do cliente / sintomas / leitura de erros..."
+                      }
+                      value={form.diagnosis ?? ""}
+                      onChange={(e) => set("diagnosis", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                  <Field label={langDisplay === "fr" ? "Description technique du service" : "Descrição técnica do serviço"}>
+                    <Textarea
+                      rows={4}
+                      placeholder={
+                        langDisplay === "fr"
+                          ? "Décrivez en détail les services à réaliser…"
+                          : "Descreva detalhadamente os serviços a serem executados..."
+                      }
+                      value={form.technical_description ?? ""}
+                      onChange={(e) => set("technical_description", e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </Field>
+                </div>
+              </Section>
+
+              <Section
+                title={meta.partsLabel}
+                actions={
+                  <Button variant="ghost" size="sm" type="button" onClick={addPart} className="h-8 px-2.5" disabled={isLocked}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                }
+              >
+                <Card className="border-border/50">
+                  <CardContent className="pt-4">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="min-w-[180px] w-[44%]">
+                              {form.budget_type === "pdr" ? "Área / Localização do dano" : "Descrição"}
+                            </TableHead>
+                            <TableHead className="w-[14%] text-right">
+                              {form.budget_type === "pdr" ? "Nº amassados" : "Qtd"}
+                            </TableHead>
+                            <TableHead className="w-[22%] text-right">
+                              {form.budget_type === "pdr" ? "Valor por dano" : "Valor Unit."}
+                            </TableHead>
+                            <TableHead className="w-[14%] text-right">Subtotal</TableHead>
+                            <TableHead className="w-[6%]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {form.parts.map((p) => (
+                            <TableRow key={p.id}>
+                              <TableCell>
+                                <Input
+                                  placeholder={
+                                    form.budget_type === "mechanics"
+                                      ? "Ex.: Filtro de óleo"
+                                      : form.budget_type === "body_paint"
+                                        ? "Ex.: Parachoque dianteiro / tinta base"
+                                        : "Ex.: Porta traseira esquerda · amassado central · 3 cm"
+                                  }
+                                  value={p.description}
+                                  onChange={(e) => updatePart(p.id, { description: e.target.value })}
+                                  disabled={isLocked}
+                                />
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    step={1}
+                                    className="tabular-nums"
+                                    value={String(p.quantity)}
+                                    onChange={(e) =>
+                                      updatePart(p.id, {
+                                        quantity: Math.max(0, Number(e.target.value) || 0),
+                                      })
+                                    }
+                                    disabled={isLocked}
+                                  />
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={(p as any).pricing_mode === "fixed" ? "default" : "outline"}
+                                    className={cn(
+                                      "h-8 px-1.5 text-[10px] font-medium shrink-0",
+                                      (p as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
+                                    )}
+                                    onClick={() =>
+                                      updatePart(p.id, {
+                                        pricing_mode: (p as any).pricing_mode === "fixed" ? "unit" : "fixed",
+                                      } as any)
+                                    }
+                                    title={(p as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
+                                    disabled={isLocked}
+                                  >
+                                    {(p as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
+                                  </Button>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <DecimalInput
+                                  className="tabular-nums text-right h-9"
+                                  placeholder="0.00"
+                                  value={p.unit_price}
+                                  onChangeValue={(val) =>
+                                    updatePart(p.id, {
+                                      unit_price: val,
+                                    })
+                                  }
+                                  disabled={isLocked}
+                                />
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums font-medium">
+                                {formatBRL(
+                                  (p as any).pricing_mode === "fixed"
+                                    ? Math.max(0, Number(p.unit_price) || 0)
+                                    : Math.max(0, Number(p.quantity) || 0) * Math.max(0, Number(p.unit_price) || 0),
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  type="button"
+                                  onClick={() => removePart(p.id)}
+                                  disabled={isLocked}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                        <TableFooter>
+                          <TableRow>
+                            <TableCell colSpan={3}>{meta.totalPartsLabel}</TableCell>
+                            <TableCell className="text-right tabular-nums font-semibold">
+                              {formatBRL(totals.parts)}
+                            </TableCell>
+                            <TableCell />
+                          </TableRow>
+                        </TableFooter>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Section>
+
+              <Section
+                title={langDisplay === "fr" ? "Services" : "Serviços"}
+                actions={
+                  <Button variant="ghost" size="sm" type="button" onClick={addService} className="h-8 px-2.5" disabled={isLocked}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                }
+              >
+                <Card className="border-border/50">
+                  <CardContent className="pt-4">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="min-w-[180px] w-[44%]">Descrição</TableHead>
+                            <TableHead className="w-[14%] text-right">Qtd</TableHead>
+                            <TableHead className="w-[22%] text-right">Valor Unit.</TableHead>
+                            <TableHead className="w-[14%] text-right">Subtotal</TableHead>
+                            <TableHead className="w-[6%]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {form.services.map((s) => (
+                            <TableRow key={s.id}>
+                              <TableCell>
+                                <Input
+                                  list={`service-catalog-dl-${s.id}`}
+                                  placeholder={
+                                    form.budget_type === "mechanics"
+                                      ? "Ex.: Diagnóstico eletrônico / Geometria"
+                                      : form.budget_type === "body_paint"
+                                        ? "Ex.: Pintura / Polimento / Tratamento"
+                                        : "Ex.: Avaliação detalhada de áreas"
+                                  }
+                                  value={s.description}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    const matched = catalogItems.find(
+                                      (it) => it.name.trim().toLowerCase() === val.trim().toLowerCase(),
+                                    );
+                                    if (matched) {
+                                      const patch: Partial<BudgetServiceLine> = {
+                                        description: matched.name,
+                                        catalogItemId: matched.id,
+                                        catalogItemCode: matched.code,
+                                        categoryCode: matched.categoryCode,
+                                      };
+                                      if (matched.suggestedPrice && (!s.unit_price || s.unit_price === 0)) {
+                                        patch.unit_price = Number(matched.suggestedPrice);
+                                      }
+                                      updateService(s.id, patch);
+                                    } else {
+                                      updateService(s.id, { description: val });
+                                    }
+                                  }}
+                                  disabled={isLocked}
+                                />
+                                <datalist id={`service-catalog-dl-${s.id}`}>
+                                  {catalogItems.map((item) => (
+                                    <option key={item.id} value={item.name}>
+                                      {item.categoryName ? `${item.categoryName} — ` : ""}{item.code}
+                                    </option>
+                                  ))}
+                                </datalist>
+                                {s.catalogItemCode ? (
+                                  <span className="text-[10px] text-muted-foreground font-mono mt-0.5 block">
+                                    {s.categoryCode ? `${s.categoryCode} · ` : ""}{s.catalogItemCode}
+                                  </span>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    step={1}
+                                    className="tabular-nums"
+                                    value={String(s.quantity)}
+                                    onChange={(e) =>
+                                      updateService(s.id, {
+                                        quantity: Math.max(0, Number(e.target.value) || 0),
+                                      })
+                                    }
+                                    disabled={isLocked}
+                                  />
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={(s as any).pricing_mode === "fixed" ? "default" : "outline"}
+                                    className={cn(
+                                      "h-8 px-1.5 text-[10px] font-medium shrink-0",
+                                      (s as any).pricing_mode === "fixed" ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "text-muted-foreground"
+                                    )}
+                                    onClick={() =>
+                                      updateService(s.id, {
+                                        pricing_mode: (s as any).pricing_mode === "fixed" ? "unit" : "fixed",
+                                      } as any)
+                                    }
+                                    title={(s as any).pricing_mode === "fixed" ? "Modo Fixo (preço fechado)" : "Modo Unitário (multiplica qtd * unitário)"}
+                                    disabled={isLocked}
+                                  >
+                                    {(s as any).pricing_mode === "fixed" ? "Fixo" : "Unit."}
+                                  </Button>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <DecimalInput
+                                  className="tabular-nums text-right h-9"
+                                  placeholder="0.00"
+                                  value={s.unit_price}
+                                  onChangeValue={(val) =>
+                                    updateService(s.id, {
+                                      unit_price: val,
+                                    })
+                                  }
+                                  disabled={isLocked}
+                                />
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums font-medium">
+                                {formatBRL(
+                                  (s as any).pricing_mode === "fixed"
+                                    ? Math.max(0, Number(s.unit_price) || 0)
+                                    : Math.max(0, Number(s.quantity) || 0) * Math.max(0, Number(s.unit_price) || 0),
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  type="button"
+                                  onClick={() => removeService(s.id)}
+                                  disabled={isLocked}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                        <TableFooter>
+                          <TableRow>
+                            <TableCell colSpan={3}>
+                              {langDisplay === "fr" ? "Total Services" : "Total Serviços"}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums font-semibold">
+                              {formatBRL(totals.services)}
+                            </TableCell>
+                            <TableCell />
+                          </TableRow>
+                        </TableFooter>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Section>
+
+              <Section
+                title={meta.laborLabel}
+                actions={
+                  <Button variant="ghost" size="sm" type="button" onClick={addLabor} className="h-8 px-2.5" disabled={isLocked}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                }
+              >
+                <Card className="border-border/50">
+                  <CardContent className="pt-4">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="min-w-[180px] w-[44%]">Descrição</TableHead>
+                            <TableHead className="w-[14%] text-right">Horas</TableHead>
+                            <TableHead className="w-[22%] text-right">Valor / Hora</TableHead>
+                            <TableHead className="w-[14%] text-right">Subtotal</TableHead>
+                            <TableHead className="w-[6%]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {form.labor.map((l) => (
+                            <TableRow key={l.id}>
+                              <TableCell>
+                                <Input
+                                  placeholder={
+                                    form.budget_type === "mechanics"
+                                      ? "Ex.: Troca de óleo e filtros"
+                                      : form.budget_type === "body_paint"
+                                        ? "Ex.: Desmontagem · Reparação · Primer · Pintura · Polimento"
+                                        : "Ex.: Acesso forro · Aquecimento · PDR · Acabamento"
+                                  }
+                                  value={l.description}
+                                  onChange={(e) => updateLabor(l.id, { description: e.target.value })}
+                                  disabled={isLocked}
+                                />
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <DecimalInput
+                                  className="tabular-nums text-right h-9"
+                                  placeholder="0.0"
+                                  value={l.hours}
+                                  onChangeValue={(val) =>
+                                    updateLabor(l.id, {
+                                      hours: val,
+                                    })
+                                  }
+                                  disabled={isLocked}
+                                />
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <DecimalInput
+                                  className="tabular-nums text-right h-9"
+                                  placeholder="0.00"
+                                  value={l.hourly_rate}
+                                  onChangeValue={(val) =>
+                                    updateLabor(l.id, {
+                                      hourly_rate: val,
+                                    })
+                                  }
+                                  disabled={isLocked}
+                                />
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums font-medium">
+                                {formatBRL(
+                                  Math.max(0, Number(l.hours) || 0) *
+                                  Math.max(0, Number(l.hourly_rate) || 0),
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  type="button"
+                                  onClick={() => removeLabor(l.id)}
+                                  disabled={isLocked}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                        <TableFooter>
+                          <TableRow>
+                            <TableCell colSpan={3}>{meta.totalLaborLabel}</TableCell>
+                            <TableCell className="text-right tabular-nums font-semibold">
+                              {formatBRL(totals.labor)}
+                            </TableCell>
+                            <TableCell />
+                          </TableRow>
+                        </TableFooter>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Section>
+
+              <Section title="Totais">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <Card className="lg:col-span-2 border-border/50">
+                    <CardHeader className="pb-3 pt-4">
+                      <CardTitle className="text-sm">Ajustes Fiscais</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3 pt-0">
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="Desconto (%)">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.01}
+                            value={String(form.discount_pct)}
+                            onChange={(e) =>
+                              set(
+                                "discount_pct",
+                                Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                              )
+                            }
+                            disabled={isLocked}
+                          />
+                        </Field>
+                        <Field label="IVA / Impostos (%)">
+                          <Input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={String(form.iva_pct)}
+                            onChange={(e) =>
+                              set("iva_pct", Math.max(0, Number(e.target.value) || 0))
+                            }
+                            disabled={isLocked}
+                          />
+                        </Field>
                       </div>
+                      <div className="grid grid-cols-1 gap-1.5 rounded-lg bg-muted/40 p-3 text-sm">
+                        <Row
+                          label={
+                            langDisplay === "fr"
+                              ? "Sous-total (Pièces + Services + M.O.)"
+                              : "Subtotal (Peças + Serviços + M.O.)"
+                          }
+                          value={formatBRL(totals.gross)}
+                        />
+                        <Row
+                          label={`Desconto (${Number(form.discount_pct || 0).toFixed(2)}%)`}
+                          value={`- ${formatBRL(totals.disc)}`}
+                          muted
+                        />
+                        <Row label="Base Tributável" value={formatBRL(totals.net)} />
+                        <Row
+                          label={`IVA (${Number(form.iva_pct || 0).toFixed(2)}%)`}
+                          value={`+ ${formatBRL(totals.iva)}`}
+                          muted
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-emerald-500/40 bg-emerald-500/5">
+                    <CardHeader className="pb-2 pt-4">
+                      <CardTitle className="text-sm">Valor Total do Orçamento</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Total a pagar
+                      </p>
+                      <p className="mt-1 text-3xl font-bold tracking-tight tabular-nums text-emerald-700 dark:text-emerald-400">
+                        {formatBRL(totals.total)}
+                      </p>
+                      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                        Valor calculado automaticamente ({meta.partsLabel} + {langDisplay === "fr" ? "Services" : "Serviços"} + {meta.laborLabel}), com desconto
+                        e IVA aplicados.
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </Section>
+
+              <Section title={langDisplay === "fr" ? "Signature du Responsable" : "Assinatura do Responsável"}>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-3 rounded-lg border border-border/60 bg-muted/10 p-3 sm:grid-cols-3">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{langDisplay === "fr" ? "Client / Entreprise" : "Cliente / Empresa"}</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground truncate">{form.client_name || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{langDisplay === "fr" ? "Nº OS" : "Nº OS"}</p>
+                      <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">{form.number}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{langDisplay === "fr" ? "Valeur finale" : "Valor final"}</p>
+                      <p className="mt-1 text-sm font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{formatBRL(totals.total)}</p>
                     </div>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <Field label={langDisplay === "fr" ? "Nom du signataire" : "Nome do signatário"}>
-                        <Input
-                          placeholder={langDisplay === "fr" ? "Ex.: João da Silva" : "Ex.: João da Silva"}
-                          value={signatureSignerName}
-                          onChange={(e) => setSignatureSignerName(e.target.value)}
-                          disabled={isLocked}
-                        />
-                      </Field>
-                      <Field label={langDisplay === "fr" ? "Type de signataire" : "Tipo de signatário"}>
-                        <Select
-                          value={signatureSignerType}
-                          onValueChange={(v) => setSignatureSignerType(v as BudgetSignerType | "")}
-                          disabled={isLocked}
-                        >
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {SIGNER_TYPE_OPTIONS.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {langDisplay === "fr" ? opt.fr : opt.pt}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                    </div>
 
-                    <div>
-                      <p className="mb-1.5 text-xs font-medium text-muted-foreground">
-                        {langDisplay === "fr" ? "Zone de signature (dessiner)" : "Área para assinatura (desenhar)"}
-                      </p>
-                      <WeeklogSignatureCanvas
-                        ref={signatureCanvasRef}
-                        disabled={isLocked}
-                        height={160}
-                        hideControls={true}
-                        placeholder={langDisplay === "fr" ? "Dessinez la signature ici (tactile ou souris)" : "Desenhe a assinatura aqui (toque ou mouse)"}
-                      />
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {form.signature.signed ? (
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-white">
+                          <CheckCircle2 className="h-5 w-5" />
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <div>
+                            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                              {langDisplay === "fr" ? "Devis approuvé" : "Orçamento aprovado"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {langDisplay === "fr" ? "Signé par" : "Assinado por"}{" "}
+                              <strong className="text-foreground">{form.signature.signerName || "—"}</strong>
+                              {" · "}
+                              {form.signature.signerType ? signerTypeLabel(form.signature.signerType as BudgetSignerType, langDisplay) : "—"}
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                              {form.signature.signedAt ? formatDateTime(form.signature.signedAt) : "—"}
+                            </p>
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                              {form.signature.confirmationMethod === "DRAWN_SIGNATURE"
+                                ? (langDisplay === "fr" ? "Méthode : signature dessinée" : "Método: assinatura desenhada")
+                                : (langDisplay === "fr" ? "Méthode : confirmation explicite (sans signature)" : "Método: confirmação explícita (sem assinatura)")}
+                            </p>
+                          </div>
+                          {form.signature.signatureData ? (
+                            <div className="mt-2">
+                              <div className="inline-block rounded-md border border-border bg-white p-2">
+                                <img src={form.signature.signatureData} alt={langDisplay === "fr" ? "Signature" : "Assinatura"} className="h-28 max-w-[320px] object-contain" />
+                              </div>
+                            </div>
+                          ) : null}
+                          {form.rejection.rejected ? (
+                            <p className="mt-1 text-[11px] text-destructive">{langDisplay === "fr" ? "Rejet enregistré également" : "Rejeição também registrada"}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : form.rejection.rejected ? (
+                    <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white">
+                          <XCircle className="h-5 w-5" />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <p className="text-sm font-semibold text-red-700 dark:text-red-400">
+                            {langDisplay === "fr" ? "Devis rejeté" : "Orçamento rejeitado"}
+                          </p>
+                          {form.rejection.rejectedBy ? (
+                            <p className="text-xs text-muted-foreground">
+                              {langDisplay === "fr" ? "Responsable : " : "Responsável: "}
+                              <strong className="text-foreground">{form.rejection.rejectedBy}</strong>
+                            </p>
+                          ) : null}
+                          {form.rejection.rejectedAt ? (
+                            <p className="text-xs text-muted-foreground tabular-nums">
+                              {formatDateTime(form.rejection.rejectedAt)}
+                            </p>
+                          ) : null}
+                          {form.rejection.reason ? (
+                            <p className="text-xs text-muted-foreground">
+                              {langDisplay === "fr" ? "Motif : " : "Motivo: "}
+                              <span className="text-foreground">{form.rejection.reason}</span>
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <Field label={langDisplay === "fr" ? "Nom du signataire" : "Nome do signatário"}>
+                          <Input
+                            placeholder={langDisplay === "fr" ? "Ex.: João da Silva" : "Ex.: João da Silva"}
+                            value={signatureSignerName}
+                            onChange={(e) => setSignatureSignerName(e.target.value)}
+                            disabled={isLocked}
+                          />
+                        </Field>
+                        <Field label={langDisplay === "fr" ? "Type de signataire" : "Tipo de signatário"}>
+                          <Select
+                            value={signatureSignerType}
+                            onValueChange={(v) => setSignatureSignerType(v as BudgetSignerType | "")}
+                            disabled={isLocked}
+                          >
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {SIGNER_TYPE_OPTIONS.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {langDisplay === "fr" ? opt.fr : opt.pt}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      </div>
+
+                      <div>
+                        <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                          {langDisplay === "fr" ? "Zone de signature (dessiner)" : "Área para assinatura (desenhar)"}
+                        </p>
+                        <WeeklogSignatureCanvas
+                          ref={signatureCanvasRef}
+                          disabled={isLocked}
+                          height={160}
+                          hideControls={true}
+                          placeholder={langDisplay === "fr" ? "Dessinez la signature ici (tactile ou souris)" : "Desenhe a assinatura aqui (toque ou mouse)"}
+                        />
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => signatureCanvasRef.current?.clear()}
+                            disabled={isLocked}
+                            className="h-8"
+                          >
+                            <Eraser className="h-3.5 w-3.5" /> {langDisplay === "fr" ? "Effacer signature" : "Limpar assinatura"}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={approveWithSignature}
+                            disabled={isLocked}
+                            className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                          >
+                            <PenLine className="h-3.5 w-3.5" /> {langDisplay === "fr" ? "Signer le devis" : "Assinar orçamento"}
+                          </Button>
+                        </div>
+
+                        <div className="rounded-lg border border-slate-700/60 bg-muted/40 p-2.5 text-xs text-muted-foreground flex items-center gap-2">
+                          <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+                          <span>
+                            {langDisplay === "fr"
+                              ? "L'approbation valide les conditions financières du devis et autorise le démarrage de l'ordre de réparation."
+                              : "A aprovação valida as condições comerciais do orçamento e autoriza o andamento para a Ordem de Produção."}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="relative">
+                        <div className="absolute inset-0 flex items-center" aria-hidden>
+                          <div className="w-full border-t border-dashed border-border" />
+                        </div>
+                        <div className="relative flex justify-center">
+                          <span className="bg-card px-2 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                            {langDisplay === "fr" ? "ou validation sans signature" : "ou validação sem assinatura"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => signatureCanvasRef.current?.clear()}
+                          onClick={() => {
+                            const defaultName = signatureSignerName.trim() || form.client_name?.trim() || "";
+                            setConfirmNoSignatureName(defaultName);
+                            setConfirmNoSignatureType(signatureSignerType || "client");
+                            setConfirmNoSignatureChecked(false);
+                            setConfirmNoSignatureOpen(true);
+                          }}
                           disabled={isLocked}
-                          className="h-8"
+                          className="h-9 gap-1.5 font-medium"
                         >
-                          <Eraser className="h-3.5 w-3.5" /> {langDisplay === "fr" ? "Effacer signature" : "Limpar assinatura"}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={approveWithSignature}
-                          disabled={isLocked}
-                          className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
-                        >
-                          <PenLine className="h-3.5 w-3.5" /> {langDisplay === "fr" ? "Signer le devis" : "Assinar orçamento"}
+                          <HandPlatter className="h-4 w-4 text-amber-500" />{" "}
+                          {langDisplay === "fr" ? "Confirmer sans signature" : "Confirmar sem assinatura (Aprovar)"}
                         </Button>
                       </div>
-
-                      <div className="rounded-lg border border-slate-700/60 bg-muted/40 p-2.5 text-xs text-muted-foreground flex items-center gap-2">
-                        <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
-                        <span>
-                          {langDisplay === "fr"
-                            ? "L'approbation valide les conditions financières du devis et autorise le démarrage de l'ordre de réparation."
-                            : "A aprovação valida as condições comerciais do orçamento e autoriza o andamento para a Ordem de Produção."}
-                        </span>
-                      </div>
                     </div>
+                  )}
+                </div>
+              </Section>
+            </div>
+          )}
 
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center" aria-hidden>
-                        <div className="w-full border-t border-dashed border-border" />
-                      </div>
-                      <div className="relative flex justify-center">
-                        <span className="bg-card px-2 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                          {langDisplay === "fr" ? "ou validation sans signature" : "ou validação sem assinatura"}
-                        </span>
-                      </div>
-                    </div>
+          {step === "form" ? (
+            <DialogFooter className="pt-4">
+              <div className="flex w-full flex-wrap justify-between gap-2">
+                <div>
+                  <Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
+                    <X className="h-4 w-4" /> {isLocked ? (langDisplay === "fr" ? "Fermer" : "Fechar") : (langDisplay === "fr" ? "Annuler" : "Cancelar")}
+                  </Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Seletor rápido de idioma do documento PDF */}
+                  <div className="flex items-center gap-0.5 bg-muted/60 p-0.5 rounded-md border border-slate-700/60 h-9" title="Idioma do documento PDF emitido">
+                    {(["pt", "fr", "en", "es", "de", "it"] as const).map((l) => (
+                      <Button
+                        key={l}
+                        type="button"
+                        size="sm"
+                        variant={pdfLang === l ? "default" : "ghost"}
+                        className={cn(
+                          "h-7 px-2 text-[11px] font-bold uppercase transition-all",
+                          pdfLang === l && "bg-cyan-600 text-white shadow-sm"
+                        )}
+                        onClick={() => {
+                          setPdfLang(l);
+                          setFormSafe((prev) => ({
+                            ...prev,
+                            pdf_lang: l,
+                            dossier_snapshot: {
+                              ...(prev.dossier_snapshot || {}),
+                              pdfLang: l,
+                            },
+                          }));
+                        }}
+                      >
+                        {l}
+                      </Button>
+                    ))}
+                  </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={viewBudgetPreview}
+                    disabled={isGeneratingPdf}
+                    className="h-9"
+                  >
+                    {isGeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}{" "}
+                    {langDisplay === "fr" ? "Aperçu PDF" : "Visualizar PDF"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={downloadPDF}
+                    disabled={isGeneratingPdf}
+                    className="h-9"
+                  >
+                    {isGeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}{" "}
+                    {langDisplay === "fr" ? "Télécharger PDF" : "Baixar PDF"}
+                  </Button>
+                  {form.status === "rejected" ? (
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      className="h-9 gap-1.5"
+                      onClick={() => {
+                        setFormSafe((prev) => ({
+                          ...prev,
+                          status: "draft",
+                          rejection: { rejected: false, rejectedAt: null, rejectedBy: null, reason: null },
+                        }));
+                        toast.info("Orçamento reaberto como rascunho para renegociação. Salve as alterações para registrar uma nova revisão.");
+                      }}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      {langDisplay === "fr" ? "Rouvrir / Renégocier" : "Reabrir para Renegociar"}
+                    </Button>
+                  ) : null}
+                  {!isLocked ? (
+                    <>
                       <Button
                         type="button"
                         variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const defaultName = signatureSignerName.trim() || form.client_name?.trim() || "";
-                          setConfirmNoSignatureName(defaultName);
-                          setConfirmNoSignatureType(signatureSignerType || "client");
-                          setConfirmNoSignatureChecked(false);
-                          setConfirmNoSignatureOpen(true);
-                        }}
-                        disabled={isLocked}
-                        className="h-9 gap-1.5 font-medium"
+                        onClick={() => setConfirmRejectionOpen(true)}
+                        className="border-red-500/40 text-red-600 hover:bg-red-500/5 hover:text-red-700"
                       >
-                        <HandPlatter className="h-4 w-4 text-amber-500" />{" "}
-                        {langDisplay === "fr" ? "Confirmer sans signature" : "Confirmar sem assinatura (Aprovar)"}
+                        <XCircle className="h-4 w-4" /> {langDisplay === "fr" ? "Rejeter le devis" : "Rejeitar orçamento"}
                       </Button>
-                    </div>
-                  </div>
-                )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={sendToClient}
+                        disabled={form.status === "sent"}
+                      >
+                        <Send className="h-4 w-4" />{" "}
+                        {form.status === "sent"
+                          ? (langDisplay === "fr" ? "Déjà envoyé" : "Já enviado")
+                          : (langDisplay === "fr" ? "Envoyer au client" : "Enviar ao cliente")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={copySignLink}
+                        className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+                      >
+                        <Share2 className="h-4 w-4" />{" "}
+                        {langDisplay === "fr" ? "Lien signature" : "Link p/ Assinar"}
+                      </Button>
+                      <Button type="button" onClick={save} disabled={saving}>
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{" "}
+                        {langDisplay === "fr" ? "Enregistrer le devis" : "Salvar Orçamento"}
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
               </div>
-            </Section>
-          </div>
-        )}
+            </DialogFooter>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
-        {step === "form" ? (
-          <DialogFooter className="pt-4">
-            <div className="flex w-full flex-wrap justify-between gap-2">
-              <div>
-                <Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
-                  <X className="h-4 w-4" /> {isLocked ? (langDisplay === "fr" ? "Fermer" : "Fechar") : (langDisplay === "fr" ? "Annuler" : "Cancelar")}
-                </Button>
+      <Dialog open={ocrDialogOpen} onOpenChange={(v) => { if (!ocrIsExtracting && !_ocrLoading1) setOcrDialogOpen(v); }}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 flex-wrap">
+              <ScanIcon className="h-5 w-5 text-indigo-600" />
+              {ocrExtraction
+                ? (langDisplay === "fr" ? "Données extraites — Confirmer" : "DADOS EXTRAÍDOS — CONFIRMAR")
+                : !ocrSelectedBudgetType
+                  ? (langDisplay === "fr" ? "Étape 1/2 — Type de service" : "Passo 1/2 — Tipo de serviço")
+                  : (langDisplay === "fr" ? "Étape 2/2 — Numériser document" : "Passo 2/2 — Escanear documento")}
+              {ocrSelectedBudgetType ? (
+                <Badge variant="outline" className={cn("ml-auto", {
+                  "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20": ocrSelectedBudgetType === "mechanics",
+                  "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20": ocrSelectedBudgetType === "body_paint",
+                  "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20": ocrSelectedBudgetType === "pdr",
+                  "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20": ocrSelectedBudgetType === "assembly_disassembly",
+                })}>
+                  {btLabel(ocrSelectedBudgetType, langDisplay)}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className={`ml-auto ${meta.accent}`}>
+                  {btLabel(form.budget_type, langDisplay)}
+                </Badge>
+              )}
+              {ocrExtraction ? (
+                <Badge variant="outline" className={cn("ml-1", confidenceTone(ocrExtraction.overall_confidence))}>
+                  Confiança: {confidenceLabel(ocrExtraction.overall_confidence)}
+                </Badge>
+              ) : null}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Upload de ficha ou documento para OCR e pré-visualização dos campos antes de aplicar.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!ocrSelectedBudgetType && !ocrExtraction ? (
+            <div className="space-y-5 py-3">
+              <div className="rounded-lg border border-dashed border-indigo-400/40 bg-indigo-500/5 px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">
+                <div className="flex items-start gap-2">
+                  <SearchIcon className="h-4 w-4 mt-0.5 shrink-0" />
+                  <div>
+                    <strong className="font-semibold">
+                      {langDisplay === "fr" ? "Quel type de service ?" : "Qual o tipo de serviço?"}
+                    </strong>
+                    <p className="mt-1 opacity-80 leading-relaxed">
+                      {langDisplay === "fr"
+                        ? "L'analyse OCR sera optimisée pour ce type (ex: PDR analysera les zones / dommages)."
+                        : "A análise OCR será otimizada para o tipo selecionado (ex: PDR lê áreas/danos e medidas)."}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Seletor rápido de idioma do documento PDF */}
-                <div className="flex items-center gap-0.5 bg-muted/60 p-0.5 rounded-md border border-slate-700/60 h-9" title="Idioma do documento PDF emitido">
-                  {(["pt", "fr", "en", "es", "de", "it"] as const).map((l) => (
-                    <Button
-                      key={l}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {(Object.keys(BUDGET_TYPE_LABELS) as BudgetType[]).map((t) => {
+                  const OptIcon =
+                    t === "mechanics" ? Wrench :
+                      t === "body_paint" ? Palette :
+                        t === "pdr" ? Hammer : BoxIcon;
+                  const tone =
+                    t === "mechanics" ? "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20 hover:bg-slate-500/20" :
+                      t === "body_paint" ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/20" :
+                        t === "pdr" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20" :
+                          "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20 hover:bg-sky-500/20";
+                  return (
+                    <button
+                      key={t}
                       type="button"
-                      size="sm"
-                      variant={pdfLang === l ? "default" : "ghost"}
+                      onClick={() => { setOcrSelectedBudgetType(t); setOcrErrorMessage(null); }}
                       className={cn(
-                        "h-7 px-2 text-[11px] font-bold uppercase transition-all",
-                        pdfLang === l && "bg-cyan-600 text-white shadow-sm"
+                        "flex items-start gap-3 text-left rounded-xl border-2 p-4 transition-all",
+                        tone,
                       )}
-                      onClick={() => {
-                        setPdfLang(l);
-                        setFormSafe((prev) => ({
-                          ...prev,
-                          pdf_lang: l,
-                          dossier_snapshot: {
-                            ...(prev.dossier_snapshot || {}),
-                            pdfLang: l,
-                          },
-                        }));
-                      }}
                     >
-                      {l}
-                    </Button>
-                  ))}
-                </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={viewBudgetPreview}
-                  disabled={isGeneratingPdf}
-                  className="h-9"
-                >
-                  {isGeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}{" "}
-                  {langDisplay === "fr" ? "Aperçu PDF" : "Visualizar PDF"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={downloadPDF}
-                  disabled={isGeneratingPdf}
-                  className="h-9"
-                >
-                  {isGeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}{" "}
-                  {langDisplay === "fr" ? "Télécharger PDF" : "Baixar PDF"}
-                </Button>
-                {form.status === "rejected" ? (
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="sm"
-                    className="h-9 gap-1.5"
-                    onClick={() => {
-                      setFormSafe((prev) => ({
-                        ...prev,
-                        status: "draft",
-                        rejection: { rejected: false, rejectedAt: null, rejectedBy: null, reason: null },
-                      }));
-                      toast.info("Orçamento reaberto como rascunho para renegociação. Salve as alterações para registrar uma nova revisão.");
-                    }}
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    {langDisplay === "fr" ? "Rouvrir / Renégocier" : "Reabrir para Renegociar"}
-                  </Button>
-                ) : null}
-                {!isLocked ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setConfirmRejectionOpen(true)}
-                      className="border-red-500/40 text-red-600 hover:bg-red-500/5 hover:text-red-700"
-                    >
-                      <XCircle className="h-4 w-4" /> {langDisplay === "fr" ? "Rejeter le devis" : "Rejeitar orçamento"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={sendToClient}
-                      disabled={form.status === "sent"}
-                    >
-                      <Send className="h-4 w-4" />{" "}
-                      {form.status === "sent"
-                        ? (langDisplay === "fr" ? "Déjà envoyé" : "Já enviado")
-                        : (langDisplay === "fr" ? "Envoyer au client" : "Enviar ao cliente")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={copySignLink}
-                      className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
-                    >
-                      <Share2 className="h-4 w-4" />{" "}
-                      {langDisplay === "fr" ? "Lien signature" : "Link p/ Assinar"}
-                    </Button>
-                    <Button type="button" onClick={save} disabled={saving}>
-                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{" "}
-                      {langDisplay === "fr" ? "Enregistrer le devis" : "Salvar Orçamento"}
-                    </Button>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          </DialogFooter>
-        ) : null}
-      </DialogContent>
-    </Dialog>
-
-    <Dialog open={ocrDialogOpen} onOpenChange={(v) => { if (!ocrIsExtracting && !_ocrLoading1) setOcrDialogOpen(v); }}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 flex-wrap">
-            <ScanIcon className="h-5 w-5 text-indigo-600" />
-            {ocrExtraction
-              ? (langDisplay === "fr" ? "Données extraites — Confirmer" : "DADOS EXTRAÍDOS — CONFIRMAR")
-              : !ocrSelectedBudgetType
-                ? (langDisplay === "fr" ? "Étape 1/2 — Type de service" : "Passo 1/2 — Tipo de serviço")
-                : (langDisplay === "fr" ? "Étape 2/2 — Numériser document" : "Passo 2/2 — Escanear documento")}
-            {ocrSelectedBudgetType ? (
-              <Badge variant="outline" className={cn("ml-auto", {
-                "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20": ocrSelectedBudgetType === "mechanics",
-                "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20": ocrSelectedBudgetType === "body_paint",
-                "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20": ocrSelectedBudgetType === "pdr",
-                "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20": ocrSelectedBudgetType === "assembly_disassembly",
-              })}>
-                {btLabel(ocrSelectedBudgetType, langDisplay)}
-              </Badge>
-            ) : (
-              <Badge variant="outline" className={`ml-auto ${meta.accent}`}>
-                {btLabel(form.budget_type, langDisplay)}
-              </Badge>
-            )}
-            {ocrExtraction ? (
-              <Badge variant="outline" className={cn("ml-1", confidenceTone(ocrExtraction.overall_confidence))}>
-                Confiança: {confidenceLabel(ocrExtraction.overall_confidence)}
-              </Badge>
-            ) : null}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            Upload de ficha ou documento para OCR e pré-visualização dos campos antes de aplicar.
-          </DialogDescription>
-        </DialogHeader>
-
-        {!ocrSelectedBudgetType && !ocrExtraction ? (
-          <div className="space-y-5 py-3">
-            <div className="rounded-lg border border-dashed border-indigo-400/40 bg-indigo-500/5 px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">
-              <div className="flex items-start gap-2">
-                <SearchIcon className="h-4 w-4 mt-0.5 shrink-0" />
-                <div>
-                  <strong className="font-semibold">
-                    {langDisplay === "fr" ? "Quel type de service ?" : "Qual o tipo de serviço?"}
-                  </strong>
-                  <p className="mt-1 opacity-80 leading-relaxed">
-                    {langDisplay === "fr"
-                      ? "L'analyse OCR sera optimisée pour ce type (ex: PDR analysera les zones / dommages)."
-                      : "A análise OCR será otimizada para o tipo selecionado (ex: PDR lê áreas/danos e medidas)."}
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {(Object.keys(BUDGET_TYPE_LABELS) as BudgetType[]).map((t) => {
-                const OptIcon =
-                  t === "mechanics" ? Wrench :
-                  t === "body_paint" ? Palette :
-                  t === "pdr" ? Hammer : BoxIcon;
-                const tone =
-                  t === "mechanics" ? "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20 hover:bg-slate-500/20" :
-                  t === "body_paint" ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/20" :
-                  t === "pdr" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20" :
-                  "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20 hover:bg-sky-500/20";
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => { setOcrSelectedBudgetType(t); setOcrErrorMessage(null); }}
-                    className={cn(
-                      "flex items-start gap-3 text-left rounded-xl border-2 p-4 transition-all",
-                      tone,
-                    )}
-                  >
-                    <span className="shrink-0 mt-0.5">
-                      {OptIcon ? <OptIcon className="h-5 w-5" /> : null}
-                    </span>
-                    <span className="flex flex-col">
-                      <span className="font-semibold text-sm leading-tight">{btLabel(t, langDisplay)}</span>
-                      <span className="text-xs opacity-75 mt-1">
-                        {t === "mechanics"
-                          ? (langDisplay === "fr" ? "Mécanique, diagnostics, entretien." : "Mecânica, diagnósticos, manutenção.")
-                          : t === "body_paint"
-                            ? (langDisplay === "fr" ? "Carrosserie, peinture, remplacement." : "Funilaria, pintura, reposição.")
-                            : t === "pdr"
-                              ? (langDisplay === "fr" ? "Débosselage sans peinture / zones + dommages." : "Martelinho sem pintura / áreas danos + medidas.")
-                              : (langDisplay === "fr" ? "Montage, démontage, accessoires." : "Montagem, desmontagem, acessórios.")}
+                      <span className="shrink-0 mt-0.5">
+                        {OptIcon ? <OptIcon className="h-5 w-5" /> : null}
                       </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" type="button" onClick={() => setOcrDialogOpen(false)}>
-                {langDisplay === "fr" ? "Annuler" : "Cancelar"}
-              </Button>
-            </DialogFooter>
-          </div>
-        ) : !ocrExtraction ? (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                type="button"
-                onClick={() => { setOcrSelectedBudgetType(null); setOcrErrorMessage(null); setOcrExtraction(null); }}
-                disabled={ocrIsExtracting || _ocrLoading1}
-              >
-                <ArrowLeft className="h-4 w-4 mr-1" />
-                {langDisplay === "fr" ? "Changer type" : "Mudar tipo"}
-              </Button>
-            </div>
-            {ocrRateLimitedUntil && ocrRateLimitedUntil > Date.now() ? (
-              <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 dark:bg-amber-500/5 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 flex items-start gap-2">
-                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 animate-pulse" />
-                <div className="flex-1">
-                  <strong className="font-semibold">
-                    {langDisplay === "fr" ? "Limite de requêtes temporaire" : "Limite de requisições temporária"}
-                  </strong>
-                  <p className="mt-0.5">
-                    {langDisplay === "fr"
-                      ? `Serveur surchargé — patientez ${ocrRateCountdown}s avant le prochain essai.`
-                      : `Servidor sobrecarregado — aguarde ${ocrRateCountdown}s antes da próxima tentativa.`}
-                  </p>
-                  <div className="mt-2 h-1.5 w-full bg-white/40 dark:bg-black/20 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500 transition-all duration-1000 ease-linear rounded-full"
-                      style={{
-                        width: ocrRateCountdown > 0
-                          ? `${Math.max(5, Math.min(100, 100 - ((60 - ocrRateCountdown) / 60) * 100))}%`
-                          : "5%",
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : null}
-            {ocrErrorMessage && !(ocrRateLimitedUntil && ocrRateLimitedUntil > Date.now()) ? (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive flex items-start gap-2">
-                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                <div>
-                  <strong className="font-semibold">{langDisplay === "fr" ? "Erreur" : "Erro"}</strong>
-                  <p className="mt-0.5">{ocrErrorMessage}</p>
-                </div>
-              </div>
-            ) : null}
-            <FileUploadZone
-              onFilesSelected={handleScanFilesSelected}
-              isProcessing={ocrIsExtracting || _ocrLoading1}
-              disabled={ocrRateLimitedUntil != null && ocrRateLimitedUntil > Date.now()}
-            />
-            {ocrIsExtracting || _ocrLoading1 ? (
-              <div className="rounded-lg border border-dashed border-indigo-400/40 bg-indigo-500/5 px-4 py-3 text-xs text-indigo-700 dark:text-indigo-300">
-                <div className="flex items-center gap-2">
-                  <SearchIcon className="h-4 w-4 animate-pulse" />
-                  {langDisplay === "fr" ? "Extraction en cours… (max 60s)" : "Lendo documento com OCR… (máx 60s)"}
-                </div>
-                <p className="mt-2 opacity-80 leading-relaxed">
-                  {langDisplay === "fr"
-                    ? "Les valeurs non identifiées seront laissées vides. Une prévisualisation sera affichée avant application."
-                    : "Campos não encontrados ficarão em branco. Uma prévia aparecerá antes da aplicação."}
-                </p>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900/80 p-4 text-xs text-slate-800 dark:text-slate-100 shadow-sm">
-                <div className="flex items-center gap-2 mb-2 font-semibold text-sm text-foreground">
-                  <FileText className="h-4 w-4 text-cyan-500" />
-                  <span>{langDisplay === "fr" ? "Comment utiliser :" : "Como funciona:"}</span>
-                </div>
-                <ul className="list-disc pl-5 space-y-1.5 leading-relaxed text-slate-700 dark:text-slate-200">
-                  <li>{langDisplay === "fr" ? "Envoyez une photo, scan ou PDF de la fiche." : "Envie uma foto, scanner ou PDF da ficha."}</li>
-                  <li>{langDisplay === "fr" ? "Les champs identifiés sont affichés avec leur niveau de confiance." : "Os campos identificados sont exibidos com nível de confiança."}</li>
-                  <li>{langDisplay === "fr" ? "Confirmez / modifiez la sélection avant d'appliquer." : "Confira / ajuste a seleção ANTES de aplicar."}</li>
-                  <li className="text-amber-800 dark:text-amber-300 font-medium">
-                    <strong className="font-semibold">{langDisplay === "fr" ? "Règle non destructive :" : "Regra NÃO destrutiva :"}</strong>
-                    {langDisplay === "fr"
-                      ? " si un champ est déjà rempli dans le devis, il ne sera JAMAIS écrasé."
-                      : " se um campo já está preenchido no orçamento, NUNCA é sobrescrito."}
-                  </li>
-                </ul>
-              </div>
-            )}
-            <DialogFooter>
-              <Button variant="outline" type="button" onClick={() => setOcrDialogOpen(false)} disabled={ocrIsExtracting || _ocrLoading1}>
-                {langDisplay === "fr" ? "Annuler" : "Cancelar"}
-              </Button>
-            </DialogFooter>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/20 p-3 text-xs text-muted-foreground">
-              <div className="flex flex-wrap items-center gap-2 justify-between">
-                <span>
-                  <strong className="font-semibold text-foreground">
-                    {langDisplay === "fr" ? "Confirmez les champs à appliquer" : "Confirme os campos que deseja APLICAR"}
-                  </strong>
-                  {langDisplay === "fr"
-                    ? " (seuls les champs vides du devis sont modifiés)."
-                    : " (apenas campos VAZIOS do orçamento são preenchidos)."}
-                </span>
-                <div className="flex gap-1.5">
-                  <Badge variant="outline" className={cn(confidenceTone("high"))}>Alta</Badge>
-                  <Badge variant="outline" className={cn(confidenceTone("medium"))}>Média</Badge>
-                  <Badge variant="outline" className={cn(confidenceTone("low"))}>Baixa</Badge>
-                </div>
-              </div>
-            </div>
-
-            <Card>
-              <CardHeader className="py-3">
-                <CardTitle className="text-sm">{langDisplay === "fr" ? "Client & Véhicule" : "Cliente & Veículo"}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {(
-                  [
-                    ["client_name", langDisplay === "fr" ? "Nom client" : "Nome cliente", ocrExtraction.client_name],
-                    ["client_phone", langDisplay === "fr" ? "Téléphone" : "Telefone", ocrExtraction.client_phone],
-                    ["client_email", langDisplay === "fr" ? "E-mail" : "E-mail", ocrExtraction.client_email],
-                    ["technician", langDisplay === "fr" ? "Technicien" : "Técnico", ocrExtraction.technician],
-                    ["docDate", langDisplay === "fr" ? "Date document" : "Data do documento", ocrExtraction.docDate],
-                    ["vehicle_brand", langDisplay === "fr" ? "Marque" : "Marca", ocrExtraction.vehicle_brand],
-                    ["vehicle_model", langDisplay === "fr" ? "Modèle" : "Modelo", ocrExtraction.vehicle_model],
-                    ["vehicle_plate", langDisplay === "fr" ? "Plaque" : "Placa", ocrExtraction.vehicle_plate],
-                    ["vehicle_vin", langDisplay === "fr" ? "VIN / Châssis" : "VIN / Chassi", ocrExtraction.vehicle_vin],
-                    ["vehicle_year", langDisplay === "fr" ? "Année" : "Ano", ocrExtraction.vehicle_year],
-                    ["vehicle_color", langDisplay === "fr" ? "Couleur" : "Cor", ocrExtraction.vehicle_color],
-                    ["vehicle_km", langDisplay === "fr" ? "Kilométrage" : "KM", ocrExtraction.vehicle_km],
-                  ] as Array<[string, string, any]>
-                ).map(([key, label, value]) => {
-                  const isEmpty = value === undefined || value === null || (typeof value === "string" && !value.trim());
-                  if (isEmpty) return null;
-                  const conf = ocrExtraction.field_confidence[key] ?? ocrExtraction.overall_confidence;
-                  return (
-                    <div key={key} className="grid grid-cols-12 items-start gap-3 border-b border-border/40 last:border-0 pb-2.5 last:pb-0">
-                      <div className="col-span-1 pt-1.5">
-                        <Checkbox
-                          checked={!!ocrApplySelections[key]}
-                          onCheckedChange={(v) => setOcrApplySelections(s => ({ ...s, [key]: !!v }))}
-                        />
-                      </div>
-                      <div className="col-span-4 text-sm text-muted-foreground flex flex-col gap-0.5 pt-1">
-                        <span>{label}</span>
-                        <Badge variant="outline" className={cn("w-fit text-[10px]", confidenceTone(conf))}>
-                          {confidenceLabel(conf)}
-                        </Badge>
-                      </div>
-                      <div className="col-span-7 text-sm font-medium break-words pt-1">
-                        {typeof value === "string" ? value : JSON.stringify(value)}
-                      </div>
-                    </div>
+                      <span className="flex flex-col">
+                        <span className="font-semibold text-sm leading-tight">{btLabel(t, langDisplay)}</span>
+                        <span className="text-xs opacity-75 mt-1">
+                          {t === "mechanics"
+                            ? (langDisplay === "fr" ? "Mécanique, diagnostics, entretien." : "Mecânica, diagnósticos, manutenção.")
+                            : t === "body_paint"
+                              ? (langDisplay === "fr" ? "Carrosserie, peinture, remplacement." : "Funilaria, pintura, reposição.")
+                              : t === "pdr"
+                                ? (langDisplay === "fr" ? "Débosselage sans peinture / zones + dommages." : "Martelinho sem pintura / áreas danos + medidas.")
+                                : (langDisplay === "fr" ? "Montage, démontage, accessoires." : "Montagem, desmontagem, acessórios.")}
+                        </span>
+                      </span>
+                    </button>
                   );
                 })}
-                {!["client_name","client_phone","client_email","technician","docDate","vehicle_brand","vehicle_model","vehicle_plate","vehicle_vin","vehicle_year","vehicle_color","vehicle_km"]
-                  .some((k) => { const v = (ocrExtraction as any)[k]; return !(v === undefined || v === null || (typeof v === "string" && !v.trim())); })
-                  ? (
-                    <div className="text-sm text-muted-foreground italic">
-                      {langDisplay === "fr" ? "Aucun champ client/véhicule détecté." : "Nenhum campo cliente/veículo identificado."}
-                    </div>
-                  ) : null}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="py-3">
-                <CardTitle className="text-sm">{langDisplay === "fr" ? "Sinistre, Intervention, Diagnostics" : "Seguradora, Intervenções, Diagnóstico"}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {(
-                  [
-                    ["dossier_insurance_company", langDisplay === "fr" ? "Assureur" : "Seguradora", ocrExtraction.dossier_insurance_company],
-                    ["dossier_claim_number", langDisplay === "fr" ? "N° sinistre" : "Nº sinistro", ocrExtraction.dossier_claim_number],
-                    ["diagnosis", langDisplay === "fr" ? "Diagnostic" : "Diagnóstico", ocrExtraction.diagnosis],
-                    ["technical_description", langDisplay === "fr" ? "Description technique" : "Descrição técnica", ocrExtraction.technical_description?.slice(0, 400) + ((ocrExtraction.technical_description?.length ?? 0) > 400 ? "…" : "")],
-                    ["forfait_total", langDisplay === "fr" ? "Forfait / Valeur globale" : "Forfait / valor total", ocrExtraction.forfait_total != null ? formatBRL(ocrExtraction.forfait_total) : undefined],
-                  ] as Array<[string, string, any]>
-                ).map(([key, label, value]) => {
-                  const isEmpty = value === undefined || value === null || (typeof value === "string" && !value.trim());
-                  if (isEmpty) return null;
-                  const conf = ocrExtraction.field_confidence[key] ?? ocrExtraction.overall_confidence;
-                  return (
-                    <div key={key} className="grid grid-cols-12 items-start gap-3 border-b border-border/40 last:border-0 pb-2.5 last:pb-0">
-                      <div className="col-span-1 pt-1.5">
-                        <Checkbox
-                          checked={!!ocrApplySelections[key]}
-                          onCheckedChange={(v) => setOcrApplySelections(s => ({ ...s, [key]: !!v }))}
-                        />
-                      </div>
-                      <div className="col-span-4 text-sm text-muted-foreground flex flex-col gap-0.5 pt-1">
-                        <span>{label}</span>
-                        <Badge variant="outline" className={cn("w-fit text-[10px]", confidenceTone(conf))}>
-                          {confidenceLabel(conf)}
-                        </Badge>
-                      </div>
-                      <div className="col-span-7 text-sm font-medium break-words pt-1">
-                        {typeof value === "string" ? value : JSON.stringify(value)}
-                      </div>
-                    </div>
-                  );
-                })}
-                {Array.isArray(ocrExtraction.intervention_types) && ocrExtraction.intervention_types.length > 0 ? (
-                  <div className="grid grid-cols-12 items-start gap-3 border-t border-border/40 pt-3">
-                    <div className="col-span-1 pt-1.5">
-                      <Checkbox
-                        checked={!!ocrApplySelections.intervention_types}
-                        onCheckedChange={(v) => setOcrApplySelections(s => ({ ...s, intervention_types: !!v }))}
-                      />
-                    </div>
-                    <div className="col-span-4 text-sm text-muted-foreground flex flex-col gap-0.5 pt-1">
-                      <span>{langDisplay === "fr" ? "Interventions détectées" : "Tipos de intervenção"}</span>
-                      <Badge variant="outline" className={cn("w-fit text-[10px]", confidenceTone(ocrExtraction.field_confidence.intervention_types ?? "low"))}>
-                        {confidenceLabel(ocrExtraction.field_confidence.intervention_types ?? "low")}
-                      </Badge>
-                    </div>
-                    <div className="col-span-7 flex flex-wrap gap-1.5 pt-1">
-                      {ocrExtraction.intervention_types.map((iv, idx) => (
-                        <Badge key={idx} variant="outline">{iv}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-                {!["dossier_insurance_company","dossier_claim_number","diagnosis","technical_description","forfait_total","intervention_types"]
-                  .some((k) => {
-                    const v = (ocrExtraction as any)[k];
-                    if (k === "intervention_types") return Array.isArray(v) && v.length > 0;
-                    return !(v === undefined || v === null || (typeof v === "string" && !v.trim()));
-                  })
-                  ? (
-                    <div className="text-sm text-muted-foreground italic">
-                      {langDisplay === "fr" ? "Aucune donnée sinistre/intervention détectée." : "Nenhum dado de seguradora/intervenção identificado."}
-                    </div>
-                  ) : null}
-              </CardContent>
-            </Card>
-
-            {form.budget_type === "pdr" ? (
-              <Card>
-                <CardHeader className="py-3">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Hammer className="h-4 w-4 text-amber-600" />
-                    {langDisplay === "fr" ? "PDR · Zones / Dommages" : "PDR · Áreas / Danos"}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  {Array.isArray(ocrExtraction.damage_areas) && ocrExtraction.damage_areas.length > 0 ? (
-                    <div className="rounded-lg border border-border/60 overflow-hidden">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-10"></TableHead>
-                            <TableHead>{langDisplay === "fr" ? "Zone / Localisation" : "Área / Localização"}</TableHead>
-                            <TableHead>{langDisplay === "fr" ? "Type" : "Tipo dano"}</TableHead>
-                            <TableHead className="text-right w-24">{langDisplay === "fr" ? "Qté" : "Qtd"}</TableHead>
-                            <TableHead>{langDisplay === "fr" ? "Mesures" : "Medidas"}</TableHead>
-                            <TableHead className="w-28">{langDisplay === "fr" ? "Confiance" : "Confiança"}</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {ocrExtraction.damage_areas.map((d) => (
-                            <TableRow key={d.id}>
-                              <TableCell>
-                                <Checkbox
-                                  checked={!!ocrDamageSelections[d.id]}
-                                  onCheckedChange={(v) => setOcrDamageSelections(s => ({ ...s, [d.id]: !!v }))}
-                                />
-                              </TableCell>
-                              <TableCell className="font-medium">{d.areaName}</TableCell>
-                              <TableCell>{d.damageType}</TableCell>
-                              <TableCell className="text-right tabular-nums">{d.quantity}</TableCell>
-                              <TableCell className="text-xs">{d.measurements ?? "—"}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className={cn(confidenceTone(d.confidence))}>{confidenceLabel(d.confidence)}</Badge>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground italic">
-                      {langDisplay === "fr" ? "Aucune zone / dommage PDR détecté." : "Nenhuma área/dano PDR identificado na ficha."}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {form.budget_type === "pdr" || Array.isArray(ocrExtraction.labor_lines) && ocrExtraction.labor_lines.length > 0 ? (
-              <Card>
-                <CardHeader className="py-3">
-                  <CardTitle className="text-sm">{langDisplay === "fr" ? "Main d'œuvre (si explicitement indiquée)" : "Mão de Obra (apenas se EXPLICITAMENTE informada)"}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  {Array.isArray(ocrExtraction.labor_lines) && ocrExtraction.labor_lines.length > 0 ? (
-                    <div className="rounded-lg border border-border/60 overflow-hidden">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-10"></TableHead>
-                            <TableHead>{langDisplay === "fr" ? "Description" : "Descrição"}</TableHead>
-                            <TableHead className="text-right w-28">{langDisplay === "fr" ? "Heures" : "Horas"}</TableHead>
-                            <TableHead className="text-right w-32">{langDisplay === "fr" ? "Taux €/h" : "Taxa horária"}</TableHead>
-                            <TableHead className="w-28">{langDisplay === "fr" ? "Confiance" : "Confiança"}</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {ocrExtraction.labor_lines.map((l) => (
-                            <TableRow key={l.id}>
-                              <TableCell>
-                                <Checkbox
-                                  checked={!!ocrLaborSelections[l.id]}
-                                  onCheckedChange={(v) => setOcrLaborSelections(s => ({ ...s, [l.id]: !!v }))}
-                                />
-                              </TableCell>
-                              <TableCell className="font-medium">{l.description}</TableCell>
-                              <TableCell className="text-right tabular-nums">{l.hours.toFixed(2)}h</TableCell>
-                              <TableCell className="text-right tabular-nums">{l.hourly_rate != null && l.hourly_rate > 0 ? formatBRL(l.hourly_rate) : "— (confirmar manual)"}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className={cn(confidenceTone(l.confidence))}>{confidenceLabel(l.confidence)}</Badge>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground italic">
-                      {langDisplay === "fr" ? "Aucune main d'œuvre explicitement indiquée dans le document." : "Nenhuma mão de obra EXPLICITAMENTE informada no documento (NÃO foi inventada)."}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {ocrExtraction.observations && ocrExtraction.observations.trim().length > 40 ? (
-              <Card>
-                <CardHeader className="py-3">
-                  <CardTitle className="text-sm">{langDisplay === "fr" ? "Texte brut / Observations (OCR)" : "Texto bruto / Observações extraídas"}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Textarea readOnly rows={6} className="text-xs font-mono" value={ocrExtraction.observations.slice(0, 1500)} />
-                </CardContent>
-              </Card>
-            ) : null}
-
-            <DialogFooter className="flex-wrap">
-              <Button variant="outline" type="button" onClick={() => { setOcrSelectedBudgetType(null); setOcrErrorMessage(null); setOcrExtraction(null); setOcrApplySelections({}); setOcrDamageSelections({}); setOcrLaborSelections({}); }} disabled={ocrIsExtracting || _ocrLoading1}>
-                {langDisplay === "fr" ? "Nouveau scan" : "Escanear outro arquivo"}
-              </Button>
-              <div className="flex gap-2 ml-auto">
-                <Button variant="ghost" type="button" onClick={() => setOcrDialogOpen(false)} disabled={ocrIsExtracting || _ocrLoading1}>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" type="button" onClick={() => setOcrDialogOpen(false)}>
                   {langDisplay === "fr" ? "Annuler" : "Cancelar"}
                 </Button>
+              </DialogFooter>
+            </div>
+          ) : !ocrExtraction ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
                 <Button
+                  variant="ghost"
+                  size="sm"
                   type="button"
-                  onClick={applyOcrData}
-                  disabled={
-                    ocrIsExtracting ||
-                    _ocrLoading1 ||
-                    (
-                      Object.values(ocrApplySelections).every(v => !v) &&
-                      Object.values(ocrDamageSelections).every(v => !v) &&
-                      Object.values(ocrLaborSelections).every(v => !v)
-                    )
-                  }
+                  onClick={() => { setOcrSelectedBudgetType(null); setOcrErrorMessage(null); setOcrExtraction(null); }}
+                  disabled={ocrIsExtracting || _ocrLoading1}
                 >
-                  <CheckIcon className="h-4 w-4 mr-2" />
-                  {langDisplay === "fr" ? "Appliquer données" : "Aplicar dados"}
+                  <ArrowLeft className="h-4 w-4 mr-1" />
+                  {langDisplay === "fr" ? "Changer type" : "Mudar tipo"}
                 </Button>
               </div>
-            </DialogFooter>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-
-    <AlertDialog open={confirmBudgetType.open} onOpenChange={(v) => !v && confirmBudgetTypeChange(false)}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
-            {langDisplay === "fr"
-              ? "Changer le type de devis ?"
-              : "Alterar o tipo de orçamento?"}
-          </AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-2 text-sm">
-              <p>
-                {langDisplay === "fr"
-                  ? `Les interventions sélectionnées actuellement (${selectedInterventions.length}) peuvent ne pas être compatibles avec le type « ${btLabel(confirmBudgetType.pending ?? form.budget_type, langDisplay)} ».`
-                  : `As intervenções atualmente selecionadas (${selectedInterventions.length}) podem não ser compatíveis com o tipo « ${btLabel(confirmBudgetType.pending ?? form.budget_type, langDisplay)} ».`}
-              </p>
-              <p className="text-muted-foreground">
-                {langDisplay === "fr"
-                  ? "Les interventions incompatibles seront retirées automatiquement après confirmation."
-                  : "Intervenções incompatíveis serão removidas automaticamente após a confirmação."}
-              </p>
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => confirmBudgetTypeChange(false)}>
-            {langDisplay === "fr" ? "Annuler" : "Cancelar"}
-          </AlertDialogCancel>
-          <AlertDialogAction onClick={() => confirmBudgetTypeChange(true)}>
-            {langDisplay === "fr" ? "Continuer" : "Continuar"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-
-    <AlertDialog open={sendClientDialogOpen} onOpenChange={(v) => { if (!v) setSendClientDialogOpen(false); }}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2">
-            <Send className="h-5 w-5 text-sky-600" />
-            {langDisplay === "fr" ? "Envoyer au client" : "Enviar ao cliente"}
-          </AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-3 text-sm">
-              <p className="text-muted-foreground">
-                {langDisplay === "fr"
-                  ? "Choisissez un canal. Le document sera téléchargé localement et prêt à être joint dans l'application qui s'ouvrira. Aucun état « envoyé » n'est marqué tant qu'un envoi réel n'a pas été confirmé côté canal."
-                  : "Escolha um canal. O documento será baixado localmente e ficará pronto para ser anexado no aplicativo que se abrirá. Nenhum status « enviado » é marcado enquanto um envio real não for confirmado no respectivo canal."}
-              </p>
-              <div className="grid grid-cols-1 gap-2">
-                <div className="flex items-center justify-between rounded-lg border border-border/70 bg-background px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21"/><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1zm0 5a.5.5 0 0 0 1 0v-3a.5.5 0 0 0-1 0v3zm5-5a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1zm0 5a.5.5 0 0 0 1 0v-3a.5.5 0 0 0-1 0v3z"/></svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{langDisplay === "fr" ? "WhatsApp" : "WhatsApp"}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {hasValidPhone ? (form.client_phone ?? "") : (langDisplay === "fr" ? "Non disponible" : "Indisponível")}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={confirmSendByWhatsApp}
-                    disabled={!hasValidPhone}
-                    className="h-8"
-                  >
-                    {langDisplay === "fr" ? "Envoyer" : "Enviar"}
-                  </Button>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-border/70 bg-background px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{langDisplay === "fr" ? "E-mail" : "E-mail"}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {hasValidEmail ? (form.client_email ?? "") : (langDisplay === "fr" ? "Non disponible" : "Indisponível")}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={confirmSendByEmail}
-                    disabled={!hasValidEmail}
-                    className="h-8"
-                  >
-                    {langDisplay === "fr" ? "Envoyer" : "Enviar"}
-                  </Button>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
-                      <LinkIcon className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        {langDisplay === "fr" ? "Lien de signature (Smartphone / Client)" : "Link de Assinatura Online (Celular)"}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {langDisplay === "fr" ? "Lien sécurisé pour signer directement avec le doigt" : "Link seguro para o cliente assinar na tela sem login"}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="sm"
-                    onClick={copySignLink}
-                    className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    {langDisplay === "fr" ? "Copier" : "Copiar"}
-                  </Button>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-dashed border-border/70 bg-muted/30 px-3 py-2.5 opacity-80">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-500/10 text-slate-600 dark:text-slate-400">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M7 2v11"/><path d="M3 4v11"/><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{langDisplay === "fr" ? "SMS" : "SMS"}</p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {hasSmsConfigured
-                          ? (hasValidPhone ? (form.client_phone ?? "") : (langDisplay === "fr" ? "Non disponible" : "Indisponível"))
-                          : (langDisplay === "fr" ? "Intégration SMS non configurée" : "Integração SMS não configurada")}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (!hasSmsConfigured) {
-                        toast.message(langDisplay === "fr" ? "Intégration SMS non disponible." : "Integração SMS não disponível.");
-                        return;
-                      }
-                    }}
-                    disabled={!hasSmsConfigured || !hasValidPhone}
-                    className="h-8"
-                  >
-                    {langDisplay === "fr" ? "Envoyer" : "Enviar"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => setSendClientDialogOpen(false)}>
-            {langDisplay === "fr" ? "Annuler" : "Cancelar"}
-          </AlertDialogCancel>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-
-    <AlertDialog open={confirmNoSignatureOpen} onOpenChange={(v) => { if (!v) setConfirmNoSignatureOpen(false); }}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2">
-            <HandPlatter className="h-5 w-5 text-amber-600" />
-            {langDisplay === "fr" ? "Confirmer sans signature dessinée" : "Confirmar sem assinatura desenhada"}
-          </AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-3 text-sm">
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-                <div className="flex items-start gap-2">
-                  <Checkbox
-                    id="confirm-no-signature-check"
-                    checked={confirmNoSignatureChecked}
-                    onCheckedChange={(c) => setConfirmNoSignatureChecked(!!c)}
-                  />
-                  <label htmlFor="confirm-no-signature-check" className="text-sm leading-relaxed text-foreground cursor-pointer select-none">
-                    <strong>
-                      {langDisplay === "fr"
-                        ? "Je confirme que le devis a été présenté, revu et autorisé."
-                        : "Confirmo que o orçamento foi apresentado, revisado e autorizado."}
+              {ocrRateLimitedUntil && ocrRateLimitedUntil > Date.now() ? (
+                <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 dark:bg-amber-500/5 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 animate-pulse" />
+                  <div className="flex-1">
+                    <strong className="font-semibold">
+                      {langDisplay === "fr" ? "Limite de requêtes temporaire" : "Limite de requisições temporária"}
                     </strong>
-                  </label>
+                    <p className="mt-0.5">
+                      {langDisplay === "fr"
+                        ? `Serveur surchargé — patientez ${ocrRateCountdown}s avant le prochain essai.`
+                        : `Servidor sobrecarregado — aguarde ${ocrRateCountdown}s antes da próxima tentativa.`}
+                    </p>
+                    <div className="mt-2 h-1.5 w-full bg-white/40 dark:bg-black/20 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-amber-500 transition-all duration-1000 ease-linear rounded-full"
+                        style={{
+                          width: ocrRateCountdown > 0
+                            ? `${Math.max(5, Math.min(100, 100 - ((60 - ocrRateCountdown) / 60) * 100))}%`
+                            : "5%",
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {ocrErrorMessage && !(ocrRateLimitedUntil && ocrRateLimitedUntil > Date.now()) ? (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <div>
+                    <strong className="font-semibold">{langDisplay === "fr" ? "Erreur" : "Erro"}</strong>
+                    <p className="mt-0.5">{ocrErrorMessage}</p>
+                  </div>
+                </div>
+              ) : null}
+              <FileUploadZone
+                onFilesSelected={handleScanFilesSelected}
+                isProcessing={ocrIsExtracting || _ocrLoading1}
+                disabled={ocrRateLimitedUntil != null && ocrRateLimitedUntil > Date.now()}
+              />
+              {ocrIsExtracting || _ocrLoading1 ? (
+                <div className="rounded-lg border border-dashed border-indigo-400/40 bg-indigo-500/5 px-4 py-3 text-xs text-indigo-700 dark:text-indigo-300">
+                  <div className="flex items-center gap-2">
+                    <SearchIcon className="h-4 w-4 animate-pulse" />
+                    {langDisplay === "fr" ? "Extraction en cours… (max 60s)" : "Lendo documento com OCR… (máx 60s)"}
+                  </div>
+                  <p className="mt-2 opacity-80 leading-relaxed">
+                    {langDisplay === "fr"
+                      ? "Les valeurs non identifiées seront laissées vides. Une prévisualisation sera affichée avant application."
+                      : "Campos não encontrados ficarão em branco. Uma prévia aparecerá antes da aplicação."}
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900/80 p-4 text-xs text-slate-800 dark:text-slate-100 shadow-sm">
+                  <div className="flex items-center gap-2 mb-2 font-semibold text-sm text-foreground">
+                    <FileText className="h-4 w-4 text-cyan-500" />
+                    <span>{langDisplay === "fr" ? "Comment utiliser :" : "Como funciona:"}</span>
+                  </div>
+                  <ul className="list-disc pl-5 space-y-1.5 leading-relaxed text-slate-700 dark:text-slate-200">
+                    <li>{langDisplay === "fr" ? "Envoyez une photo, scan ou PDF de la fiche." : "Envie uma foto, scanner ou PDF da ficha."}</li>
+                    <li>{langDisplay === "fr" ? "Les champs identifiés sont affichés avec leur niveau de confiance." : "Os campos identificados sont exibidos com nível de confiança."}</li>
+                    <li>{langDisplay === "fr" ? "Confirmez / modifiez la sélection avant d'appliquer." : "Confira / ajuste a seleção ANTES de aplicar."}</li>
+                    <li className="text-amber-800 dark:text-amber-300 font-medium">
+                      <strong className="font-semibold">{langDisplay === "fr" ? "Règle non destructive :" : "Regra NÃO destrutiva :"}</strong>
+                      {langDisplay === "fr"
+                        ? " si un champ est déjà rempli dans le devis, il ne sera JAMAIS écrasé."
+                        : " se um campo já está preenchido no orçamento, NUNCA é sobrescrito."}
+                    </li>
+                  </ul>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" type="button" onClick={() => setOcrDialogOpen(false)} disabled={ocrIsExtracting || _ocrLoading1}>
+                  {langDisplay === "fr" ? "Annuler" : "Cancelar"}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/20 p-3 text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2 justify-between">
+                  <span>
+                    <strong className="font-semibold text-foreground">
+                      {langDisplay === "fr" ? "Confirmez les champs à appliquer" : "Confirme os campos que deseja APLICAR"}
+                    </strong>
+                    {langDisplay === "fr"
+                      ? " (seuls les champs vides du devis sont modifiés)."
+                      : " (apenas campos VAZIOS do orçamento são preenchidos)."}
+                  </span>
+                  <div className="flex gap-1.5">
+                    <Badge variant="outline" className={cn(confidenceTone("high"))}>Alta</Badge>
+                    <Badge variant="outline" className={cn(confidenceTone("medium"))}>Média</Badge>
+                    <Badge variant="outline" className={cn(confidenceTone("low"))}>Baixa</Badge>
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label={langDisplay === "fr" ? "Nom du signataire" : "Nome do signatário"}>
-                  <Input
-                    placeholder={langDisplay === "fr" ? "Nom complet" : "Nome completo"}
-                    value={confirmNoSignatureName}
-                    onChange={(e) => setConfirmNoSignatureName(e.target.value)}
-                  />
-                </Field>
-                <Field label={langDisplay === "fr" ? "Type de signataire" : "Tipo de signatário"}>
-                  <Select value={confirmNoSignatureType} onValueChange={(v) => setConfirmNoSignatureType(v as BudgetSignerType)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {SIGNER_TYPE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {langDisplay === "fr" ? opt.fr : opt.pt}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => setConfirmNoSignatureOpen(false)}>
-            {langDisplay === "fr" ? "Annuler" : "Cancelar"}
-          </AlertDialogCancel>
-          <AlertDialogAction
-            onClick={approveWithExplicitConfirmation}
-            disabled={!confirmNoSignatureChecked || !confirmNoSignatureName.trim() || !confirmNoSignatureType}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
-          >
-            {langDisplay === "fr" ? "Confirmer l'approbation" : "Confirmar aprovação"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
 
-    <AlertDialog open={confirmRejectionOpen} onOpenChange={(v) => { if (!v) setConfirmRejectionOpen(false); }}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2">
-            <XCircle className="h-5 w-5 text-red-600" />
-            {langDisplay === "fr" ? "Rejeter le devis ?" : "Rejeitar este orçamento?"}
-          </AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-3 text-sm">
-              <p>
-                {langDisplay === "fr"
-                  ? "Êtes-vous sûr de vouloir rejeter ce devis ? Une fois rejeté, il sera verrouillé et ne pourra plus être modifié normalement."
-                  : "Tem certeza que deseja rejeitar este orçamento? Uma vez rejeitado, ele ficará bloqueado e não poderá mais ser alterado normalmente."}
-              </p>
-              <div className="grid grid-cols-1 gap-3">
-                <Field label={langDisplay === "fr" ? "Responsable du rejet" : "Responsável pela rejeição"}>
-                  <Input
-                    placeholder={langDisplay === "fr" ? "Nom (optionnel)" : "Nome (opcional)"}
-                    value={rejectionRejectedBy}
-                    onChange={(e) => setRejectionRejectedBy(e.target.value)}
-                  />
-                </Field>
-                <Field label={langDisplay === "fr" ? "Motif du rejet" : "Motivo da rejeição"}>
-                  <Textarea
-                    rows={3}
-                    placeholder={langDisplay === "fr" ? "Optionnel — expliquez le motif du rejet…" : "Opcional — explique o motivo da rejeição…"}
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                  />
-                </Field>
-              </div>
+              <Card>
+                <CardHeader className="py-3">
+                  <CardTitle className="text-sm">{langDisplay === "fr" ? "Client & Véhicule" : "Cliente & Veículo"}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {(
+                    [
+                      ["client_name", langDisplay === "fr" ? "Nom client" : "Nome cliente", ocrExtraction.client_name],
+                      ["client_phone", langDisplay === "fr" ? "Téléphone" : "Telefone", ocrExtraction.client_phone],
+                      ["client_email", langDisplay === "fr" ? "E-mail" : "E-mail", ocrExtraction.client_email],
+                      ["technician", langDisplay === "fr" ? "Technicien" : "Técnico", ocrExtraction.technician],
+                      ["docDate", langDisplay === "fr" ? "Date document" : "Data do documento", ocrExtraction.docDate],
+                      ["vehicle_brand", langDisplay === "fr" ? "Marque" : "Marca", ocrExtraction.vehicle_brand],
+                      ["vehicle_model", langDisplay === "fr" ? "Modèle" : "Modelo", ocrExtraction.vehicle_model],
+                      ["vehicle_plate", langDisplay === "fr" ? "Plaque" : "Placa", ocrExtraction.vehicle_plate],
+                      ["vehicle_vin", langDisplay === "fr" ? "VIN / Châssis" : "VIN / Chassi", ocrExtraction.vehicle_vin],
+                      ["vehicle_year", langDisplay === "fr" ? "Année" : "Ano", ocrExtraction.vehicle_year],
+                      ["vehicle_color", langDisplay === "fr" ? "Couleur" : "Cor", ocrExtraction.vehicle_color],
+                      ["vehicle_km", langDisplay === "fr" ? "Kilométrage" : "KM", ocrExtraction.vehicle_km],
+                    ] as Array<[string, string, any]>
+                  ).map(([key, label, value]) => {
+                    const isEmpty = value === undefined || value === null || (typeof value === "string" && !value.trim());
+                    if (isEmpty) return null;
+                    const conf = ocrExtraction.field_confidence[key] ?? ocrExtraction.overall_confidence;
+                    return (
+                      <div key={key} className="grid grid-cols-12 items-start gap-3 border-b border-border/40 last:border-0 pb-2.5 last:pb-0">
+                        <div className="col-span-1 pt-1.5">
+                          <Checkbox
+                            checked={!!ocrApplySelections[key]}
+                            onCheckedChange={(v) => setOcrApplySelections(s => ({ ...s, [key]: !!v }))}
+                          />
+                        </div>
+                        <div className="col-span-4 text-sm text-muted-foreground flex flex-col gap-0.5 pt-1">
+                          <span>{label}</span>
+                          <Badge variant="outline" className={cn("w-fit text-[10px]", confidenceTone(conf))}>
+                            {confidenceLabel(conf)}
+                          </Badge>
+                        </div>
+                        <div className="col-span-7 text-sm font-medium break-words pt-1">
+                          {typeof value === "string" ? value : JSON.stringify(value)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!["client_name", "client_phone", "client_email", "technician", "docDate", "vehicle_brand", "vehicle_model", "vehicle_plate", "vehicle_vin", "vehicle_year", "vehicle_color", "vehicle_km"]
+                    .some((k) => { const v = (ocrExtraction as any)[k]; return !(v === undefined || v === null || (typeof v === "string" && !v.trim())); })
+                    ? (
+                      <div className="text-sm text-muted-foreground italic">
+                        {langDisplay === "fr" ? "Aucun champ client/véhicule détecté." : "Nenhum campo cliente/veículo identificado."}
+                      </div>
+                    ) : null}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="py-3">
+                  <CardTitle className="text-sm">{langDisplay === "fr" ? "Sinistre, Intervention, Diagnostics" : "Seguradora, Intervenções, Diagnóstico"}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {(
+                    [
+                      ["dossier_insurance_company", langDisplay === "fr" ? "Assureur" : "Seguradora", ocrExtraction.dossier_insurance_company],
+                      ["dossier_claim_number", langDisplay === "fr" ? "N° sinistre" : "Nº sinistro", ocrExtraction.dossier_claim_number],
+                      ["diagnosis", langDisplay === "fr" ? "Diagnostic" : "Diagnóstico", ocrExtraction.diagnosis],
+                      ["technical_description", langDisplay === "fr" ? "Description technique" : "Descrição técnica", ocrExtraction.technical_description?.slice(0, 400) + ((ocrExtraction.technical_description?.length ?? 0) > 400 ? "…" : "")],
+                      ["forfait_total", langDisplay === "fr" ? "Forfait / Valeur globale" : "Forfait / valor total", ocrExtraction.forfait_total != null ? formatBRL(ocrExtraction.forfait_total) : undefined],
+                    ] as Array<[string, string, any]>
+                  ).map(([key, label, value]) => {
+                    const isEmpty = value === undefined || value === null || (typeof value === "string" && !value.trim());
+                    if (isEmpty) return null;
+                    const conf = ocrExtraction.field_confidence[key] ?? ocrExtraction.overall_confidence;
+                    return (
+                      <div key={key} className="grid grid-cols-12 items-start gap-3 border-b border-border/40 last:border-0 pb-2.5 last:pb-0">
+                        <div className="col-span-1 pt-1.5">
+                          <Checkbox
+                            checked={!!ocrApplySelections[key]}
+                            onCheckedChange={(v) => setOcrApplySelections(s => ({ ...s, [key]: !!v }))}
+                          />
+                        </div>
+                        <div className="col-span-4 text-sm text-muted-foreground flex flex-col gap-0.5 pt-1">
+                          <span>{label}</span>
+                          <Badge variant="outline" className={cn("w-fit text-[10px]", confidenceTone(conf))}>
+                            {confidenceLabel(conf)}
+                          </Badge>
+                        </div>
+                        <div className="col-span-7 text-sm font-medium break-words pt-1">
+                          {typeof value === "string" ? value : JSON.stringify(value)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {Array.isArray(ocrExtraction.intervention_types) && ocrExtraction.intervention_types.length > 0 ? (
+                    <div className="grid grid-cols-12 items-start gap-3 border-t border-border/40 pt-3">
+                      <div className="col-span-1 pt-1.5">
+                        <Checkbox
+                          checked={!!ocrApplySelections.intervention_types}
+                          onCheckedChange={(v) => setOcrApplySelections(s => ({ ...s, intervention_types: !!v }))}
+                        />
+                      </div>
+                      <div className="col-span-4 text-sm text-muted-foreground flex flex-col gap-0.5 pt-1">
+                        <span>{langDisplay === "fr" ? "Interventions détectées" : "Tipos de intervenção"}</span>
+                        <Badge variant="outline" className={cn("w-fit text-[10px]", confidenceTone(ocrExtraction.field_confidence.intervention_types ?? "low"))}>
+                          {confidenceLabel(ocrExtraction.field_confidence.intervention_types ?? "low")}
+                        </Badge>
+                      </div>
+                      <div className="col-span-7 flex flex-wrap gap-1.5 pt-1">
+                        {ocrExtraction.intervention_types.map((iv, idx) => (
+                          <Badge key={idx} variant="outline">{iv}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {!["dossier_insurance_company", "dossier_claim_number", "diagnosis", "technical_description", "forfait_total", "intervention_types"]
+                    .some((k) => {
+                      const v = (ocrExtraction as any)[k];
+                      if (k === "intervention_types") return Array.isArray(v) && v.length > 0;
+                      return !(v === undefined || v === null || (typeof v === "string" && !v.trim()));
+                    })
+                    ? (
+                      <div className="text-sm text-muted-foreground italic">
+                        {langDisplay === "fr" ? "Aucune donnée sinistre/intervention détectée." : "Nenhum dado de seguradora/intervenção identificado."}
+                      </div>
+                    ) : null}
+                </CardContent>
+              </Card>
+
+              {form.budget_type === "pdr" ? (
+                <Card>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Hammer className="h-4 w-4 text-amber-600" />
+                      {langDisplay === "fr" ? "PDR · Zones / Dommages" : "PDR · Áreas / Danos"}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    {Array.isArray(ocrExtraction.damage_areas) && ocrExtraction.damage_areas.length > 0 ? (
+                      <div className="rounded-lg border border-border/60 overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-10"></TableHead>
+                              <TableHead>{langDisplay === "fr" ? "Zone / Localisation" : "Área / Localização"}</TableHead>
+                              <TableHead>{langDisplay === "fr" ? "Type" : "Tipo dano"}</TableHead>
+                              <TableHead className="text-right w-24">{langDisplay === "fr" ? "Qté" : "Qtd"}</TableHead>
+                              <TableHead>{langDisplay === "fr" ? "Mesures" : "Medidas"}</TableHead>
+                              <TableHead className="w-28">{langDisplay === "fr" ? "Confiance" : "Confiança"}</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {ocrExtraction.damage_areas.map((d) => (
+                              <TableRow key={d.id}>
+                                <TableCell>
+                                  <Checkbox
+                                    checked={!!ocrDamageSelections[d.id]}
+                                    onCheckedChange={(v) => setOcrDamageSelections(s => ({ ...s, [d.id]: !!v }))}
+                                  />
+                                </TableCell>
+                                <TableCell className="font-medium">{d.areaName}</TableCell>
+                                <TableCell>{d.damageType}</TableCell>
+                                <TableCell className="text-right tabular-nums">{d.quantity}</TableCell>
+                                <TableCell className="text-xs">{d.measurements ?? "—"}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className={cn(confidenceTone(d.confidence))}>{confidenceLabel(d.confidence)}</Badge>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground italic">
+                        {langDisplay === "fr" ? "Aucune zone / dommage PDR détecté." : "Nenhuma área/dano PDR identificado na ficha."}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {form.budget_type === "pdr" || Array.isArray(ocrExtraction.labor_lines) && ocrExtraction.labor_lines.length > 0 ? (
+                <Card>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm">{langDisplay === "fr" ? "Main d'œuvre (si explicitement indiquée)" : "Mão de Obra (apenas se EXPLICITAMENTE informada)"}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    {Array.isArray(ocrExtraction.labor_lines) && ocrExtraction.labor_lines.length > 0 ? (
+                      <div className="rounded-lg border border-border/60 overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-10"></TableHead>
+                              <TableHead>{langDisplay === "fr" ? "Description" : "Descrição"}</TableHead>
+                              <TableHead className="text-right w-28">{langDisplay === "fr" ? "Heures" : "Horas"}</TableHead>
+                              <TableHead className="text-right w-32">{langDisplay === "fr" ? "Taux €/h" : "Taxa horária"}</TableHead>
+                              <TableHead className="w-28">{langDisplay === "fr" ? "Confiance" : "Confiança"}</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {ocrExtraction.labor_lines.map((l) => (
+                              <TableRow key={l.id}>
+                                <TableCell>
+                                  <Checkbox
+                                    checked={!!ocrLaborSelections[l.id]}
+                                    onCheckedChange={(v) => setOcrLaborSelections(s => ({ ...s, [l.id]: !!v }))}
+                                  />
+                                </TableCell>
+                                <TableCell className="font-medium">{l.description}</TableCell>
+                                <TableCell className="text-right tabular-nums">{l.hours.toFixed(2)}h</TableCell>
+                                <TableCell className="text-right tabular-nums">{l.hourly_rate != null && l.hourly_rate > 0 ? formatBRL(l.hourly_rate) : "— (confirmar manual)"}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className={cn(confidenceTone(l.confidence))}>{confidenceLabel(l.confidence)}</Badge>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground italic">
+                        {langDisplay === "fr" ? "Aucune main d'œuvre explicitement indiquée dans le document." : "Nenhuma mão de obra EXPLICITAMENTE informada no documento (NÃO foi inventada)."}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {ocrExtraction.observations && ocrExtraction.observations.trim().length > 40 ? (
+                <Card>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm">{langDisplay === "fr" ? "Texte brut / Observations (OCR)" : "Texto bruto / Observações extraídas"}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Textarea readOnly rows={6} className="text-xs font-mono" value={ocrExtraction.observations.slice(0, 1500)} />
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              <DialogFooter className="flex-wrap">
+                <Button variant="outline" type="button" onClick={() => { setOcrSelectedBudgetType(null); setOcrErrorMessage(null); setOcrExtraction(null); setOcrApplySelections({}); setOcrDamageSelections({}); setOcrLaborSelections({}); }} disabled={ocrIsExtracting || _ocrLoading1}>
+                  {langDisplay === "fr" ? "Nouveau scan" : "Escanear outro arquivo"}
+                </Button>
+                <div className="flex gap-2 ml-auto">
+                  <Button variant="ghost" type="button" onClick={() => setOcrDialogOpen(false)} disabled={ocrIsExtracting || _ocrLoading1}>
+                    {langDisplay === "fr" ? "Annuler" : "Cancelar"}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={applyOcrData}
+                    disabled={
+                      ocrIsExtracting ||
+                      _ocrLoading1 ||
+                      (
+                        Object.values(ocrApplySelections).every(v => !v) &&
+                        Object.values(ocrDamageSelections).every(v => !v) &&
+                        Object.values(ocrLaborSelections).every(v => !v)
+                      )
+                    }
+                  >
+                    <CheckIcon className="h-4 w-4 mr-2" />
+                    {langDisplay === "fr" ? "Appliquer données" : "Aplicar dados"}
+                  </Button>
+                </div>
+              </DialogFooter>
             </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => setConfirmRejectionOpen(false)}>
-            {langDisplay === "fr" ? "Annuler" : "Cancelar"}
-          </AlertDialogCancel>
-          <AlertDialogAction onClick={confirmRejection} className="bg-red-600 hover:bg-red-700 text-white">
-            {langDisplay === "fr" ? "Confirmer le rejet" : "Confirmar rejeição"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={confirmBudgetType.open} onOpenChange={(v) => !v && confirmBudgetTypeChange(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {langDisplay === "fr"
+                ? "Changer le type de devis ?"
+                : "Alterar o tipo de orçamento?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  {langDisplay === "fr"
+                    ? `Les interventions sélectionnées actuellement (${selectedInterventions.length}) peuvent ne pas être compatibles avec le type « ${btLabel(confirmBudgetType.pending ?? form.budget_type, langDisplay)} ».`
+                    : `As intervenções atualmente selecionadas (${selectedInterventions.length}) podem não ser compatíveis com o tipo « ${btLabel(confirmBudgetType.pending ?? form.budget_type, langDisplay)} ».`}
+                </p>
+                <p className="text-muted-foreground">
+                  {langDisplay === "fr"
+                    ? "Les interventions incompatibles seront retirées automatiquement après confirmation."
+                    : "Intervenções incompatíveis serão removidas automaticamente após a confirmação."}
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => confirmBudgetTypeChange(false)}>
+              {langDisplay === "fr" ? "Annuler" : "Cancelar"}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => confirmBudgetTypeChange(true)}>
+              {langDisplay === "fr" ? "Continuer" : "Continuar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={sendClientDialogOpen} onOpenChange={(v) => { if (!v) setSendClientDialogOpen(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Send className="h-5 w-5 text-sky-600" />
+              {langDisplay === "fr" ? "Envoyer au client" : "Enviar ao cliente"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                <p className="text-muted-foreground">
+                  {langDisplay === "fr"
+                    ? "Choisissez un canal. Le document sera téléchargé localement et prêt à être joint dans l'application qui s'ouvrira. Aucun état « envoyé » n'est marqué tant qu'un envoi réel n'a pas été confirmé côté canal."
+                    : "Escolha um canal. O documento será baixado localmente e ficará pronto para ser anexado no aplicativo que se abrirá. Nenhum status « enviado » é marcado enquanto um envio real não for confirmado no respectivo canal."}
+                </p>
+                <div className="grid grid-cols-1 gap-2">
+                  <div className="flex items-center justify-between rounded-lg border border-border/70 bg-background px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21" /><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1zm0 5a.5.5 0 0 0 1 0v-3a.5.5 0 0 0-1 0v3zm5-5a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1zm0 5a.5.5 0 0 0 1 0v-3a.5.5 0 0 0-1 0v3z" /></svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{langDisplay === "fr" ? "WhatsApp" : "WhatsApp"}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {hasValidPhone ? (form.client_phone ?? "") : (langDisplay === "fr" ? "Non disponible" : "Indisponível")}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={confirmSendByWhatsApp}
+                      disabled={!hasValidPhone}
+                      className="h-8"
+                    >
+                      {langDisplay === "fr" ? "Envoyer" : "Enviar"}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border/70 bg-background px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{langDisplay === "fr" ? "E-mail" : "E-mail"}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {hasValidEmail ? (form.client_email ?? "") : (langDisplay === "fr" ? "Non disponible" : "Indisponível")}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={confirmSendByEmail}
+                      disabled={!hasValidEmail}
+                      className="h-8"
+                    >
+                      {langDisplay === "fr" ? "Envoyer" : "Enviar"}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                        <LinkIcon className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {langDisplay === "fr" ? "Lien de signature (Smartphone / Client)" : "Link de Assinatura Online (Celular)"}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {langDisplay === "fr" ? "Lien sécurisé pour signer directement avec le doigt" : "Link seguro para o cliente assinar na tela sem login"}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      onClick={copySignLink}
+                      className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {langDisplay === "fr" ? "Copier" : "Copiar"}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-dashed border-border/70 bg-muted/30 px-3 py-2.5 opacity-80">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-500/10 text-slate-600 dark:text-slate-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M7 2v11" /><path d="M3 4v11" /><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{langDisplay === "fr" ? "SMS" : "SMS"}</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {hasSmsConfigured
+                            ? (hasValidPhone ? (form.client_phone ?? "") : (langDisplay === "fr" ? "Non disponible" : "Indisponível"))
+                            : (langDisplay === "fr" ? "Intégration SMS non configurée" : "Integração SMS não configurada")}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (!hasSmsConfigured) {
+                          toast.message(langDisplay === "fr" ? "Intégration SMS non disponible." : "Integração SMS não disponível.");
+                          return;
+                        }
+                      }}
+                      disabled={!hasSmsConfigured || !hasValidPhone}
+                      className="h-8"
+                    >
+                      {langDisplay === "fr" ? "Envoyer" : "Enviar"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setSendClientDialogOpen(false)}>
+              {langDisplay === "fr" ? "Annuler" : "Cancelar"}
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmNoSignatureOpen} onOpenChange={(v) => { if (!v) setConfirmNoSignatureOpen(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <HandPlatter className="h-5 w-5 text-amber-600" />
+              {langDisplay === "fr" ? "Confirmer sans signature dessinée" : "Confirmar sem assinatura desenhada"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+                  <div className="flex items-start gap-2">
+                    <Checkbox
+                      id="confirm-no-signature-check"
+                      checked={confirmNoSignatureChecked}
+                      onCheckedChange={(c) => setConfirmNoSignatureChecked(!!c)}
+                    />
+                    <label htmlFor="confirm-no-signature-check" className="text-sm leading-relaxed text-foreground cursor-pointer select-none">
+                      <strong>
+                        {langDisplay === "fr"
+                          ? "Je confirme que le devis a été présenté, revu et autorisé."
+                          : "Confirmo que o orçamento foi apresentado, revisado e autorizado."}
+                      </strong>
+                    </label>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label={langDisplay === "fr" ? "Nom du signataire" : "Nome do signatário"}>
+                    <Input
+                      placeholder={langDisplay === "fr" ? "Nom complet" : "Nome completo"}
+                      value={confirmNoSignatureName}
+                      onChange={(e) => setConfirmNoSignatureName(e.target.value)}
+                    />
+                  </Field>
+                  <Field label={langDisplay === "fr" ? "Type de signataire" : "Tipo de signatário"}>
+                    <Select value={confirmNoSignatureType} onValueChange={(v) => setConfirmNoSignatureType(v as BudgetSignerType)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {SIGNER_TYPE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {langDisplay === "fr" ? opt.fr : opt.pt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmNoSignatureOpen(false)}>
+              {langDisplay === "fr" ? "Annuler" : "Cancelar"}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={approveWithExplicitConfirmation}
+              disabled={!confirmNoSignatureChecked || !confirmNoSignatureName.trim() || !confirmNoSignatureType}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {langDisplay === "fr" ? "Confirmer l'approbation" : "Confirmar aprovação"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmRejectionOpen} onOpenChange={(v) => { if (!v) setConfirmRejectionOpen(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <XCircle className="h-5 w-5 text-red-600" />
+              {langDisplay === "fr" ? "Rejeter le devis ?" : "Rejeitar este orçamento?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                <p>
+                  {langDisplay === "fr"
+                    ? "Êtes-vous sûr de vouloir rejeter ce devis ? Une fois rejeté, il sera verrouillé et ne pourra plus être modifié normalement."
+                    : "Tem certeza que deseja rejeitar este orçamento? Uma vez rejeitado, ele ficará bloqueado e não poderá mais ser alterado normalmente."}
+                </p>
+                <div className="grid grid-cols-1 gap-3">
+                  <Field label={langDisplay === "fr" ? "Responsable du rejet" : "Responsável pela rejeição"}>
+                    <Input
+                      placeholder={langDisplay === "fr" ? "Nom (optionnel)" : "Nome (opcional)"}
+                      value={rejectionRejectedBy}
+                      onChange={(e) => setRejectionRejectedBy(e.target.value)}
+                    />
+                  </Field>
+                  <Field label={langDisplay === "fr" ? "Motif du rejet" : "Motivo da rejeição"}>
+                    <Textarea
+                      rows={3}
+                      placeholder={langDisplay === "fr" ? "Optionnel — expliquez le motif du rejet…" : "Opcional — explique o motivo da rejeição…"}
+                      value={rejectionReason}
+                      onChange={(e) => setRejectionReason(e.target.value)}
+                    />
+                  </Field>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmRejectionOpen(false)}>
+              {langDisplay === "fr" ? "Annuler" : "Cancelar"}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRejection} className="bg-red-600 hover:bg-red-700 text-white">
+              {langDisplay === "fr" ? "Confirmer le rejet" : "Confirmar rejeição"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

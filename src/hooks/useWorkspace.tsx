@@ -71,81 +71,103 @@ function readSelected(): string | null {
   try { return localStorage.getItem(SELECTED_KEY); } catch { return null; }
 }
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
+export interface SessionBootstrapData {
+  appUserId: string | null;
+  authUserId: string;
+  email: string;
+  role: string;
+  membershipRole: string | null;
+  isWorkspaceOwner: boolean;
+  activeWorkspaceId: string | null;
+  activeWorkspace: {
+    workspaceId: string;
+    workspaceName: string;
+    ownerAppUserId: string | null;
+    membershipRole: string | null;
+    membershipStatus: string;
+    brandConfig?: BrandConfig | null;
+    logoUrl?: string | null;
+  } | null;
+  workspaces: Array<{
+    workspaceId: string;
+    workspaceName: string;
+    ownerAppUserId: string | null;
+    membershipRole: string | null;
+    membershipStatus: string;
+    brandConfig?: BrandConfig | null;
+    logoUrl?: string | null;
+  }>;
+  permissions: {
+    admin: boolean;
+    role: string;
+    membership_role: string | null;
+    is_workspace_owner: boolean;
+    workspace_id: string | null;
+    permissions_overrides: Record<string, boolean> | null;
+    map: Record<string, { allowed: boolean; scope?: string }>;
+  };
+  computedAt: string;
+}
+
+export const BOOTSTRAP_QUERY_KEY = ["session-bootstrap"] as const;
+
+export function useSessionBootstrap() {
+  const { user, loading: authLoading } = useAuth();
   const userId = user?.id ?? null;
+  const selectedWs = readSelected();
 
-  // Operational scope state — initialised from storage, mutated by the
-  // switcher. Owner and tenant users share the same flow: the workspace
-  // is the OPERATIONAL context, never the identity.
-  const [selectedId, setSelectedId] = useState<string | null>(() => readSelected());
-
-  const { data: wsData, isLoading: wsLoading } = useQuery({
-    queryKey: ["my-workspace", userId, selectedId],
-    enabled: !!userId,
-    retry: 0,
-    staleTime: 5 * 60_000,
-    queryFn: async () => {
-      const data = await apiRequest<{
-        appUserId: string | null;
-        workspaces: Array<{
-          workspaceId: string;
-          workspaceName: string;
-          ownerAppUserId: string | null;
-          membershipRole: MembershipRole | null;
-          membershipStatus: string;
-          brandConfig?: BrandConfig | null;
-          logoUrl?: string | null;
-        }>;
-      }>("/account/workspaces", { timeoutMs: 8000 });
-      const memberships = data.workspaces;
-      if (!memberships || memberships.length === 0) {
-        return {
-          appUserId: data.appUserId,
-          availableWorkspaces: [],
-          workspaceId: null,
-          workspaceName: null,
-          ownerAppUserId: null,
-          brandConfig: null,
-          logoUrl: null,
-          myRole: null,
-        };
+  return useQuery({
+    queryKey: [...BOOTSTRAP_QUERY_KEY, userId, selectedWs],
+    enabled: !!userId && !authLoading,
+    staleTime: 60_000,
+    retry: 1,
+    queryFn: async (): Promise<SessionBootstrapData> => {
+      const data = await apiRequest<SessionBootstrapData>("/account/bootstrap", { timeoutMs: 8000 });
+      if (data.activeWorkspaceId) {
+        try {
+          if (localStorage.getItem(SELECTED_KEY) !== data.activeWorkspaceId) {
+            localStorage.setItem(SELECTED_KEY, data.activeWorkspaceId);
+          }
+        } catch { /* best effort */ }
       }
-
-      // Resolve: explicit selection → first membership. Never null when
-      // memberships exist — operational runtime always has a scope so the
-      // owner identity layer stays alongside a live workspace.
-      const picked = selectedId ? memberships.find((m) => m.workspaceId === selectedId) : null;
-      const membership = picked || memberships[0];
-      // Persist whichever id we ended up with so subsequent mounts are
-      // deterministic. This does NOT trigger a remount — it just keeps
-      // storage in sync with state.
-      try {
-        if (localStorage.getItem(SELECTED_KEY) !== membership.workspaceId) {
-          localStorage.setItem(SELECTED_KEY, membership.workspaceId);
-        }
-      } catch { /* best effort */ }
-      return {
-        workspaceId: membership.workspaceId,
-        workspaceName: membership.workspaceName,
-        appUserId: data.appUserId,
-        ownerAppUserId: membership.ownerAppUserId,
-        brandConfig: (membership.brandConfig as BrandConfig | null) || null,
-        logoUrl: membership.logoUrl ?? null,
-        myRole: membership.membershipRole,
-        availableWorkspaces: memberships.map((item) => ({
-          id: item.workspaceId,
-          name: item.workspaceName,
-          ownerAppUserId: item.ownerAppUserId,
-          membershipRole: item.membershipRole,
-          membershipStatus: item.membershipStatus,
-          brandConfig: (item.brandConfig as BrandConfig | null) || null,
-          logoUrl: item.logoUrl ?? null,
-        })),
-      };
+      return data;
     },
   });
+}
+
+export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
+  const queryClient = useQueryClient();
+
+  const [selectedId, setSelectedId] = useState<string | null>(() => readSelected());
+  const { data: bootstrap, isLoading: bootstrapLoading } = useSessionBootstrap();
+
+  const wsData = useMemo(() => {
+    if (!bootstrap) return null;
+    const active = bootstrap.activeWorkspace;
+    const memberships = bootstrap.workspaces || [];
+    return {
+      workspaceId: bootstrap.activeWorkspaceId,
+      workspaceName: active?.workspaceName ?? null,
+      appUserId: bootstrap.appUserId,
+      ownerAppUserId: active?.ownerAppUserId ?? null,
+      brandConfig: (active?.brandConfig as BrandConfig | null) || null,
+      logoUrl: active?.logoUrl ?? null,
+      myRole: (bootstrap.membershipRole as MembershipRole | null) ?? null,
+      isWorkspaceOwner: bootstrap.isWorkspaceOwner,
+      availableWorkspaces: memberships.map((item) => ({
+        id: item.workspaceId,
+        name: item.workspaceName,
+        ownerAppUserId: item.ownerAppUserId,
+        membershipRole: item.membershipRole as MembershipRole | null,
+        membershipStatus: item.membershipStatus,
+        brandConfig: (item.brandConfig as BrandConfig | null) || null,
+        logoUrl: item.logoUrl ?? null,
+      })),
+    };
+  }, [bootstrap]);
+
+  const wsLoading = authLoading || (!bootstrap && bootstrapLoading);
 
   // Members of the active operational workspace.
   const { data: members = [] } = useQuery({
@@ -182,6 +204,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         .forEach((k) => sessionStorage.removeItem(k));
     } catch { /* best effort */ }
     setSelectedId(id);
+    queryClient.invalidateQueries({ queryKey: BOOTSTRAP_QUERY_KEY });
     queryClient.invalidateQueries({ queryKey: ["my-workspace"] });
     queryClient.invalidateQueries({ queryKey: ["workspace-members"] });
   }, [selectedId, queryClient]);
@@ -194,6 +217,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(branding),
       });
+      queryClient.invalidateQueries({ queryKey: BOOTSTRAP_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ["my-workspace"] });
       queryClient.invalidateQueries({ queryKey: ["company-brand"] });
     },

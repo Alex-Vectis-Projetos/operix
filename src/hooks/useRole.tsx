@@ -3,7 +3,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/api";
 import { useAuth } from "./useAuth";
 import { useImpersonation } from "./useImpersonation";
-import { useWorkspaceOptional } from "./useWorkspace";
+import { useWorkspaceOptional, useSessionBootstrap } from "./useWorkspace";
 
 export type AppRole = "owner" | "admin" | "partner" | "technician" | "client";
 
@@ -46,9 +46,11 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const workspaceId = workspace?.workspaceId ?? null;
   const isWorkspaceLoading = workspace?.isLoading ?? false;
 
-  const { data, isLoading, isPending, isFetching } = useQuery({
+  const { data: bootstrap, isLoading: bootstrapLoading } = useSessionBootstrap();
+
+  const { data, isPending, isFetching } = useQuery({
     queryKey: ["my-role", lookupId, isImpersonating, workspaceId],
-    enabled: !!lookupId && !authLoading && !isWorkspaceLoading,
+    enabled: !!isImpersonating && !!lookupId && !authLoading && !isWorkspaceLoading,
     retry: 0,
     staleTime: 5 * 60_000,
     queryFn: async () => {
@@ -71,14 +73,19 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const isOwnerEmail =
     !!user?.email && OWNER_EMAILS.includes(user.email.toLowerCase());
 
-  const effectiveDbRole: AppRole | null = isOwnerEmail ? "owner" : data?.role ?? null;
-  const isOwner = effectiveDbRole === "owner" || data?.is_workspace_owner === true || isOwnerEmail;
+  const resolvedRole = isImpersonating ? data?.role ?? null : (bootstrap?.role as AppRole ?? null);
+  const resolvedIsWorkspaceOwner = isImpersonating ? data?.is_workspace_owner === true : bootstrap?.isWorkspaceOwner === true;
+
+  const effectiveDbRole: AppRole | null = isOwnerEmail ? "owner" : resolvedRole;
+  const isOwner = effectiveDbRole === "owner" || resolvedIsWorkspaceOwner || isOwnerEmail;
   const role = effectiveDbRole ? (ROLE_MAP[effectiveDbRole] as DisplayRole) : null;
   const isAdmin = effectiveDbRole === "owner" || effectiveDbRole === "admin";
 
   const isResolving = isOwnerEmail
     ? false
-    : (authLoading || !user || isWorkspaceLoading || !workspaceId || (!!lookupId && (isPending || isFetching || !data)));
+    : isImpersonating
+      ? (authLoading || !user || isWorkspaceLoading || !workspaceId || (!!lookupId && (isPending || isFetching || !data)))
+      : (authLoading || (!bootstrap && bootstrapLoading));
 
   return (
     <RoleCtx.Provider
