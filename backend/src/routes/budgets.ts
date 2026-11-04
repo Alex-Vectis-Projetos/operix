@@ -563,8 +563,9 @@ budgetsRouter.get("/", async (req: Request, res: Response, next: NextFunction) =
     });
 
     const isFull = req.query.full === "true";
+    const mapped = (budgets as any[]).map((b) => (isFull ? formatBudget(b) : formatBudgetSummary(b)));
     return res.status(200).json({
-      budgets: budgets.map(isFull ? formatBudget : formatBudgetSummary),
+      budgets: mapped,
     });
   } catch (error) {
     return next(error);
