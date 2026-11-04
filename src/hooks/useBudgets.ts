@@ -124,6 +124,7 @@ export function useBudgets(filters?: BudgetFilters) {
       qc.invalidateQueries({ queryKey: ["budget", variables.budgetId] });
       qc.invalidateQueries({ queryKey: ["budget_revisions", variables.budgetId] });
       qc.invalidateQueries({ queryKey: ["production_orders"] });
+      qc.invalidateQueries({ queryKey: ["production_kpis"] });
       toast.success("Orçamento aprovado e enviado para a Produção com sucesso!");
     },
     onError: (err: any) => {
