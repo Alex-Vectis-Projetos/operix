@@ -341,12 +341,14 @@ export function getBudgetSignLink(id: string): Promise<{ token: string; path: st
 
 export function apiBudgetToLocalBudget(api: ApiBudget): any {
   const rev = api.currentRevision || api.current_revision;
-  const canonicalStatus = api.status === "rejected" || api.status === "approved"
-    ? api.status
-    : (rev?.status || api.status || "draft");
   const clientSnap = rev?.clientSnapshot || rev?.client_snapshot || {};
   const vehicleSnap = rev?.vehicleSnapshot || rev?.vehicle_snapshot || {};
   const dossierSnap = rev?.dossierSnapshot || rev?.dossier_snapshot || {};
+  const canonicalStatus = api.status === "rejected" || api.status === "approved"
+    ? api.status
+    : (api.approvedRevisionId || (api as any).approved_revision_id || rev?.status === "approved" || !!rev?.signature?.signed
+      ? "approved"
+      : (rev?.status || api.status || "draft"));
 
   return {
     id: api.id,
@@ -354,6 +356,7 @@ export function apiBudgetToLocalBudget(api: ApiBudget): any {
     issued_at: rev?.createdAt || rev?.created_at || api.createdAt || api.created_at || new Date().toISOString(),
     status: (canonicalStatus === "submitted" ? "sent" : canonicalStatus) as any,
     budget_type: (rev?.budgetType || rev?.budget_type || "pdr") as any,
+    pdf_lang: dossierSnap.pdfLang || dossierSnap.lang || undefined,
 
     client_id: api.clientId || api.client_id || clientSnap.id || undefined,
     client_display_id: clientSnap.display_id || clientSnap.customer_display_id || undefined,
@@ -456,6 +459,7 @@ export function localBudgetToApiPayload(b: any): CreateBudgetInput {
       expert_number: b.dossier_expert_number,
       insurance_company: b.dossier_insurance_company,
       garage_name: b.dossier_garage_name,
+      pdfLang: b.pdf_lang || (b as any).pdfLang || (b as any).dossier_snapshot?.pdfLang || undefined,
     },
     parts: b.parts || [],
     services: b.services || [],

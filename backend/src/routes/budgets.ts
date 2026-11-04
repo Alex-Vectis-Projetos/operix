@@ -210,9 +210,10 @@ budgetsRouter.get("/public-sign/:token/pdf", async (req: Request, res: Response,
       include: { damagePoints: true },
     });
 
+    const dossierSnap = (revision?.dossierSnapshot as any) || {};
     const lang = (typeof req.query.lang === "string" && req.query.lang.trim())
       ? req.query.lang.trim()
-      : ((req.headers["accept-language"]?.split(",")[0]?.split(";")[0]?.trim()) || "pt");
+      : (dossierSnap.pdfLang || dossierSnap.lang || (req.headers["accept-language"]?.split(",")[0]?.split(";")[0]?.trim()) || "pt");
     const pdfBuffer = await generateBudgetPdfBuffer(budget, revision, budget.workspace, inspection, lang);
 
     res.setHeader("Content-Type", "application/pdf");
@@ -386,7 +387,7 @@ function formatBudget(b: any) {
     id: b.id,
     workspace_id: b.workspaceId,
     workspaceId: b.workspaceId,
-    status: b.currentRevision?.status || b.status || "draft",
+    status: b.approvedRevisionId || b.currentRevision?.status === "approved" ? "approved" : (b.currentRevision?.status || b.status || "draft"),
     code: b.code,
     client_id: b.clientId,
     clientId: b.clientId,
@@ -1220,9 +1221,10 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
       }),
     ]);
 
+    const dossierSnap = (rev?.dossierSnapshot as any) || {};
     const lang = (typeof req.query.lang === "string" && req.query.lang.trim())
       ? req.query.lang.trim()
-      : ((req.headers["accept-language"]?.split(",")[0]?.split(";")[0]?.trim()) || "pt");
+      : (dossierSnap.pdfLang || dossierSnap.lang || (req.headers["accept-language"]?.split(",")[0]?.split(";")[0]?.trim()) || "pt");
     const pdfBuffer = await generateBudgetPdfBuffer(budget, rev, workspace, inspection, lang);
 
     res.setHeader("Content-Type", "application/pdf");

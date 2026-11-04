@@ -37,7 +37,7 @@ interface RoleContext {
 const RoleCtx = createContext<RoleContext | undefined>(undefined);
 
 export function RoleProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { effectiveUserId, isImpersonating } = useImpersonation();
   const workspace = useWorkspaceOptional();
   // When impersonating, resolve the role of the target user so the whole UI
@@ -77,7 +77,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
   return (
     <RoleCtx.Provider
-      value={{ dbRole: effectiveDbRole, role, isAdmin, isOwner, isLoading: isOwnerEmail ? false : isLoading }}
+      value={{ dbRole: effectiveDbRole, role, isAdmin, isOwner, isLoading: isOwnerEmail ? false : (authLoading || (!user && authLoading) || (!!lookupId && isLoading)) }}
     >
       {children}
     </RoleCtx.Provider>

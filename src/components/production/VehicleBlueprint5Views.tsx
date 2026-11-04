@@ -31,6 +31,61 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+function DecimalInput({
+  value,
+  onChangeValue,
+  className,
+  ...props
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & {
+  value: number | string | undefined;
+  onChangeValue: (val: number) => void;
+}) {
+  const [localVal, setLocalVal] = useState<string>(() => (value !== undefined && value !== null ? String(value) : ""));
+
+  useEffect(() => {
+    const formatted = value !== undefined && value !== null ? String(value) : "";
+    const numLocal = Number(localVal.replace(",", "."));
+    const numProp = Number(formatted);
+    if (isNaN(numLocal) || isNaN(numProp) || Math.abs(numLocal - numProp) > 0.0001) {
+      setLocalVal(formatted);
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (/^[0-9]*[.,]?[0-9]*$/.test(raw)) {
+      setLocalVal(raw);
+      const normalized = raw.replace(",", ".");
+      if (normalized !== "" && normalized !== "." && !isNaN(Number(normalized))) {
+        onChangeValue(Math.max(0, Number(normalized)));
+      } else if (normalized === "") {
+        onChangeValue(0);
+      }
+    }
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    props.onBlur?.(e);
+    const normalized = localVal.replace(",", ".");
+    const num = Number(normalized);
+    if (!isNaN(num) && normalized !== "") {
+      setLocalVal(String(num));
+    }
+  };
+
+  return (
+    <Input
+      {...props}
+      type="text"
+      inputMode="decimal"
+      value={localVal}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      className={className}
+    />
+  );
+}
+
 export type VehicleViewType = "top" | "front" | "rear" | "left" | "right";
 export type VehicleBodyType = "sedan" | "hatchback" | "suv" | "pickup" | "pickup_cs" | "pickup_cd" | "van" | "furgao" | "wagon" | "chassis_cab";
 
@@ -578,7 +633,7 @@ export function VehicleBlueprint5Views({
     }
     const nextPoints = damagePoints.map((p) => ({
       ...p,
-      pricingMode: "global" as const,
+      pricingMode: p.damageType === "replace" ? (p.pricingMode || "fixed") : ("global" as const),
     }));
     onChange?.(nextPoints);
     toast.success("Modalidade 'Conjunto' aplicada globalmente a todas as peças!");
@@ -597,13 +652,16 @@ export function VehicleBlueprint5Views({
     }
     const nextPoints = damagePoints.map((p) => ({
       ...p,
-      pricingMode: "global" as const,
+      pricingMode: p.damageType === "replace" ? (p.pricingMode || "fixed") : ("global" as const),
       validated: true,
     }));
     onChange?.(nextPoints);
 
     if (onValidatePart) {
-      piecesSummary.forEach((piece, idx) => {
+      const pdrPieces = piecesSummary.filter((p) => !p.damageTypes.every((dt) => dt === "replace"));
+      const replacePieces = piecesSummary.filter((p) => p.damageTypes.every((dt) => dt === "replace"));
+
+      pdrPieces.forEach((piece, idx) => {
         const refPt = piece.points[0];
         const sizeObj = DENT_SIZES.find((s) => s.code === refPt?.dentSize);
         onValidatePart({
@@ -622,7 +680,26 @@ export function VehicleBlueprint5Views({
           notes: refPt?.notes || undefined,
         });
       });
-      toast.success(`Conjunto validado com sucesso! Total: ${pkgAmount.toFixed(2)} € para ${totalAllDents} mossas.`);
+
+      replacePieces.forEach((piece) => {
+        const refPt = piece.points[0];
+        onValidatePart({
+          carPartCode: piece.carPartCode,
+          partLabel: piece.partLabel,
+          damageType: "replace",
+          dentCount: piece.totalDents,
+          dentSize: refPt?.dentSize || "2",
+          partMaterial: piece.materialCode,
+          materialTag: piece.materialObj.tag,
+          materialLabel: piece.materialObj.label,
+          pricingMode: piece.pricingMode || "fixed",
+          estimatedAmount: piece.estimatedTotal || 0,
+          packageTotalAmount: 0,
+          notes: refPt?.notes || undefined,
+        });
+      });
+
+      toast.success(`Conjunto validado com sucesso! Total: ${pkgAmount.toFixed(2)} € para ${totalAllDents} mossas PDR.`);
     }
   };
 
@@ -638,13 +715,23 @@ export function VehicleBlueprint5Views({
     updateSelectedPoint({ photoStoragePath: url });
   };
 
-  // Contagem dinâmica total de mossas somando todas as peças
+  // Contagem dinâmica total de mossas somando apenas peças de Martelinho/PDR (exclui Substituição da Peça)
   const totalAllDents = useMemo(() => {
-    return damagePoints.reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
+    return damagePoints
+      .filter((p) => p.damageType !== "replace")
+      .reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
+  }, [damagePoints]);
+
+  const totalReplaceDents = useMemo(() => {
+    return damagePoints
+      .filter((p) => p.damageType === "replace")
+      .reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
   }, [damagePoints]);
 
   const totalContractedDents = useMemo(() => {
-    return damagePoints.filter((p) => p.contracted).reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
+    return damagePoints
+      .filter((p) => p.contracted && p.damageType !== "replace")
+      .reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
   }, [damagePoints]);
 
   // Agrupamento consolidado por peça da carroceria (elimina poluição de dezenas de cards individuais)
@@ -883,7 +970,7 @@ export function VehicleBlueprint5Views({
               </span>
               <span className="inline-flex items-center gap-1 rounded-md bg-cyan-950/70 border border-cyan-700/60 px-2 py-0.5 text-cyan-200 font-semibold shadow-sm">
                 <Sparkles className="h-3 w-3 text-cyan-400" />
-                <strong className="text-white">{totalAllDents}</strong> {totalAllDents === 1 ? "mossa total" : "mossas totais"}
+                <strong className="text-white">{totalAllDents}</strong> {totalAllDents === 1 ? "mossa PDR" : "mossas PDR"}{totalReplaceDents > 0 ? ` (+${totalReplaceDents} subst.)` : ""}
               </span>
               <span className="inline-flex items-center gap-1 rounded-md bg-blue-950/50 border border-blue-800/60 px-2 py-0.5 text-cyan-300 font-medium">
                 {totalContractedDents} orçadas
@@ -1238,14 +1325,12 @@ export function VehicleBlueprint5Views({
               </Label>
               {selectedPoint.pricingMode === "global" ? (
                 <div className="space-y-1">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    className="h-8 border-cyan-600 bg-cyan-950/30 text-cyan-200 font-semibold text-xs"
+                  <DecimalInput
+                    className="h-8 border-cyan-600 bg-cyan-950/30 text-cyan-200 font-semibold text-xs text-right"
                     placeholder="Ex: 500.00"
                     value={globalPackageAmount}
-                    onChange={(e) => {
-                      setGlobalPackageAmount(e.target.value);
+                    onChangeValue={(val) => {
+                      setGlobalPackageAmount(String(val));
                       updateSelectedPoint({ estimatedAmount: 0 });
                     }}
                   />
@@ -1254,13 +1339,11 @@ export function VehicleBlueprint5Views({
                   </span>
                 </div>
               ) : (
-                <Input
-                  type="number"
-                  step="0.01"
-                  className="h-8"
+                <DecimalInput
+                  className="h-8 text-right"
                   placeholder="Ex: 350.00"
                   value={selectedPoint.estimatedAmount ?? ""}
-                  onChange={(e) => updateSelectedPoint({ estimatedAmount: e.target.value })}
+                  onChangeValue={(val) => updateSelectedPoint({ estimatedAmount: val })}
                 />
               )}
             </div>
@@ -1394,7 +1477,7 @@ export function VehicleBlueprint5Views({
             <div className="flex items-center gap-2">
               <Car className="h-4 w-4 text-cyan-400" />
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Dossiê Consolidado por Peça ({piecesSummary.length} {piecesSummary.length === 1 ? "peça" : "peças"} • <strong className="text-cyan-400 font-bold">{totalAllDents}</strong> {totalAllDents === 1 ? "mossa total" : "mossas no total"})
+                Dossiê Consolidado por Peça ({piecesSummary.length} {piecesSummary.length === 1 ? "peça" : "peças"} • <strong className="text-cyan-400 font-bold">{totalAllDents}</strong> {totalAllDents === 1 ? "mossa PDR" : "mossas PDR"}{totalReplaceDents > 0 ? ` + ${totalReplaceDents} informativas em substituição` : ""})
               </span>
             </div>
             <span className="text-[11px] text-muted-foreground">
@@ -1434,9 +1517,15 @@ export function VehicleBlueprint5Views({
 
                   {/* Detalhes Técnicos e Contagens */}
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                    <span className="font-medium text-cyan-300">
-                      {piece.totalDents} {piece.totalDents === 1 ? "mossa" : "mossas"}
-                    </span>
+                    {piece.damageTypes.includes("replace") ? (
+                      <span className="font-medium text-amber-400">
+                        {piece.totalDents} {piece.totalDents === 1 ? "mossa" : "mossas"} (Informativo - Substituição)
+                      </span>
+                    ) : (
+                      <span className="font-medium text-cyan-300">
+                        {piece.totalDents} {piece.totalDents === 1 ? "mossa" : "mossas"}
+                      </span>
+                    )}
                     {piece.dentSizeLabel && (
                       <>
                         <span className="text-slate-600">•</span>

@@ -544,6 +544,8 @@ export type Budget = {
   budget_type: BudgetType;
   /** ISO 4217 currency of the budget (display only; authority is backend). */
   currency?: string;
+  pdf_lang?: string;
+  dossier_snapshot?: any;
 
   client_id?: string;
   client_display_id?: string;
@@ -1163,6 +1165,58 @@ export function formatDateTime(iso: string | null | undefined): string {
   }
 }
 
+export interface DecimalInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> {
+  value: number | string | undefined;
+  onChangeValue: (val: number) => void;
+}
+
+export function DecimalInput({ value, onChangeValue, className, ...props }: DecimalInputProps) {
+  const [localVal, setLocalVal] = useState<string>(() => (value !== undefined && value !== null ? String(value) : ""));
+
+  useEffect(() => {
+    const formatted = value !== undefined && value !== null ? String(value) : "";
+    const numLocal = Number(localVal.replace(",", "."));
+    const numProp = Number(formatted);
+    if (isNaN(numLocal) || isNaN(numProp) || Math.abs(numLocal - numProp) > 0.0001) {
+      setLocalVal(formatted);
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (/^[0-9]*[.,]?[0-9]*$/.test(raw)) {
+      setLocalVal(raw);
+      const normalized = raw.replace(",", ".");
+      if (normalized !== "" && normalized !== "." && !isNaN(Number(normalized))) {
+        onChangeValue(Math.max(0, Number(normalized)));
+      } else if (normalized === "") {
+        onChangeValue(0);
+      }
+    }
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    props.onBlur?.(e);
+    const normalized = localVal.replace(",", ".");
+    const num = Number(normalized);
+    if (!isNaN(num) && normalized !== "") {
+      setLocalVal(String(num));
+    }
+  };
+
+  return (
+    <Input
+      {...props}
+      type="text"
+      inputMode="decimal"
+      value={localVal}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      className={className}
+    />
+  );
+}
+
 interface Props {
   open: boolean;
   initial?: Budget | null;
@@ -1176,6 +1230,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const { dbRole } = useRole();
   const isClient = dbRole === "client";
   const [form, setForm] = useState<Budget>(() => emptyBudget());
+  const lastLoadedIdRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState<DialogStep>(() => {
     const bt = initial?.budget_type;
@@ -1540,8 +1595,21 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   };
 
   useEffect(() => {
-    if (open) {
-      const base = initial ?? emptyBudget();
+    if (!open) {
+      lastLoadedIdRef.current = null;
+      return;
+    }
+    const currentInstanceId = initial?.id || "new";
+    if (lastLoadedIdRef.current === currentInstanceId) {
+      return;
+    }
+    lastLoadedIdRef.current = currentInstanceId;
+
+    const base = initial ?? emptyBudget();
+    const loadedPdfLang = (base as any)?.pdf_lang || (base as any)?.dossier_snapshot?.pdfLang;
+    if (loadedPdfLang && ["pt", "fr", "en", "es", "de", "it", "pl", "ru"].includes(loadedPdfLang.toLowerCase().slice(0, 2))) {
+      setPdfLang(loadedPdfLang.toLowerCase().slice(0, 2));
+    }
       const type = normalizeBudgetType(
         (base as unknown as Record<string, unknown>)?.budget_type as string | undefined,
         undefined,
@@ -1628,7 +1696,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       setIntervQuery("");
       setIntervPopoverOpen(false);
       setConfirmBudgetType({ open: false, pending: null, source: "choose_step" });
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial?.id]);
 
@@ -2047,6 +2114,11 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     const finalDraft: Budget = {
       ...form,
       status: "approved",
+      pdf_lang: pdfLang,
+      dossier_snapshot: {
+        ...((form as any).dossier_snapshot || {}),
+        pdfLang: pdfLang,
+      },
       signature: {
         signed: true,
         signerName: name,
@@ -2060,9 +2132,25 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       updated_at: signedAt,
     };
     try {
-      await onSave({ ...finalDraft, updated_at: new Date().toISOString() });
+      const savedRes: any = await onSave({ ...finalDraft, updated_at: new Date().toISOString() });
+      const targetId =
+        savedRes?.budget?.id ||
+        savedRes?.id ||
+        savedRes?.revision?.budgetId ||
+        form.id ||
+        initial?.id;
+
+      if (targetId && !targetId.startsWith("local-")) {
+        try {
+          await apiRequest(`/budgets/${targetId}/inspection`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ damage_points: inspectionPoints }),
+          });
+        } catch {}
+      }
       setFormSafe(finalDraft);
-      toast.success(langDisplay === "fr" ? "Devis approuvé · Bloqué" : "Orçamento aprovado com sucesso!");
+      toast.success(langDisplay === "fr" ? "Devis approuvé et envoyé en production !" : "Orçamento aprovado e enviado para a Produção!");
       onOpenChange(false);
     } catch (error: any) {
       toast.error(error?.message || (langDisplay === "fr" ? "Échec de l'approbation." : "Falha ao aprovar o orçamento."));
@@ -2247,7 +2335,41 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     if (saving) return null;
     setSaving(true);
     try {
-      const savedRes: any = await onSave({ ...form, updated_at: new Date().toISOString() });
+      let draftToSave: Budget = {
+        ...form,
+        pdf_lang: pdfLang,
+        dossier_snapshot: {
+          ...((form as any).dossier_snapshot || {}),
+          pdfLang: pdfLang,
+        },
+        updated_at: new Date().toISOString(),
+      };
+
+      // Se há assinatura desenhada no canvas mas ainda não confirmada em estado, salva como aprovado
+      const sigCanvas = signatureCanvasRef.current;
+      if (!draftToSave.signature?.signed && sigCanvas && !sigCanvas.isEmpty()) {
+        const dataUrl = sigCanvas.getDataUrl();
+        if (dataUrl) {
+          const name = signatureSignerName.trim() || form.client_name?.trim() || "Cliente";
+          const resolvedSignerType = signatureSignerType || "client";
+          draftToSave = {
+            ...draftToSave,
+            status: "approved",
+            signature: {
+              signed: true,
+              signerName: name,
+              signerType: resolvedSignerType,
+              signedAt: new Date().toISOString(),
+              signatureData: dataUrl,
+              confirmationMethod: "DRAWN_SIGNATURE",
+              budgetNumberAtMoment: form.number || null,
+              finalValueAtMoment: totals.total,
+            },
+          };
+        }
+      }
+
+      const savedRes: any = await onSave(draftToSave);
       const targetId =
         savedRes?.budget?.id ||
         savedRes?.id ||
@@ -2256,7 +2378,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         initial?.id;
 
       if (targetId && !targetId.startsWith("local-")) {
-        setFormSafe((prev) => ({ ...prev, id: targetId }));
+        setFormSafe((prev) => ({ ...prev, id: targetId, ...draftToSave }));
         try {
           await apiRequest(`/budgets/${targetId}/inspection`, {
             method: "POST",
@@ -2269,7 +2391,11 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       }
 
       if (closeOnFinish) {
-        toast.success(langDisplay === "fr" ? "Devis enregistré avec succès." : "Orçamento salvo com sucesso.");
+        toast.success(
+          draftToSave.status === "approved"
+            ? (langDisplay === "fr" ? "Devis approuvé et envoyé en production !" : "Orçamento aprovado e enviado para a Produção!")
+            : (langDisplay === "fr" ? "Devis enregistré avec succès." : "Orçamento salvo com sucesso.")
+        );
         onOpenChange(false);
       }
       return targetId;
@@ -2798,48 +2924,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
           </div>
         ) : (
           <div className="space-y-6 pt-2">
-            {/* TIPO DE ORÇAMENTO (Promovido para o topo do formulário) */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border bg-muted/20 border-slate-700/60 shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className={cn("p-2 rounded-lg border shadow-sm", meta.accent)}>
-                  <meta.icon className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {langDisplay === "fr" ? "Type de devis actif" : "Tipo de orçamento ativo"}
-                  </div>
-                  <div className="text-sm font-bold text-foreground flex items-center gap-2">
-                    <span>{btLabel(form.budget_type, langDisplay)}</span>
-                    <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", meta.accent)}>
-                      {form.budget_type === "pdr" ? "Baremo Pericial UT" : "Itens Comerciais"}
-                    </Badge>
-                  </div>
-                </div>
-              </div>
-
-              {!isLocked && (
-                <div className="flex items-center gap-2">
-                  <Select
-                    value={isValidBudgetType(form.budget_type) ? form.budget_type : "pdr"}
-                    onValueChange={(v) => {
-                      const t = normalizeBudgetType(v);
-                      if (t) requestBudgetTypeChange(t, "form_step");
-                    }}
-                  >
-                    <SelectTrigger className="h-8 text-xs w-[200px] border-slate-700 bg-background/80">
-                      <SelectValue placeholder={langDisplay === "fr" ? "Changer type de devis" : "Alterar tipo de orçamento"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pdr">Martelinho / PDR</SelectItem>
-                      <SelectItem value="body_paint">Funilaria e Pintura</SelectItem>
-                      <SelectItem value="mechanics">Mecânica</SelectItem>
-                      <SelectItem value="assembly_disassembly">Montagem / Desmontagem</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-
             <Section
               title={
                 <span className="inline-flex items-center gap-2">
@@ -3265,6 +3349,48 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
               </p>
             </Section>
 
+            {/* SELETOR UNIFICADO DE TIPO DE ORÇAMENTO (Logo acima do Mapeamento Visual) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border bg-muted/20 border-slate-700/60 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className={cn("p-2 rounded-lg border shadow-sm", meta.accent)}>
+                  <meta.icon className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {langDisplay === "fr" ? "Type de devis actif" : "Tipo de orçamento ativo"}
+                  </div>
+                  <div className="text-sm font-bold text-foreground flex items-center gap-2">
+                    <span>{btLabel(form.budget_type, langDisplay)}</span>
+                    <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", meta.accent)}>
+                      {form.budget_type === "pdr" ? "Baremo Pericial UT" : "Itens Comerciais"}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+
+              {!isLocked && (
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={isValidBudgetType(form.budget_type) ? form.budget_type : "pdr"}
+                    onValueChange={(v) => {
+                      const t = normalizeBudgetType(v);
+                      if (t) requestBudgetTypeChange(t, "form_step");
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-[200px] border-slate-700 bg-background/80">
+                      <SelectValue placeholder={langDisplay === "fr" ? "Changer type de devis" : "Alterar tipo de orçamento"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pdr">Martelinho / PDR</SelectItem>
+                      <SelectItem value="body_paint">Funilaria e Pintura</SelectItem>
+                      <SelectItem value="mechanics">Mecânica</SelectItem>
+                      <SelectItem value="assembly_disassembly">Montagem / Desmontagem</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
             <Section
               title={
                 <span className="inline-flex items-center gap-2">
@@ -3353,7 +3479,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                   ? "Informations opérationnelles, type de devis et interventions sélectionnées."
                   : "Dados operacionais, tipo de orçamento e intervenções selecionadas."}
               </p>
-              <div className="mb-4">
+              <div className="mb-4 flex items-center gap-3">
                 <Badge variant="outline" className="tabular-nums font-bold tracking-wide text-foreground px-3 py-1 border-border/70 bg-muted/20">
                   <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground/80">
                     {langDisplay === "fr" ? "OS" : "OS"}
@@ -3362,35 +3488,10 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                     {form.number || (langDisplay === "fr" ? "Brouillon" : "Rascunho")}
                   </span>
                 </Badge>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-1">
-                <Field label={langDisplay === "fr" ? "Type de devis" : "Tipo de orçamento"}>
-                  <Select
-                    value={isValidBudgetType(form.budget_type) ? form.budget_type : ""}
-                    onValueChange={(v) => {
-                      const t = normalizeBudgetType(v);
-                      if (t) requestBudgetTypeChange(t, "form_step");
-                    }}
-                    disabled={isLocked}
-                  >
-                    <SelectTrigger className="h-9 text-xs">
-                      <SelectValue placeholder={langDisplay === "fr" ? "Sélectionner le type de devis" : "Selecionar tipo de orçamento"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(BUDGET_TYPE_META) as BudgetType[]).map((k) => {
-                        const m = BUDGET_TYPE_META[k];
-                        return (
-                          <SelectItem key={k} value={k}>
-                            <span className="flex items-center gap-2">
-                              <m.icon className={`h-3.5 w-3.5 ${m.dot.replace("bg-", "text-")}`} />
-                              {btLabel(k, langDisplay)}
-                            </span>
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </Field>
+                <div className="text-xs text-muted-foreground">
+                  {langDisplay === "fr" ? "Type actif :" : "Tipo ativo :"}{" "}
+                  <strong className="text-foreground">{btLabel(form.budget_type, langDisplay)}</strong>
+                </div>
               </div>
               <div className="mt-2 space-y-2">
                 <Field
@@ -3681,15 +3782,13 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                step={0.01}
-                                className="tabular-nums"
-                                value={String(p.unit_price)}
-                                onChange={(e) =>
+                              <DecimalInput
+                                className="tabular-nums text-right h-9"
+                                placeholder="0.00"
+                                value={p.unit_price}
+                                onChangeValue={(val) =>
                                   updatePart(p.id, {
-                                    unit_price: Math.max(0, Number(e.target.value) || 0),
+                                    unit_price: val,
                                   })
                                 }
                                 disabled={isLocked}
@@ -3838,15 +3937,13 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                step={0.01}
-                                className="tabular-nums"
-                                value={String(s.unit_price)}
-                                onChange={(e) =>
+                              <DecimalInput
+                                className="tabular-nums text-right h-9"
+                                placeholder="0.00"
+                                value={s.unit_price}
+                                onChangeValue={(val) =>
                                   updateService(s.id, {
-                                    unit_price: Math.max(0, Number(e.target.value) || 0),
+                                    unit_price: val,
                                   })
                                 }
                                 disabled={isLocked}
@@ -3930,30 +4027,26 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                               />
                             </TableCell>
                             <TableCell className="text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                step={0.25}
-                                className="tabular-nums"
-                                value={String(l.hours)}
-                                onChange={(e) =>
+                              <DecimalInput
+                                className="tabular-nums text-right h-9"
+                                placeholder="0.0"
+                                value={l.hours}
+                                onChangeValue={(val) =>
                                   updateLabor(l.id, {
-                                    hours: Math.max(0, Number(e.target.value) || 0),
+                                    hours: val,
                                   })
                                 }
                                 disabled={isLocked}
                               />
                             </TableCell>
                             <TableCell className="text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                step={0.01}
-                                className="tabular-nums"
-                                value={String(l.hourly_rate)}
-                                onChange={(e) =>
+                              <DecimalInput
+                                className="tabular-nums text-right h-9"
+                                placeholder="0.00"
+                                value={l.hourly_rate}
+                                onChangeValue={(val) =>
                                   updateLabor(l.id, {
-                                    hourly_rate: Math.max(0, Number(e.target.value) || 0),
+                                    hourly_rate: val,
                                   })
                                 }
                                 disabled={isLocked}

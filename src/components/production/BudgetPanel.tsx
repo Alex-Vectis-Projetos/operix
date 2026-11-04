@@ -292,7 +292,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   };
 
   const openNew = () => {
-    setEditing(null);
+    setEditing(emptyBudget());
     setOpen(true);
   };
 
@@ -307,7 +307,8 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       return;
     }
     try {
-      const blob = await getBudgetPdf(b.id, lang);
+      const targetLang = (b as any).pdf_lang || (b as any).pdfLang || (b as any).dossier_snapshot?.pdfLang || (b as any).dossier_snapshot?.lang || lang;
+      const blob = await getBudgetPdf(b.id, targetLang);
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank", "noopener,noreferrer");
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -319,7 +320,8 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const downloadBudgetFile = async (b: Budget) => {
     if (b.id && !b.id.startsWith("local-")) {
       try {
-        const blob = await getBudgetPdf(b.id, lang);
+        const targetLang = (b as any).pdf_lang || (b as any).pdfLang || (b as any).dossier_snapshot?.pdfLang || (b as any).dossier_snapshot?.lang || lang;
+        const blob = await getBudgetPdf(b.id, targetLang);
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -499,7 +501,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                   <TableHead className="min-w-[130px] max-w-[200px]">Veículo</TableHead>
                   <TableHead className="w-[95px]">Status</TableHead>
                   <TableHead className="w-[105px] text-right">Total</TableHead>
-                  <TableHead className="w-[160px] text-right sticky right-0 z-20 bg-slate-900/95 backdrop-blur border-l border-slate-800 shadow-[-8px_0_12px_-4px_rgba(0,0,0,0.5)]">
+                  <TableHead className="w-[130px] text-right">
                     Ação
                   </TableHead>
                 </TableRow>
@@ -579,7 +581,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                       >
                         {formatBRL(computeTotalsFor(b).total, b.currency || "EUR")}
                       </TableCell>
-                      <TableCell className="text-right sticky right-0 z-10 bg-slate-900 group-hover:bg-slate-800 border-l border-slate-800 shadow-[-8px_0_12px_-4px_rgba(0,0,0,0.5)] transition-colors py-2 px-3">
+                      <TableCell className="text-right py-2 px-3">
                         <div className="flex items-center justify-end gap-1">
                           <Button
                             size="icon"
@@ -600,19 +602,21 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                             <FileDown className="h-4 w-4" />
                           </Button>
                           <Button
-                            size="sm"
-                            variant={b.status === "rejected" ? "secondary" : "default"}
-                            className="h-8 px-2.5 text-xs font-medium"
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            title={
+                              b.status === "approved"
+                                ? "Revisar"
+                                : b.status === "rejected"
+                                  ? "Ver / Reabrir"
+                                  : langDisplay === "fr"
+                                    ? "Modifier"
+                                    : "Editar"
+                            }
                             onClick={() => openEdit(b)}
                           >
-                            <Pencil className="h-3 w-3 mr-1" />
-                            {b.status === "approved"
-                              ? "Revisar"
-                              : b.status === "rejected"
-                                ? "Ver / Reabrir"
-                                : langDisplay === "fr"
-                                  ? "Modifier"
-                                  : "Editar"}
+                            <Pencil className="h-4 w-4" />
                           </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -678,7 +682,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
 
       <BudgetDialog
         open={open}
-        initial={editing ?? emptyBudget()}
+        initial={editing ?? undefined}
         onOpenChange={(v) => {
           setOpen(v);
           if (!v) setEditing(null);

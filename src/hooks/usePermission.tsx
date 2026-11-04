@@ -153,6 +153,7 @@ export function useCan(): {
   };
 
   // Loading while role is still resolving OR perms map is fetching (unless admin shortcut)
-  const loading = roleLoading || (isLoading && !isAdmin);
+  const { user, loading: authLoading } = useAuth();
+  const loading = authLoading || (!user && authLoading) || roleLoading || (isLoading && !isAdmin);
   return { can, isLoading: loading };
 }
