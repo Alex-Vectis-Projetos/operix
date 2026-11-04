@@ -584,8 +584,8 @@ function buildStructuredProductionServices(
         throw new UnprocessableEntityError(`BUDGET_SERVICE_VALUE_REQUIRED: ${source.category}[${index}]`);
       }
 
-      if (unitPrice.lte(0) || total.lte(0)) {
-        throw new UnprocessableEntityError(`BUDGET_SERVICE_VALUE_REQUIRED: ${source.category}[${index}]`);
+      if (unitPrice.lt(0) || total.lt(0)) {
+        throw new UnprocessableEntityError(`BUDGET_SERVICE_VALUE_NEGATIVE: ${source.category}[${index}]`);
       }
 
       const catalogItemId = item.catalogItemId || (item as any).catalog_item_id;

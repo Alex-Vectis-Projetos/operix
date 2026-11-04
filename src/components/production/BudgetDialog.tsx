@@ -1056,14 +1056,14 @@ export function getCountryBudgetConfig(code: string | undefined | null): Country
 const DEFAULT_CLIENT_COUNTRY = "BR";
 
 export function emptyBudget(
-  type?: BudgetType,
+  type: BudgetType = "pdr",
 ): Budget {
   return {
     id: `local-${uid()}`,
     number: "",
     issued_at: todayISO(),
     status: "draft",
-    budget_type: type ?? ("" as any),
+    budget_type: type || "pdr",
 
     client_id: "",
     client_display_id: "",
@@ -1123,11 +1123,16 @@ export function emptyBudget(
 
 function normalizeBudgetType(
   v: string | null | undefined,
-  fallback?: BudgetType,
-): BudgetType | undefined {
+  fallback: BudgetType = "pdr",
+): BudgetType {
   if (!v) return fallback;
-  return (v === "mechanics" || v === "body_paint" || v === "pdr" || v === "assembly_disassembly")
-    ? (v as BudgetType)
+  const s = String(v).toLowerCase();
+  if (s === "mechanics" || s === "mechanic") return "mechanics";
+  if (s === "body_paint" || s === "bodywork") return "body_paint";
+  if (s === "pdr" || s === "smart" || s === "detailing") return "pdr";
+  if (s === "assembly_disassembly") return "assembly_disassembly";
+  return (s === "mechanics" || s === "body_paint" || s === "pdr" || s === "assembly_disassembly")
+    ? (s as BudgetType)
     : fallback;
 }
 
@@ -1616,7 +1621,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     }
     const type = normalizeBudgetType(
       (base as unknown as Record<string, unknown>)?.budget_type as string | undefined,
-      undefined,
+      "pdr",
     );
     const normalizedSelections: unknown[] = Array.isArray((base as any).mechanical_selections)
       ? (base as any).mechanical_selections.filter(Boolean)
@@ -1642,7 +1647,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     const next: Budget = {
       ...emptyBudget(type),
       ...base,
-      budget_type: type ?? ("" as any),
+      budget_type: type || "pdr",
       parts: baseParts,
       services: baseServices,
       labor: baseLabor,
@@ -2124,23 +2129,20 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       finalValueAtMoment: totals.total,
     };
 
-    setFormSafe((prev) => ({
-      ...prev,
+    const approvedDraft: Budget = {
+      ...form,
       status: "approved",
       pdf_lang: pdfLang,
       dossier_snapshot: {
-        ...((prev as any).dossier_snapshot || {}),
+        ...((form as any).dossier_snapshot || {}),
         pdfLang: pdfLang,
       },
       signature: signedData,
       updated_at: signedAt,
-    }));
+    };
 
-    toast.success(
-      langDisplay === "fr"
-        ? "Signature attachée ! Cliquez sur 'Enregistrer le devis' pour confirmer et envoyer en production."
-        : "Assinatura anexada com sucesso! Clique em 'Salvar Orçamento' para confirmar e enviar para a Produção."
-    );
+    setForm(approvedDraft);
+    await persistCurrentState(true, approvedDraft);
   };
 
   const approveWithExplicitConfirmation = async () => {
@@ -2162,29 +2164,27 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       signerType: resolvedSignerType,
       signedAt,
       signatureData: "CONFIRMED_WITHOUT_SIGNATURE",
-      confirmationMethod: "NO_SIGNATURE_EXPLICIT_CONFIRMATION",
+      confirmationMethod: "EXPLICIT_CONFIRMATION",
       budgetNumberAtMoment: form.number || null,
       finalValueAtMoment: totals.total,
     };
 
-    setFormSafe((prev) => ({
-      ...prev,
+    const approvedDraft: Budget = {
+      ...form,
       status: "approved",
       pdf_lang: pdfLang,
       dossier_snapshot: {
-        ...((prev as any).dossier_snapshot || {}),
+        ...((form as any).dossier_snapshot || {}),
         pdfLang: pdfLang,
       },
       signature: confirmedData,
       updated_at: signedAt,
-    }));
+    };
+
     setConfirmNoSignatureOpen(false);
     setConfirmNoSignatureChecked(false);
-    toast.success(
-      langDisplay === "fr"
-        ? "Approbation confirmée ! Cliquez sur 'Enregistrer le devis' pour finaliser et envoyer en production."
-        : "Aprovação confirmada! Clique em 'Salvar Orçamento' para finalizar e enviar para a Produção."
-    );
+    setForm(approvedDraft);
+    await persistCurrentState(true, approvedDraft);
   };
 
   const rawPhone = (form.client_phone ?? "").trim();
@@ -2321,11 +2321,11 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     }
   };
 
-  const persistCurrentState = async (closeOnFinish = false): Promise<string | null> => {
+  const persistCurrentState = async (closeOnFinish = false, draftOverride?: Budget): Promise<string | null> => {
     if (saving) return null;
     setSaving(true);
     try {
-      let draftToSave: Budget = {
+      let draftToSave: Budget = draftOverride ?? {
         ...form,
         pdf_lang: pdfLang,
         dossier_snapshot: {
@@ -3487,10 +3487,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                       {form.number || (langDisplay === "fr" ? "Brouillon" : "Rascunho")}
                     </span>
                   </Badge>
-                  <div className="text-xs text-muted-foreground">
-                    {langDisplay === "fr" ? "Type actif :" : "Tipo ativo :"}{" "}
-                    <strong className="text-foreground">{btLabel(form.budget_type, langDisplay)}</strong>
-                  </div>
                 </div>
                 <div className="mt-2 space-y-2">
                   <Field
@@ -3523,7 +3519,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                             disabled={isLocked}
                           >
                             <span className="truncate">
-                              {interventionsCatalogue.length === 0
+                              {isCatalogLoading && interventionsCatalogue.length === 0
                                 ? (langDisplay === "fr"
                                   ? "Chargement du catalogue…"
                                   : "Carregando catálogo…")

@@ -422,8 +422,7 @@ function formatBudgetSummary(b: any) {
   const activeRev = b.approvedRevision || b.currentRevision;
   const isApproved =
     !!b.approvedRevisionId ||
-    b.currentRevision?.status === "approved" ||
-    !!(b.currentRevision?.signature as any)?.signed;
+    b.currentRevision?.status === "approved";
 
   return {
     id: b.id,

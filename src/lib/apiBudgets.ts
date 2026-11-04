@@ -144,6 +144,11 @@ export interface ApiBudget {
   revisions?: ApiBudgetRevision[];
   productionOrder?: any;
   production_order?: any;
+  finalTotal?: string | number | null;
+  final_total?: string | number | null;
+  grossTotal?: string | number | null;
+  gross_total?: string | number | null;
+  is_summary?: boolean;
 }
 
 export interface ApiBudgetPhoto {
@@ -346,7 +351,7 @@ export function apiBudgetToLocalBudget(api: ApiBudget): any {
   const dossierSnap = rev?.dossierSnapshot || rev?.dossier_snapshot || {};
   const canonicalStatus = api.status === "rejected" || api.status === "approved"
     ? api.status
-    : (api.approvedRevisionId || (api as any).approved_revision_id || rev?.status === "approved" || !!rev?.signature?.signed
+    : (api.approvedRevisionId || (api as any).approved_revision_id || rev?.status === "approved"
       ? "approved"
       : (rev?.status || api.status || "draft"));
 
@@ -416,6 +421,14 @@ export function apiBudgetToLocalBudget(api: ApiBudget): any {
       finalValueAtMoment: null,
     },
     rejection: rev?.rejection || { rejected: false, rejectedAt: null, rejectedBy: null, reason: null },
+    final_total: api.final_total ?? api.finalTotal ?? rev?.final_total ?? rev?.finalTotal ?? null,
+    finalTotal: api.final_total ?? api.finalTotal ?? rev?.final_total ?? rev?.finalTotal ?? null,
+    gross_total: api.gross_total ?? api.grossTotal ?? rev?.gross_total ?? rev?.grossTotal ?? null,
+    grossTotal: api.gross_total ?? api.grossTotal ?? rev?.gross_total ?? rev?.grossTotal ?? null,
+    is_summary: !!(api as any).is_summary,
+    approved_revision_id: api.approvedRevisionId || (api as any).approved_revision_id || null,
+    current_revision_id: api.currentRevisionId || (api as any).current_revision_id || null,
+    current_revision: api.currentRevision || (api as any).current_revision || null,
     created_at: api.createdAt || api.created_at || new Date().toISOString(),
     updated_at: api.updatedAt || api.updated_at || new Date().toISOString(),
   };

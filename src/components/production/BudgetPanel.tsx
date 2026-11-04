@@ -174,7 +174,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         const total =
           (b as any).final_total != null &&
           !isNaN(Number((b as any).final_total)) &&
-          (!b.parts?.length && !b.services?.length && !b.labor?.length)
+          ((b as any).is_summary || (!b.parts?.length && !b.services?.length && !b.labor?.length))
             ? Number((b as any).final_total)
             : (() => {
                 const p = (b.parts || []).reduce(
@@ -228,16 +228,20 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const handleSave = async (b: Budget) => {
     try {
       const payload = localBudgetToApiPayload(b);
-      const existing = (apiBudgets || []).find((x) => x.id === b.id);
+      const isExisting = Boolean(b.id && !b.id.startsWith("local-"));
+      const existing = isExisting ? (apiBudgets || []).find((x) => x.id === b.id) : null;
 
       let savedResult: any = null;
 
-      if (existing) {
+      if (existing || isExisting) {
+        const budgetTargetId = b.id;
         const revId =
-          existing.currentRevisionId ||
-          existing.current_revision_id ||
-          existing.currentRevision?.id ||
-          existing.current_revision?.id;
+          existing?.currentRevisionId ||
+          existing?.current_revision_id ||
+          (b as any).currentRevisionId ||
+          (b as any).current_revision_id ||
+          existing?.currentRevision?.id ||
+          existing?.current_revision?.id;
 
         if (!revId) {
           toast.error("Identificador de revisão não localizado para este orçamento.");
@@ -245,16 +249,16 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         }
 
         const updated = await updateRevisionMutation.mutateAsync({
-          budgetId: b.id,
+          budgetId: budgetTargetId,
           revisionId: revId,
           patch: payload,
         });
         savedResult = updated;
-        const targetRevisionId = updated.revision.id;
+        const targetRevisionId = updated?.revision?.id || revId;
 
         if (b.status === "approved" || b.signature?.signed) {
           const res = await approveBudgetMutation.mutateAsync({
-            budgetId: b.id,
+            budgetId: budgetTargetId,
             revisionId: targetRevisionId,
             options: { notes: b.diagnosis || undefined, signature: b.signature },
           });
@@ -265,7 +269,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           }
         } else if (b.status === "rejected") {
           await rejectBudgetMutation.mutateAsync({
-            budgetId: b.id,
+            budgetId: budgetTargetId,
             revisionId: targetRevisionId,
             reason: b.rejection?.reason || "Orçamento recusado pelo cliente",
           });
@@ -275,7 +279,10 @@ export function BudgetPanel({ onOpenOrder }: Props) {
         const created = await createBudgetMutation.mutateAsync(payload);
         savedResult = created;
         const createdBudgetId = created.budget.id;
-        const createdRevId = created.budget.currentRevisionId || created.revision.id;
+        const createdRevId =
+          created.budget.currentRevisionId ||
+          created.budget.current_revision_id ||
+          created.revision?.id;
         if ((b.status === "approved" || b.signature?.signed) && createdRevId) {
           const res = await approveBudgetMutation.mutateAsync({
             budgetId: createdBudgetId,
@@ -375,7 +382,7 @@ export function BudgetPanel({ onOpenOrder }: Props) {
     if (
       (b as any).final_total != null &&
       !isNaN(Number((b as any).final_total)) &&
-      (!b.parts?.length && !b.services?.length && !b.labor?.length)
+      ((b as any).is_summary || (!b.parts?.length && !b.services?.length && !b.labor?.length))
     ) {
       const total = Number((b as any).final_total);
       const gross = Number((b as any).gross_total ?? total);
@@ -421,8 +428,12 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       const revId =
         existing?.approvedRevisionId ||
         existing?.approved_revision_id ||
+        (b as any).approved_revision_id ||
+        (b as any).approvedRevisionId ||
         existing?.currentRevisionId ||
-        existing?.current_revision_id;
+        existing?.current_revision_id ||
+        (b as any).current_revision_id ||
+        (b as any).currentRevisionId;
 
       if (!revId) {
         toast.error("Revisão aprovada não localizada.");
