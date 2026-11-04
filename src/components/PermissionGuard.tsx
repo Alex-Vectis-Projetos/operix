@@ -3,6 +3,9 @@ import { useLocation } from "react-router-dom";
 import { Navigate } from "react-router-dom";
 import { Loader2, ShieldOff } from "lucide-react";
 import { useCan } from "@/hooks/usePermission";
+import { useAuth } from "@/hooks/useAuth";
+import { useRole } from "@/hooks/useRole";
+import { useWorkspaceOptional } from "@/hooks/useWorkspace";
 import { useLanguage } from "@/hooks/useLanguage";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -59,7 +62,7 @@ function PermissionLoadingSkeleton({ pathname }: { pathname: string }) {
  * Route/page guard — uses the SINGLE source-of-truth `can()` resolver.
  * No role checks. No fallback to legacy logic.
  *
- * Resilience: a 6s watchdog forces render-through if permissions never
+ * Resilience: a 10s watchdog forces render-through if permissions never
  * resolve, so backend slowness can never deadlock the app shell.
  */
 export function PermissionGuard({
@@ -69,25 +72,29 @@ export function PermissionGuard({
   redirectTo = "/",
 }: PermissionGuardProps) {
   const { can, isLoading } = useCan();
+  const { user, loading: authLoading } = useAuth();
+  const { isLoading: roleLoading } = useRole();
+  const workspace = useWorkspaceOptional();
+  const isWorkspaceLoading = workspace?.isLoading ?? false;
   const { t } = useLanguage();
   const location = useLocation();
   const [module, action] = permission.split(".");
 
+  const isGuardedLoading = isLoading || authLoading || !user || roleLoading || isWorkspaceLoading;
+
   const [timedOut, setTimedOut] = useState(false);
   useEffect(() => {
-    if (!isLoading) {
+    if (!isGuardedLoading) {
       setTimedOut(false);
       return;
     }
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       setTimedOut(true);
     }, 10000);
-    return () => clearTimeout(t);
-  }, [isLoading]);
+    return () => clearTimeout(timer);
+  }, [isGuardedLoading]);
 
-
-
-  if (isLoading && !timedOut) {
+  if (isGuardedLoading && !timedOut) {
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">

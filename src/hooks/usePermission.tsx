@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { apiRequest } from "@/lib/api";
 import { RealtimeHub } from "@/lib/realtime/RealtimeHub";
@@ -6,7 +6,6 @@ import { useAuth } from "./useAuth";
 import { useRole } from "./useRole";
 import { useImpersonation } from "./useImpersonation";
 import { useWorkspaceOptional } from "./useWorkspace";
-
 
 /**
  * Permission key format: "module.action"
@@ -33,15 +32,17 @@ type Source = "admin" | "role" | "default-deny";
 type Entry = { allowed: boolean; scope: PermissionScope | null; source: Source };
 
 function useMyPermissionsMap() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { dbRole, isAdmin, isLoading: roleLoading } = useRole();
   const { effectiveUserId, isImpersonating } = useImpersonation();
   const workspace = useWorkspaceOptional();
   const qc = useQueryClient();
+
   // When impersonating, evaluate permissions for the target user so the UI
   // matches what they would see. isAdmin already reflects the impersonated role.
   const permUserId = isImpersonating ? effectiveUserId : user?.id;
   const workspaceId = workspace?.workspaceId ?? null;
+  const isWorkspaceLoading = workspace?.isLoading ?? false;
 
   useEffect(() => {
     if (!permUserId) {
@@ -55,13 +56,12 @@ function useMyPermissionsMap() {
     };
   }, [permUserId, qc]);
 
-
   return useQuery({
     queryKey: [...PERMS_QUERY_KEY, permUserId, dbRole, isImpersonating, workspaceId],
-    enabled: !!permUserId && !roleLoading,
+    enabled: !!permUserId && !authLoading && !roleLoading && !isWorkspaceLoading,
     staleTime: 30_000,
     retry: 0,
-    placeholderData: (previousData) => previousData ?? { admin: false, map: {} },
+    placeholderData: keepPreviousData,
     queryFn: async (): Promise<{ admin: boolean; map: Record<string, Entry> }> => {
       if (!permUserId) return { admin: false, map: {} };
       if (isAdmin) return { admin: true, map: {} };
@@ -97,11 +97,15 @@ export function useInvalidatePermissions() {
 
 export function usePermission(key: string): { allowed: boolean; isLoading: boolean } {
   const { isAdmin, isLoading: roleLoading } = useRole();
-  const { data, isLoading } = useMyPermissionsMap();
+  const { user, loading: authLoading } = useAuth();
+  const workspace = useWorkspaceOptional();
+  const isWorkspaceLoading = workspace?.isLoading ?? false;
+  const { data, isLoading, isPending } = useMyPermissionsMap();
 
-  if (roleLoading) return { allowed: false, isLoading: true };
   if (isAdmin) return { allowed: true, isLoading: false };
-  if (isLoading || !data) return { allowed: false, isLoading: true };
+  if (authLoading || !user || roleLoading || isWorkspaceLoading || isPending || (isLoading && !data) || !data) {
+    return { allowed: false, isLoading: true };
+  }
   if (data.admin) return { allowed: true, isLoading: false };
 
   return { allowed: data.map[key]?.allowed === true, isLoading: false };
@@ -110,14 +114,18 @@ export function usePermission(key: string): { allowed: boolean; isLoading: boole
 /** Bulk check: returns true only if ALL keys are allowed. */
 export function usePermissions(keys: string[]): { allowed: boolean; isLoading: boolean; map: Record<string, boolean> } {
   const { isAdmin, isLoading: roleLoading } = useRole();
-  const { data, isLoading } = useMyPermissionsMap();
+  const { user, loading: authLoading } = useAuth();
+  const workspace = useWorkspaceOptional();
+  const isWorkspaceLoading = workspace?.isLoading ?? false;
+  const { data, isLoading, isPending } = useMyPermissionsMap();
 
-  if (roleLoading) return { allowed: false, isLoading: true, map: {} };
   if (isAdmin) {
     const map = Object.fromEntries(keys.map((k) => [k, true]));
     return { allowed: true, isLoading: false, map };
   }
-  if (isLoading || !data) return { allowed: false, isLoading: true, map: {} };
+  if (authLoading || !user || roleLoading || isWorkspaceLoading || isPending || (isLoading && !data) || !data) {
+    return { allowed: false, isLoading: true, map: {} };
+  }
   if (data.admin) {
     const map = Object.fromEntries(keys.map((k) => [k, true]));
     return { allowed: true, isLoading: false, map };
@@ -141,7 +149,17 @@ export function useCan(): {
   isLoading: boolean;
 } {
   const { isAdmin, isLoading: roleLoading } = useRole();
-  const { data, isLoading } = useMyPermissionsMap();
+  const { user, loading: authLoading } = useAuth();
+  const workspace = useWorkspaceOptional();
+  const isWorkspaceLoading = workspace?.isLoading ?? false;
+  const { data, isLoading, isPending } = useMyPermissionsMap();
+
+  const isResolving =
+    authLoading ||
+    !user ||
+    roleLoading ||
+    isWorkspaceLoading ||
+    (!isAdmin && (isPending || (isLoading && !data) || !data));
 
   const can = (module: string, action: string): PermissionResult => {
     if (isAdmin) return { allowed: true, scope: "all" };
@@ -152,8 +170,5 @@ export function useCan(): {
     return { allowed: true, scope: entry.scope ?? "all" };
   };
 
-  // Loading while role is still resolving OR perms map is fetching (unless admin shortcut)
-  const { user, loading: authLoading } = useAuth();
-  const loading = authLoading || (!user && authLoading) || roleLoading || (isLoading && !isAdmin);
-  return { can, isLoading: loading };
+  return { can, isLoading: isResolving };
 }

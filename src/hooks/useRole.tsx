@@ -1,5 +1,5 @@
 import { createContext, useContext, ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/api";
 import { useAuth } from "./useAuth";
 import { useImpersonation } from "./useImpersonation";
@@ -44,8 +44,9 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   // (sidebar, guards, dashboards) reflects what they see.
   const lookupId = isImpersonating ? effectiveUserId : user?.id;
   const workspaceId = workspace?.workspaceId ?? null;
+  const isWorkspaceLoading = workspace?.isLoading ?? false;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isPending } = useQuery({
     queryKey: ["my-role", lookupId, isImpersonating, workspaceId],
     enabled: !!lookupId,
     retry: 0,
@@ -60,7 +61,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
         is_workspace_owner?: boolean;
       }>(`/account/role${suffix}`, { timeoutMs: 8000 });
     },
-    placeholderData: (previousData) => previousData ?? { role: null, is_workspace_owner: false },
+    placeholderData: keepPreviousData,
   });
 
   // Platform owner safety net — the master account ALWAYS resolves as admin,
@@ -75,9 +76,13 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const role = effectiveDbRole ? (ROLE_MAP[effectiveDbRole] as DisplayRole) : null;
   const isAdmin = effectiveDbRole === "owner" || effectiveDbRole === "admin";
 
+  const isResolving = isOwnerEmail
+    ? false
+    : (authLoading || !user || isWorkspaceLoading || (!!lookupId && (isPending || (isLoading && !data))));
+
   return (
     <RoleCtx.Provider
-      value={{ dbRole: effectiveDbRole, role, isAdmin, isOwner, isLoading: isOwnerEmail ? false : (authLoading || (!user && authLoading) || (!!lookupId && isLoading)) }}
+      value={{ dbRole: effectiveDbRole, role, isAdmin, isOwner, isLoading: isResolving }}
     >
       {children}
     </RoleCtx.Provider>
