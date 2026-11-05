@@ -1319,11 +1319,19 @@ budgetsRouter.get("/:id/pdf", async (req: Request, res: Response, next: NextFunc
       }),
     ]);
 
+    let activeInspection = inspection;
+    if (!activeInspection && budget.productionOrder?.id) {
+      activeInspection = await prisma.vehicleInspection.findFirst({
+        where: { productionOrderId: budget.productionOrder.id, workspaceId },
+        include: { damagePoints: true },
+      });
+    }
+
     const dossierSnap = (rev?.dossierSnapshot as any) || {};
     const lang = (typeof req.query.lang === "string" && req.query.lang.trim())
       ? req.query.lang.trim()
       : (dossierSnap.pdfLang || dossierSnap.lang || (req.headers["accept-language"]?.split(",")[0]?.split(";")[0]?.trim()) || "pt");
-    const pdfBuffer = await generateBudgetPdfBuffer(budget, rev, workspace, inspection, lang);
+    const pdfBuffer = await generateBudgetPdfBuffer(budget, rev, workspace, activeInspection, lang);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${budget.code}.pdf"`);

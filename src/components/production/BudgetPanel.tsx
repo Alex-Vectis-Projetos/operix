@@ -28,6 +28,7 @@ import {
   ArrowRightLeft,
   AlertTriangle,
   FileDown,
+  Download,
   Eye,
   Pencil,
   Trash2,
@@ -643,6 +644,15 @@ export function BudgetPanel({ onOpenOrder }: Props) {
                             onClick={() => openPreview(b)}
                           >
                             <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            title={langDisplay === "fr" ? "Télécharger PDF" : "Baixar PDF"}
+                            onClick={() => downloadBudgetFile(b)}
+                          >
+                            <Download className="h-4 w-4" />
                           </Button>
                           <Button
                             size="icon"

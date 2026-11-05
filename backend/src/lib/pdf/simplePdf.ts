@@ -128,20 +128,30 @@ export function parseJpegDimensions(buf: Buffer): { width: number; height: numbe
   return null;
 }
 
-export async function loadWorkspaceLogo(logoUrl: string | null | undefined): Promise<PdfImageObject | null> {
-  if (!logoUrl || typeof logoUrl !== "string") return null;
-  const trimmed = logoUrl.trim();
+export async function loadPdfImage(imgRef: string | null | undefined): Promise<PdfImageObject | null> {
+  if (!imgRef || typeof imgRef !== "string") return null;
+  const trimmed = imgRef.trim();
   if (!trimmed) return null;
 
   try {
     let buf: Buffer | null = null;
 
-    // 1. MinIO retrieval if stored in public logos bucket
-    if (trimmed.includes("/logos/")) {
-      const key = decodeURIComponent(trimmed.split(/\/logos\//)[1]);
+    // 1. Data URL (Base64 JPEG do Canvas ou Upload)
+    if (trimmed.startsWith("data:")) {
+      const parts = trimmed.split(",");
+      if (parts.length > 1) {
+        buf = Buffer.from(parts[1], "base64");
+      }
+    }
+
+    // 2. MinIO / S3 retrieval
+    if (!buf && (trimmed.includes("/logos/") || trimmed.includes("/production-photos/"))) {
+      const bucket = trimmed.includes("/logos/") ? "logos" : "production-photos";
+      const marker = trimmed.includes("/logos/") ? "/logos/" : "/production-photos/";
+      const key = decodeURIComponent(trimmed.split(marker)[1]);
       if (key) {
         try {
-          const res = await s3.send(new GetObjectCommand({ Bucket: "logos", Key: key }));
+          const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
           if (res.Body) {
             const chunks: Buffer[] = [];
             for await (const chunk of res.Body as any) {
@@ -155,17 +165,9 @@ export async function loadWorkspaceLogo(logoUrl: string | null | undefined): Pro
       }
     }
 
-    // 2. Data URL
-    if (!buf && trimmed.startsWith("data:")) {
-      const parts = trimmed.split(",");
-      if (parts.length > 1) {
-        buf = Buffer.from(parts[1], "base64");
-      }
-    }
-
     // 3. HTTP / HTTPS fallback
     if (!buf && (trimmed.startsWith("http://") || trimmed.startsWith("https://"))) {
-      const resp = await fetch(trimmed, { signal: AbortSignal.timeout(3000) });
+      const resp = await fetch(trimmed, { signal: AbortSignal.timeout(4000) });
       if (resp.ok) {
         buf = Buffer.from(await resp.arrayBuffer());
       }
@@ -182,6 +184,10 @@ export async function loadWorkspaceLogo(logoUrl: string | null | undefined): Pro
   } catch {
     return null;
   }
+}
+
+export async function loadWorkspaceLogo(logoUrl: string | null | undefined): Promise<PdfImageObject | null> {
+  return loadPdfImage(logoUrl);
 }
 
 function clipCell(text: string | null | undefined, maxChars: number): string {
@@ -228,7 +234,16 @@ function splitTwoLines(
   return { line1, line2 };
 }
 
-function assemblePdf(contentStream: string, image?: PdfImageObject | null): Buffer {
+export interface PdfPageDef {
+  contentStream: string;
+  images?: Record<string, PdfImageObject>;
+}
+
+export function assembleMultiPagePdf(pages: PdfPageDef[]): Buffer {
+  if (!pages || pages.length === 0) {
+    pages = [{ contentStream: "" }];
+  }
+
   const pageWidth = 595.28;
   const pageHeight = 841.89;
 
@@ -242,36 +257,78 @@ function assemblePdf(contentStream: string, image?: PdfImageObject | null): Buff
     offset += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk, "utf8");
   };
 
+  let nextObjId = 1;
+  const catalogId = nextObjId++; // 1
+  const pagesRootId = nextObjId++; // 2
+  const fontF1Id = nextObjId++; // 3
+  const fontF2Id = nextObjId++; // 4
+
+  const pageIds: number[] = [];
+  const contentIds: number[] = [];
+  const pageImagesMap: Array<Array<{ name: string; objId: number; img: PdfImageObject }>> = [];
+
+  for (let i = 0; i < pages.length; i++) {
+    pageIds.push(nextObjId++);
+    contentIds.push(nextObjId++);
+    const imgs: Array<{ name: string; objId: number; img: PdfImageObject }> = [];
+    if (pages[i].images) {
+      for (const [name, imgObj] of Object.entries(pages[i].images!)) {
+        if (imgObj && imgObj.buffer) {
+          const imgId = nextObjId++;
+          imgs.push({ name, objId: imgId, img: imgObj });
+        }
+      }
+    }
+    pageImagesMap.push(imgs);
+  }
+
+  const numObjects = nextObjId - 1;
+
   push("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
-  push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n", 1);
-  push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n", 2);
+  push(`${catalogId} 0 obj\n<< /Type /Catalog /Pages ${pagesRootId} 0 R >>\nendobj\n`, catalogId);
 
-  const xobjectRes = image ? "/XObject << /Im1 7 0 R >>" : "";
+  const kidsStr = pageIds.map((id) => `${id} 0 R`).join(" ");
+  push(`${pagesRootId} 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${pages.length} >>\nendobj\n`, pagesRootId);
+
   push(
-    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> ${xobjectRes} >> /Contents 6 0 R >>\nendobj\n`,
-    3,
+    `${fontF1Id} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n`,
+    fontF1Id,
   );
   push(
-    "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n",
-    4,
-  );
-  push(
-    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n",
-    5,
-  );
-  push(
-    `6 0 obj\n<< /Length ${Buffer.byteLength(contentStream, "utf8")} >>\nstream\n${contentStream}\nendstream\nendobj\n`,
-    6,
+    `${fontF2Id} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n`,
+    fontF2Id,
   );
 
-  let numObjects = 6;
-  if (image) {
-    numObjects = 7;
-    const header = `7 0 obj\n<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.buffer.length} >>\nstream\n`;
-    const footer = "\nendstream\nendobj\n";
-    push(header, 7);
-    push(image.buffer);
-    push(footer);
+  for (let i = 0; i < pages.length; i++) {
+    const pageId = pageIds[i];
+    const contentId = contentIds[i];
+    const imgs = pageImagesMap[i];
+
+    let xobjectRes = "";
+    if (imgs.length > 0) {
+      const xobjEntries = imgs.map((item) => `/${item.name} ${item.objId} 0 R`).join(" ");
+      xobjectRes = `/XObject << ${xobjEntries} >>`;
+    }
+
+    push(
+      `${pageId} 0 obj\n<< /Type /Page /Parent ${pagesRootId} 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${fontF1Id} 0 R /F2 ${fontF2Id} 0 R >> ${xobjectRes} >> /Contents ${contentId} 0 R >>\nendobj\n`,
+      pageId,
+    );
+
+    const streamStr = pages[i].contentStream;
+    push(
+      `${contentId} 0 obj\n<< /Length ${Buffer.byteLength(streamStr, "utf8")} >>\nstream\n${streamStr}\nendstream\nendobj\n`,
+      contentId,
+    );
+
+    for (const item of imgs) {
+      const img = item.img;
+      const header = `${item.objId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${img.buffer.length} >>\nstream\n`;
+      const footer = "\nendstream\nendobj\n";
+      push(header, item.objId);
+      push(img.buffer);
+      push(footer);
+    }
   }
 
   const xrefOffset = offset;
@@ -279,11 +336,20 @@ function assemblePdf(contentStream: string, image?: PdfImageObject | null): Buff
   for (let i = 1; i <= numObjects; i += 1) {
     xref += String(objOffsets[i]).padStart(10, "0") + " 00000 n \n";
   }
-  const trailer = `trailer\n<< /Size ${numObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  const trailer = `trailer\n<< /Size ${numObjects + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
   push(xref);
   push(trailer);
 
   return Buffer.concat(parts.map((p) => (Buffer.isBuffer(p) ? p : Buffer.from(p, "utf8"))));
+}
+
+function assemblePdf(contentStream: string, image?: PdfImageObject | null): Buffer {
+  return assembleMultiPagePdf([
+    {
+      contentStream,
+      images: image ? { Im1: image } : undefined,
+    },
+  ]);
 }
 
 /**
@@ -1310,14 +1376,303 @@ const BACKEND_PROTOCOLE_ZONES = [
   },
 ];
 
-export function buildProtocoleDeReparationPdf(
+const PART_NAME_DICT: Record<string, { pt: string; fr: string }> = {
+  hood: { pt: "Capô", fr: "Capot" },
+  roof: { pt: "Teto", fr: "Pavillon" },
+  trunk: { pt: "Tampa Traseira", fr: "Hayon / Coffre" },
+  fender_fl: { pt: "Para-lama Diant. Esq.", fr: "Aile avant gauche" },
+  fender_fr: { pt: "Para-lama Diant. Dir.", fr: "Aile avant droite" },
+  fender_rl: { pt: "Lateral Tras. Esq.", fr: "Aile arrière gauche" },
+  fender_rr: { pt: "Lateral Tras. Dir.", fr: "Aile arrière droite" },
+  quarter_rl: { pt: "Lateral Tras. Esq.", fr: "Aile arrière gauche" },
+  quarter_rr: { pt: "Lateral Tras. Dir.", fr: "Aile arrière droite" },
+  door_fl: { pt: "Porta Diant. Esq.", fr: "Porte avant gauche" },
+  door_fr: { pt: "Porta Diant. Dir.", fr: "Porte avant droite" },
+  door_rl: { pt: "Porta Tras. Esq.", fr: "Porte arrière gauche" },
+  door_rr: { pt: "Porta Tras. Dir.", fr: "Porte arrière droite" },
+  bumper_f: { pt: "Para-choque Dianteiro", fr: "Pare-chocs avant" },
+  bumper_r: { pt: "Para-choque Traseiro", fr: "Pare-chocs arrière" },
+  mirror_l: { pt: "Retrovisor Esq.", fr: "Rétroviseur gauche" },
+  mirror_r: { pt: "Retrovisor Dir.", fr: "Rétroviseur droit" },
+  headlight_l: { pt: "Farol Dianteiro Esq.", fr: "Phare avant gauche" },
+  headlight_r: { pt: "Farol Dianteiro Dir.", fr: "Phare avant droit" },
+  taillight_l: { pt: "Lanterna Traseira Esq.", fr: "Feu arrière gauche" },
+  taillight_r: { pt: "Lanterna Traseira Dir.", fr: "Feu arrière droit" },
+  rocker_l: { pt: "Soleira / Caixa de Ar Esq.", fr: "Bas de caisse gauche" },
+  rocker_r: { pt: "Soleira / Caixa de Ar Dir.", fr: "Bas de caisse droit" },
+  pillar_a_l: { pt: "Coluna A Esq.", fr: "Montant A gauche" },
+  pillar_a_r: { pt: "Coluna A Dir.", fr: "Montant A droit" },
+  pillar_b_l: { pt: "Coluna B Esq.", fr: "Montant B gauche" },
+  pillar_b_r: { pt: "Coluna B Dir.", fr: "Montant B droit" },
+  pillar_c_l: { pt: "Coluna C Esq.", fr: "Montant C gauche" },
+  pillar_c_r: { pt: "Coluna C Dir.", fr: "Montant C droit" },
+};
+
+const DAMAGE_TYPE_DICT: Record<string, { pt: string; fr: string }> = {
+  dent: { pt: "Mossa PDR (Martelinho)", fr: "Bosse DSP" },
+  scratch: { pt: "Risco / Arranhão", fr: "Rayure / Éraflure" },
+  replace: { pt: "Substituição da Peça", fr: "Remplacement pièce" },
+  crack: { pt: "Fissura / Trinca", fr: "Fissure / Cassure" },
+  paint_damage: { pt: "Dano na Pintura", fr: "Dégât peinture" },
+};
+
+function formatPartLabel(code: string | null | undefined, isFr: boolean): string {
+  if (!code) return isFr ? "Pièce générale" : "Peça geral";
+  const entry = PART_NAME_DICT[code.toLowerCase()];
+  if (entry) return isFr ? entry.fr : entry.pt;
+  return code.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatDamageTypeLabel(type: string | null | undefined, isFr: boolean): string {
+  if (!type) return isFr ? "Avarie" : "Avaria";
+  const entry = DAMAGE_TYPE_DICT[type.toLowerCase()];
+  if (entry) return isFr ? entry.fr : entry.pt;
+  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export async function buildInspectionAnnexPages(
+  budget: any,
+  rev: any,
+  workspace?: any,
+  inspection?: any,
+  langRaw: string = "pt",
+): Promise<PdfPageDef[]> {
+  const rawDamagePoints: any[] = Array.isArray(inspection?.damagePoints) ? inspection.damagePoints : [];
+  if (rawDamagePoints.length === 0) return [];
+
+  const lang = normalizePdfLang(langRaw);
+  const isFr = lang === "fr";
+
+  const brand = workspace?.brandConfig || {};
+  const companyName = brand.legalName || brand.name || workspace?.billingProfile?.companyName || workspace?.billingProfile?.legalName || workspace?.name || "Operix Automotive";
+  const legalAddress = brand.address || workspace?.billingProfile?.billingAddress || "388 Rue Louis Joseph Gay Lussac";
+  const postalCity = [brand.postalCode || workspace?.billingProfile?.postalCode || "26100", brand.city || workspace?.billingProfile?.city || "Romans sur Isere"].filter(Boolean).join(" ");
+  const companyPhone = brand.phone || "04 87 20 01 47";
+  const tollFree = brand.tollFree || companyPhone;
+  const companyEmail = brand.email || workspace?.billingProfile?.billingEmail || "info@pdr-team.fr";
+  const companyWebsite = brand.website || "www.pdr-team.fr";
+
+  const vehiclePlate = String(budget.vehiclePlate || (isFr ? "SANS IMMAT" : "SEM PLACA")).toUpperCase();
+
+  // Carrega todas as imagens das avarias em paralelo
+  const loadedPoints = await Promise.all(
+    rawDamagePoints.map(async (dp, idx) => {
+      let img: PdfImageObject | null = null;
+      if (dp.photoStoragePath) {
+        try {
+          img = await loadPdfImage(dp.photoStoragePath);
+        } catch {
+          // ignore
+        }
+      }
+      return {
+        dp,
+        img,
+        index: idx + 1,
+      };
+    })
+  );
+
+  const countPreExisting = rawDamagePoints.filter((p) => p.contracted === false).length;
+  const countContracted = rawDamagePoints.length - countPreExisting;
+
+  // Pagina em blocos de até 6 avarias por página
+  const chunks: Array<typeof loadedPoints> = [];
+  for (let i = 0; i < loadedPoints.length; i += 6) {
+    chunks.push(loadedPoints.slice(i, i + 6));
+  }
+
+  const pages: PdfPageDef[] = [];
+
+  for (let pIdx = 0; pIdx < chunks.length; pIdx++) {
+    const chunk = chunks[pIdx];
+    const isLastPage = pIdx === chunks.length - 1;
+    const content: string[] = [];
+    const images: Record<string, PdfImageObject> = {};
+
+    // 1. Header da Página de Anexo (Y: 786 -> 814)
+    content.push("0.1 0.12 0.16 rg");
+    content.push("40 786 515 28 re f");
+
+    const headerTitle = chunks.length > 1
+      ? (isFr ? `ANNEXE 1 — CONSTAT PRÉALABLE & ÉVIDENCES (${pIdx + 1}/${chunks.length})` : `ANEXO 1 — CHECKLIST DE ENTRADA & VISTORIA (${pIdx + 1}/${chunks.length})`)
+      : (isFr ? "ANNEXE 1 — CONSTAT PRÉALABLE & ÉVIDENCES PHOTOGRAPHIQUES" : "ANEXO 1 — CHECKLIST DE ENTRADA & VISTORIA CAUTELAR");
+
+    content.push("BT");
+    content.push("1 1 1 rg");
+    content.push("/F2 10 Tf");
+    content.push("48 796 Td");
+    content.push(`(${pdfEscapeWinAnsi(headerTitle)}) Tj`);
+    content.push("ET");
+
+    // Badge com Placa no canto superior direito
+    const plateText = vehiclePlate;
+    const plateW = Math.max(90, plateText.length * 6 + 18);
+    const badgeX = 550 - plateW;
+    content.push("0.98 0.94 0.94 rg");
+    content.push(`${badgeX} 790 ${plateW} 20 re f`);
+    content.push("0.85 0.15 0.15 RG 1 w");
+    content.push(`${badgeX} 790 ${plateW} 20 re s`);
+    content.push("BT 0.75 0.1 0.1 rg /F2 8 Tf " + (badgeX + 8) + " 796 Td (" + pdfEscapeWinAnsi(plateText) + ") Tj ET");
+
+    // 2. Banner Explicativo de Engenharia de Vistoria (Y: 746 -> 778)
+    content.push("0.96 0.97 0.98 rg 40 746 515 32 re f");
+    content.push("0.8 0.83 0.88 RG 0.5 w 40 746 515 32 re s");
+
+    const lineExp1 = isFr
+      ? "Relevé contradictoire et photographique des dommages constaté lors de la réception du véhicule à l'atelier."
+      : "Vistoria cautelar e registro fotográfico de conformidade na entrada do veículo na oficina.";
+    const lineExp2 = isFr
+      ? "Les dommages identifiés comme préexistants protègent l'atelier contre tout litige ultérieur (aucun frais de réparation appliqué)."
+      : "Danos pré-existentes resguardam a oficina contra responsabilidade civil e não geram cobrança no orçamento.";
+
+    content.push(`BT 0.2 0.25 0.3 rg /F2 6.5 Tf 48 764 Td (${pdfEscapeWinAnsi(lineExp1)}) Tj ET`);
+    content.push(`BT 0.4 0.45 0.5 rg /F1 6 Tf 48 753 Td (${pdfEscapeWinAnsi(lineExp2)}) Tj ET`);
+
+    // 3. Grid de Cards (2 colunas x até 3 linhas)
+    chunk.forEach((item, idxInChunk) => {
+      const col = idxInChunk % 2;
+      const row = Math.floor(idxInChunk / 2);
+      const cardX = col === 0 ? 40 : 305;
+      const cardY = 600 - row * 140;
+      const cardW = 250;
+      const cardH = 130;
+
+      const isPreExisting = item.dp.contracted === false;
+      const partName = formatPartLabel(item.dp.carPartCode, isFr);
+      const damageType = formatDamageTypeLabel(item.dp.damageType, isFr);
+      const dentCount = Number(item.dp.dentCount) || 1;
+
+      // Moldura do Card
+      content.push("0.98 0.98 0.99 rg " + cardX + " " + cardY + " " + cardW + " " + cardH + " re f");
+      content.push("0.8 0.83 0.88 RG 0.5 w " + cardX + " " + cardY + " " + cardW + " " + cardH + " re s");
+
+      // Barra de cabeçalho do card
+      const hdrBg = isPreExisting ? "1 0.95 0.90 rg" : "0.92 0.96 0.98 rg";
+      content.push(hdrBg + " " + cardX + " " + (cardY + cardH - 18) + " " + cardW + " 18 re f");
+      content.push("BT 0.1 0.12 0.16 rg /F2 7 Tf " + (cardX + 6) + " " + (cardY + cardH - 12) + " Td (#" + item.index + " — " + pdfEscapeWinAnsi(clipCell(partName, 20)) + ") Tj ET");
+
+      // Badge no canto direito da barra do card
+      const badgeText = isPreExisting
+        ? (isFr ? "[PRÉEXISTANT]" : "[PRÉ-EXISTENTE]")
+        : (isFr ? "[FACTURÉ / DSP]" : "[ORÇADO]");
+      const badgeColor = isPreExisting ? "0.75 0.35 0 rg" : "0.05 0.5 0.5 rg";
+      content.push("BT " + badgeColor + " /F2 5.5 Tf " + (cardX + cardW - 75) + " " + (cardY + cardH - 12) + " Td (" + badgeText + ") Tj ET");
+
+      // Se possui foto anexada
+      if (item.img) {
+        const imgKey = "ImD_" + item.index;
+        images[imgKey] = item.img;
+
+        const maxW = 90;
+        const maxH = 80;
+        const aspect = (item.img.width || 1) / (item.img.height || 1);
+        let renderW = maxW;
+        let renderH = maxH;
+        if (renderW / aspect > maxH) {
+          renderW = Math.round(maxH * aspect);
+          renderH = maxH;
+        } else {
+          renderH = Math.round(renderW / aspect);
+        }
+        const imgX = cardX + 8 + (maxW - renderW) / 2;
+        const imgY = cardY + 20 + (maxH - renderH) / 2;
+
+        content.push("q");
+        content.push(`${renderW} 0 0 ${renderH} ${imgX.toFixed(1)} ${imgY.toFixed(1)} cm`);
+        content.push("/" + imgKey + " Do");
+        content.push("Q");
+
+        // Borda suave em volta da foto
+        content.push("0.75 0.78 0.82 RG 0.5 w");
+        content.push((cardX + 8) + " " + (cardY + 20) + " " + maxW + " " + maxH + " re s");
+
+        // Legenda abaixo da foto
+        content.push("BT 0.4 0.45 0.5 rg /F1 5 Tf " + (cardX + 16) + " " + (cardY + 9) + " Td (" + pdfEscapeWinAnsi(isFr ? "Photo de l'avarie" : "Foto da avaria") + ") Tj ET");
+      }
+
+      const textX = item.img ? (cardX + 104) : (cardX + 10);
+      content.push("BT 0.2 0.25 0.3 rg /F2 6.5 Tf " + textX + " " + (cardY + 92) + " Td (" + pdfEscapeWinAnsi((isFr ? "Avarie: " : "Avaria: ") + damageType) + ") Tj ET");
+      content.push("BT 0.35 0.4 0.45 rg /F1 6 Tf " + textX + " " + (cardY + 79) + " Td (" + pdfEscapeWinAnsi((isFr ? "Quantité: " : "Quantidade: ") + dentCount + (dentCount === 1 ? (isFr ? " point" : " ponto") : (isFr ? " points" : " pontos"))) + ") Tj ET");
+
+      const statusDesc = isPreExisting
+        ? (isFr ? "Constat (Sans facturation)" : "Checklist (Sem cobrança)")
+        : (isFr ? "Prestation à chiffrer" : "Serviço orçado a reparar");
+      content.push("BT " + badgeColor + " /F2 6 Tf " + textX + " " + (cardY + 66) + " Td (" + pdfEscapeWinAnsi(statusDesc) + ") Tj ET");
+
+      if (item.dp.notes) {
+        const noteSplit = splitTwoLines(item.dp.notes, 28, 28);
+        content.push("BT 0.4 0.45 0.5 rg /F1 5.5 Tf " + textX + " " + (cardY + 50) + " Td (Obs.: " + pdfEscapeWinAnsi(noteSplit.line1) + ") Tj ET");
+        if (noteSplit.line2) {
+          content.push("BT 0.4 0.45 0.5 rg /F1 5.5 Tf " + textX + " " + (cardY + 41) + " Td (" + pdfEscapeWinAnsi(noteSplit.line2) + ") Tj ET");
+        }
+      }
+    });
+
+    // 4. Rodapé / Box de Conformidade e Síntese (Apenas na última página de anexo)
+    if (isLastPage) {
+      content.push("0.97 0.98 0.99 rg 40 70 515 95 re f");
+      content.push("0.75 0.78 0.82 RG 0.5 w 40 70 515 95 re s");
+
+      // Faixa título da síntese
+      content.push("0.22 0.25 0.32 rg 40 155 515 10 re f");
+      const titleSynth = isFr ? "RÈGLES DE CONFORMITÉ & PROTECTION PERICIALE" : "TERMO DE CONFORMIDADE & RESGUARDO PERICIAL";
+      content.push("BT 1 1 1 rg /F2 6 Tf 46 157 Td (" + pdfEscapeWinAnsi(titleSynth) + ") Tj ET");
+
+      const statLine = isFr
+        ? `Total d'avaries inspectées: ${rawDamagePoints.length} | Préexistantes (Constat): ${countPreExisting} | Facturées (Devis): ${countContracted}`
+        : `Total de avarias vistoriadas: ${rawDamagePoints.length} | Pré-existentes (Checklist): ${countPreExisting} | Orçadas (Reparação): ${countContracted}`;
+      content.push("BT 0.2 0.25 0.3 rg /F2 6.5 Tf 48 141 Td (" + pdfEscapeWinAnsi(statLine) + ") Tj ET");
+
+      const legLine1 = isFr
+        ? "Le client et l'atelier attestent de l'exactitude des constatations visuelles et photographiques ci-dessus dressées contradictoirement."
+        : "O cliente e a oficina atestam a exatidão das constatações visuais e fotográficas registradas na recepção do veículo.";
+      const legLine2 = isFr
+        ? "Les avaries classées comme préexistantes font l'objet d'un accord contradictoire dégageant l'atelier de toute responsabilité antérieure."
+        : "As avarias classificadas como pré-existentes integram o laudo contraditório e isentam a oficina de vícios anteriores.";
+      content.push("BT 0.35 0.4 0.45 rg /F1 5.5 Tf 48 128 Td (" + pdfEscapeWinAnsi(legLine1) + ") Tj ET");
+      content.push("BT 0.35 0.4 0.45 rg /F1 5.5 Tf 48 118 Td (" + pdfEscapeWinAnsi(legLine2) + ") Tj ET");
+
+      // Status de assinatura / validação
+      const sig = rev?.signature;
+      if (sig && (sig.signed || sig.signedAt)) {
+        const signer = sig.signerName || budget.clientName || "Client";
+        const dateStr = (sig.signedAt || "").slice(0, 10);
+        const sigTag = isFr ? `[Constat validé et signé par: ${signer} le ${dateStr}]` : `[Vistoria confirmada e assinada por: ${signer} em ${dateStr}]`;
+        content.push("BT 0.08 0.55 0.25 rg /F2 6 Tf 48 98 Td (" + pdfEscapeWinAnsi(sigTag) + ") Tj ET");
+      } else {
+        const pendTag = isFr ? "[Constat contradictoire d'entrée horodaté — Système Operix]" : "[Checklist de entrada registrado no Sistema Operix]";
+        content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 48 98 Td (" + pdfEscapeWinAnsi(pendTag) + ") Tj ET");
+      }
+    }
+
+    // 5. Linha de Rodapé Institucional (Y: 45 -> 15)
+    content.push("0.1 0.12 0.16 RG 1 w");
+    content.push("40 45 m 555 45 l S");
+    content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 40 35 Td (" + pdfEscapeWinAnsi(companyName) + ") Tj ET");
+    content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 40 27 Td (" + pdfEscapeWinAnsi(legalAddress + " - " + postalCity) + ") Tj ET");
+    content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 230 35 Td (" + pdfEscapeWinAnsi("Tel: " + companyPhone + " | N' Vert: " + tollFree) + ") Tj ET");
+    content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 230 27 Td (" + pdfEscapeWinAnsi(companyEmail + " - " + companyWebsite) + ") Tj ET");
+    content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 475 35 Td (" + (isFr ? "Document émis le:" : "Emitido em:") + ") Tj ET");
+    content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 475 27 Td (" + pdfEscapeWinAnsi((new Date()).toISOString().slice(0, 10)) + ") Tj ET");
+
+    pages.push({
+      contentStream: content.join("\n"),
+      images,
+    });
+  }
+
+  return pages;
+}
+
+export async function buildProtocoleDeReparationPdf(
   budget: any,
   rev: any,
   workspace?: any,
   inspection?: any,
   logoImage?: PdfImageObject | null,
   langRaw: string = "pt",
-): Buffer {
+): Promise<Buffer> {
   const lang = normalizePdfLang(langRaw);
   const i18n = BACKEND_PROTOCOLE_I18N[lang] || BACKEND_PROTOCOLE_I18N.pt;
   const content: string[] = [];
@@ -1819,7 +2174,13 @@ export function buildProtocoleDeReparationPdf(
   content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 475 35 Td (Version du:) Tj ET");
   content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 475 27 Td (" + pdfEscapeWinAnsi((new Date()).toISOString().slice(0, 10)) + ") Tj ET");
 
-  return assemblePdf(content.join("\n"), logoImage);
+  const page1Def: PdfPageDef = {
+    contentStream: content.join("\n"),
+    images: logoImage ? { Im1: logoImage } : undefined,
+  };
+
+  const annexPages = await buildInspectionAnnexPages(budget, rev, workspace, inspection, langRaw);
+  return assembleMultiPagePdf([page1Def, ...annexPages]);
 }
 
 export async function generateBudgetPdfBuffer(
@@ -1841,7 +2202,7 @@ export async function generateBudgetPdfBuffer(
   if (isPdr) {
     const rawLogoUrl = workspace?.logoUrl || (workspace?.brandConfig as any)?.logoUrl;
     const logoImage = await loadWorkspaceLogo(rawLogoUrl);
-    return buildProtocoleDeReparationPdf(budget, rev, workspace, inspection, logoImage, langRaw);
+    return await buildProtocoleDeReparationPdf(budget, rev, workspace, inspection, logoImage, langRaw);
   }
 
   const clientSnap = (rev?.clientSnapshot as any) || {};
