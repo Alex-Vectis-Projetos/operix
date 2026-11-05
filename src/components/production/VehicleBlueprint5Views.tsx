@@ -121,6 +121,8 @@ export interface ValidatedPartSummary {
   estimatedAmount?: number;
   packageTotalAmount?: number;
   notes?: string;
+  contracted?: boolean;
+  isPreExisting?: boolean;
 }
 
 interface VehicleBlueprintProps {
@@ -589,8 +591,11 @@ export function VehicleBlueprint5Views({
     const partPoints = damagePoints.filter((p) => p.carPartCode === targetCode);
     if (partPoints.length === 0) return;
 
-    const totalCount = partPoints.reduce((acc, p) => acc + (Number(p.dentCount) || 1), 0);
-    const referencePoint = partPoints[0];
+    const contractedPoints = partPoints.filter((p) => p.contracted !== false);
+    const isPreExistingOnly = contractedPoints.length === 0;
+
+    const totalCount = (isPreExistingOnly ? partPoints : contractedPoints).reduce((acc, p) => acc + (Number(p.dentCount) || 1), 0);
+    const referencePoint = contractedPoints[0] || partPoints[0];
     const matCode = referencePoint.partMaterial || "steel";
     const matObj = PART_MATERIALS.find((m) => m.code === matCode) || PART_MATERIALS[0];
     const partObj = CAR_PARTS.find((p) => p.code === targetCode);
@@ -598,7 +603,7 @@ export function VehicleBlueprint5Views({
     const sizeObj = DENT_SIZES.find((s) => s.code === referencePoint.dentSize);
 
     const partPricingMode = referencePoint.pricingMode || "fixed";
-    const finalAmount = partPricingMode === "global" ? 0 : Number(referencePoint.estimatedAmount) || 0;
+    const finalAmount = isPreExistingOnly || partPricingMode === "global" ? 0 : Number(referencePoint.estimatedAmount) || 0;
 
     // Marca todos os pontos da peça como validados
     const nextPoints = damagePoints.map((p) =>
@@ -622,6 +627,8 @@ export function VehicleBlueprint5Views({
         estimatedAmount: finalAmount,
         packageTotalAmount: partPricingMode === "global" ? (Number(globalPackageAmount) || 0) : undefined,
         notes: referencePoint.notes || undefined,
+        contracted: !isPreExistingOnly,
+        isPreExisting: isPreExistingOnly,
       });
     }
   };
@@ -1451,16 +1458,25 @@ export function VehicleBlueprint5Views({
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <CheckCircle2 className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
                 <span>
-                  Ao validar, os dados desta peça são consolidados e vinculados automaticamente às tabelas financeiras de serviços/peças.
+                  {selectedPoint.contracted === false
+                    ? "Dano classificado como pré-existente (Checklist Entrada). Ao validar, registra a evidência na vistoria sem gerar cobrança de serviços."
+                    : "Ao validar, os dados desta peça são consolidados e vinculados automaticamente às tabelas financeiras de serviços/peças."}
                 </span>
               </div>
               <Button
                 type="button"
-                className="h-9 px-5 gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow shrink-0"
+                className={cn(
+                  "h-9 px-5 gap-2 text-white font-semibold shadow shrink-0",
+                  selectedPoint.contracted === false
+                    ? "bg-amber-600 hover:bg-amber-500"
+                    : "bg-emerald-600 hover:bg-emerald-500"
+                )}
                 onClick={() => handleValidatePiece()}
               >
                 <CheckCheck className="h-4 w-4" />
-                Validar Peça e Vincular ao Orçamento
+                {selectedPoint.contracted === false
+                  ? "Validar na Vistoria (Sem Cobrança)"
+                  : "Validar Peça e Vincular ao Orçamento"}
               </Button>
             </div>
           </div>

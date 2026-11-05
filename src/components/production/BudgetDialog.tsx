@@ -1355,6 +1355,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const [form, setForm] = useState<Budget>(() => emptyBudget());
   const lastLoadedIdRef = useRef<string | null>(null);
 
+
   const [saving, setSaving] = useState(false);
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState<Date | null>(null);
   const [hasRestoredDraft, setHasRestoredDraft] = useState(false);
@@ -1894,7 +1895,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
             }
           }
         }
-      } catch {}
+      } catch { }
       if (!restored) {
         setStep("choose_type");
         setShowBackToType(false);
@@ -1989,7 +1990,6 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
 
     return () => clearTimeout(timer);
   }, [form, inspectionPoints, step, open, isLocked, workspaceId]);
-
 
   const handleScanFilesSelected = async (files: File[]) => {
     if (isLocked) {
@@ -2483,14 +2483,24 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
         }
       >();
 
-      const hasGlobal = points.some((p) => p.pricingMode === "global");
+      const contractedPoints = points.filter((p) => p.contracted !== false);
+      const preExistingPartLabels = Array.from(new Set(
+        points
+          .filter((p) => p.contracted === false && !contractedPoints.some((cp) => (cp.carPartCode || "general") === (p.carPartCode || "general")))
+          .map((p) => {
+            const pCode = p.carPartCode || "general";
+            return CAR_PARTS.find((cp) => cp.code === pCode)?.label || pCode;
+          })
+      ));
+
+      const hasGlobal = contractedPoints.some((p) => p.pricingMode === "global");
       const globalPkg =
         explicitPkgAmount ??
-        (points.find((p) => p.pricingMode === "global" && Number(p.estimatedAmount) > 0)?.estimatedAmount as
+        (contractedPoints.find((p) => p.pricingMode === "global" && Number(p.estimatedAmount) > 0)?.estimatedAmount as
           | number
           | undefined);
 
-      points.forEach((pt) => {
+      contractedPoints.forEach((pt) => {
         const pCode = pt.carPartCode || "general";
         const partObj = CAR_PARTS.find((p) => p.code === pCode);
         const pLabel = partObj?.label || pCode;
@@ -2524,7 +2534,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
 
       setFormSafe((prev) => {
         const manualParts = prev.parts.filter(
-          (p) => p.description && !CAR_PARTS.some((cp) => p.description.includes(cp.label)),
+          (p) => p.description && !CAR_PARTS.some((cp) => p.description.includes(cp.label)) && !preExistingPartLabels.some((pe) => p.description.includes(pe)),
         );
 
         const newPartLines: BudgetPartLine[] = pieces.map((piece) => {
@@ -2565,11 +2575,12 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
               pricing_mode: "fixed",
             });
           }
-          // Remove linhas individuais de peças duplicadas em serviços
+          // Remove linhas individuais de peças duplicadas em serviços e pré-existentes
           nextServices = nextServices.filter((s) => {
             const isMaster = s.description.startsWith("PDR - Pacote Conjunto Global");
             const isCarPiece = pieces.some((pc) => s.description.includes(pc.partLabel));
-            return isMaster || !isCarPiece;
+            const isPreExistingPiece = preExistingPartLabels.some((pe) => s.description.includes(pe));
+            return isMaster || (!isCarPiece && !isPreExistingPiece);
           });
         }
 
@@ -2595,6 +2606,22 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   }, [inspectionPoints, form.budget_type, syncInspectionPointsToForm, form.parts]);
 
   const handleValidatePartFromBlueprint = (summary: ValidatedPartSummary) => {
+    // Danos classificados como pré-existentes são exclusivamente para vistoria / resguardo da oficina. Não geram serviços nem peças!
+    if (summary.contracted === false || summary.isPreExisting) {
+      setFormSafe((prev) => ({
+        ...prev,
+        parts: prev.parts.filter((p) => !p.description.includes(summary.partLabel)),
+        services: prev.services.filter((s) => !s.description.includes(summary.partLabel)),
+        updated_at: new Date().toISOString(),
+      }));
+      toast.info(
+        langDisplay === "fr"
+          ? `Dommage préexistant "${summary.partLabel}" validé dans le constat (aucun service facturable).`
+          : `Dano pré-existente "${summary.partLabel}" registrado na vistoria (nenhum serviço financeiro gerado).`
+      );
+      return;
+    }
+
     const isReplace = summary.damageType === "replace" || summary.damageType === "crack";
     const isPaint = summary.damageType === "paint_damage" || summary.damageType === "scratch";
     const materialTag = summary.materialTag ? `[${summary.materialTag}]` : "";
@@ -2606,8 +2633,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       const baseDesc = isReplace
         ? `Substituição - ${summary.partLabel} ${materialTag} (${summary.dentCount} mossas informativas)`.trim()
         : isPaint
-        ? `Pintura - ${summary.partLabel} ${materialTag}`.trim()
-        : `${summary.partLabel} ${materialTag} — ${summary.dentCount} ${summary.dentCount === 1 ? "mossa" : "mossas"}${sizeText}`.trim();
+          ? `Pintura - ${summary.partLabel} ${materialTag}`.trim()
+          : `${summary.partLabel} ${materialTag} — ${summary.dentCount} ${summary.dentCount === 1 ? "mossa" : "mossas"}${sizeText}`.trim();
 
       const desc = isGlobal ? `${baseDesc} [Incluso no Conjunto]` : baseDesc;
       const isFixed = summary.pricingMode === "fixed" || isGlobal || isReplace;
@@ -2826,7 +2853,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       if (closeOnFinish) {
         try {
           localStorage.removeItem(getBudgetDraftKey(workspaceId));
-        } catch {}
+        } catch { }
         setHasRestoredDraft(false);
         toast.success(
           draftToSave.status === "approved"
@@ -3173,7 +3200,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
           };
           localStorage.setItem(getBudgetDraftKey(workspaceId), JSON.stringify(payload));
           setLastAutoSavedAt(new Date());
-          persistCurrentState(false).catch(() => {});
+          persistCurrentState(false).catch(() => { });
           toast.info(
             langDisplay === "fr"
               ? "Brouillon sauvegardé automatiquement."
@@ -3291,7 +3318,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                 onClick={() => {
                   try {
                     localStorage.removeItem(getBudgetDraftKey(workspaceId));
-                  } catch {}
+                  } catch { }
                   setForm(emptyBudget());
                   setInspectionPoints([]);
                   setStep("choose_type");
