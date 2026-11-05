@@ -1339,10 +1339,15 @@ function StageOrderCardContent({
           onPointerDown={(e) => e.stopPropagation()}
         >
           <Button
+            type="button"
             size="sm"
             variant="outline"
             className="h-7 gap-1 px-2.5 text-[11px] font-medium border-primary/20 hover:border-primary hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+            }}
             onClick={(e) => {
+              e.preventDefault();
               e.stopPropagation();
               onOpen(order);
             }}

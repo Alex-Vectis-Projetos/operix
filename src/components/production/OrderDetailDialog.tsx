@@ -58,6 +58,17 @@ interface Props {
   onClose: () => void;
 }
 
+function safeUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 const BUDGET_NOTES_DELIMITER = "--- DADOS DO ORÇAMENTO (NÃO REMOVER ESTA LINHA) ---";
 
 function escapeRegex(s: string): string {
@@ -472,7 +483,7 @@ function tryDecodeExecution(s: string | null | undefined): ServiceExecution | nu
       steps: steps
         .filter((x) => x && typeof x === "object")
         .map((x) => ({
-          id: String(x.id ?? crypto.randomUUID()),
+          id: String(x.id ?? safeUUID()),
           description: String(x.description ?? "Serviço sem descrição"),
           responsible_id: x.responsible_id ? String(x.responsible_id) : null,
           responsible_name: x.responsible_name ? String(x.responsible_name) : null,
@@ -550,7 +561,7 @@ function splitBudgetOnlyAfterExecution(
 
 function emptyStep(description: string, fallbackResponsibleName: string | null = null): ServiceStep {
   return {
-    id: crypto.randomUUID(),
+    id: safeUUID(),
     description,
     responsible_id: null,
     responsible_name: fallbackResponsibleName,
@@ -683,7 +694,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const { extract, isExtracting } = useExtractProductionOrder();
   const [ocrStatus, setOcrStatus] = useState<{ type: "error" | "success"; message: string } | null>(null);
 
-  const sessionDraftId = useRef(crypto.randomUUID());
+  const sessionDraftId = useRef(safeUUID());
   const resolvedDraftId = sessionDraftId.current;
 
   const draftKey = useMemo(
@@ -756,7 +767,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     const existingPerformed = (order.performed_services || (order as any).performedServices || []) as any[];
     if (Array.isArray(existingPerformed) && existingPerformed.length > 0) {
       setManualServices(existingPerformed.map(s => ({
-        id: s.id || crypto.randomUUID(),
+        id: s.id || safeUUID(),
         name: s.name || s.description || "Serviço",
         price: Number(s.price ?? s.unit_price ?? s.total ?? 0),
         quantity: Number(s.quantity ?? 1) || 1,
@@ -866,7 +877,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     }
     const priceNum = parseFloat(newServicePrice.replace(",", ".")) || 0;
     const item = {
-      id: crypto.randomUUID(),
+      id: safeUUID(),
       name,
       price: priceNum,
       quantity: 1,
@@ -1193,6 +1204,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
   const currentStatus = (form.status ?? order?.status ?? "new_vehicle") as ProductionStatus;
   const currentPriority = (form.priority ?? order?.priority ?? "normal") as ProductionPriority;
+  const safePriorityMeta = PRIORITY_META[currentPriority] ?? PRIORITY_META.normal ?? { label: "Normal", tone: "text-foreground" };
 
   const canFinalizeStatus = !isNew && !locked && (currentStatus === "in_production" || currentStatus === "paused");
   const preflightMissingClient = !order?.client_id && !form.client_id && !budgetHydrated;
@@ -1240,8 +1252,8 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                 <ClipboardList className="h-3 w-3" /> Orçamento {displayBudgetNumber}
               </Badge>
             )}
-            <Badge variant="outline" className={PRIORITY_META[currentPriority].tone}>
-              {PRIORITY_META[currentPriority].label}
+            <Badge variant="outline" className={safePriorityMeta.tone}>
+              {safePriorityMeta.label}
             </Badge>
             <Badge variant="outline" className="gap-1">
               <BoardStatusDot status={currentStatus} />

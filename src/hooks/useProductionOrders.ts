@@ -23,7 +23,7 @@ export type CommercialStatus = "invoiced" | "delivered" | null;
 export const LOCKED_STATUSES: ProductionStatus[] = ["delivered", "invoiced"];
 export const isOrderLocked = (s?: ProductionStatus | null) => !!s && LOCKED_STATUSES.includes(s);
 
-export type ProductionPriority = "low" | "normal" | "high" | "urgent";
+export type ProductionPriority = "low" | "normal" | "medium" | "high" | "urgent";
 
 export interface ProductionOrder {
   id: string;
@@ -105,6 +105,7 @@ export const PRODUCTION_STATUSES: { value: ProductionStatus; label: string; colo
 export const PRIORITY_META: Record<ProductionPriority, { label: string; tone: string }> = {
   low: { label: "Baixa", tone: "text-muted-foreground" },
   normal: { label: "Normal", tone: "text-foreground" },
+  medium: { label: "Normal", tone: "text-foreground" },
   high: { label: "Alta", tone: "text-amber-500" },
   urgent: { label: "Urgente", tone: "text-destructive" },
 };
