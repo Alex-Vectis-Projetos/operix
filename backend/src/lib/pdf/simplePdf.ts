@@ -71,9 +71,17 @@ const WIN_ANSI_MAP: Record<string, number> = {
 
 export function pdfEscapeWinAnsi(text: string): string {
   if (!text) return "";
+  const sanitized = String(text)
+    .replace(/[\u2014\u2015]/g, " - ") // em dash
+    .replace(/[\u2012\u2013]/g, "-")   // en dash, figure dash
+    .replace(/[\u2018\u2019]/g, "'")   // curly single quotes
+    .replace(/[\u201C\u201D]/g, '"')   // curly double quotes
+    .replace(/[\u2022\u25CF]/g, "*")   // bullet
+    .replace(/[\u20AC]/g, "EUR");      // euro sign -> EUR
+
   let out = "";
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+  for (let i = 0; i < sanitized.length; i++) {
+    const ch = sanitized[i];
     const code = ch.charCodeAt(0);
     if (ch === "\\") {
       out += "\\\\";
@@ -1377,9 +1385,36 @@ const BACKEND_PROTOCOLE_ZONES = [
 ];
 
 const PART_NAME_DICT: Record<string, { pt: string; fr: string }> = {
+  // Canonical keys from CAR_PARTS (VehicleBlueprint5Views.tsx)
   hood: { pt: "Capô", fr: "Capot" },
   roof: { pt: "Teto", fr: "Pavillon" },
-  trunk: { pt: "Tampa Traseira", fr: "Hayon / Coffre" },
+  trunk: { pt: "Tampa Traseira / Porta-Malas", fr: "Hayon / Coffre" },
+  windshield: { pt: "Para-brisa Dianteiro", fr: "Pare-brise avant" },
+  rear_glass: { pt: "Vidro Traseiro", fr: "Lunette arrière" },
+  front_bumper: { pt: "Para-choque Dianteiro", fr: "Pare-chocs avant" },
+  rear_bumper: { pt: "Para-choque Traseiro", fr: "Pare-chocs arrière" },
+  front_grille: { pt: "Grade Dianteira", fr: "Calandre avant" },
+  left_headlight: { pt: "Farol Dianteiro Esquerdo", fr: "Phare avant gauche" },
+  right_headlight: { pt: "Farol Dianteiro Direito", fr: "Phare avant droit" },
+  left_taillight: { pt: "Lanterna Traseira Esquerda", fr: "Feu arrière gauche" },
+  right_taillight: { pt: "Lanterna Traseira Direita", fr: "Feu arrière droit" },
+  front_left_fender: { pt: "Para-lama Dianteiro Esquerdo", fr: "Aile avant gauche" },
+  front_right_fender: { pt: "Para-lama Dianteiro Direito", fr: "Aile avant droite" },
+  front_left_door: { pt: "Porta Dianteira Esquerda", fr: "Porte avant gauche" },
+  front_right_door: { pt: "Porta Dianteira Direita", fr: "Porte avant droite" },
+  rear_left_door: { pt: "Porta Traseira Esquerda", fr: "Porte arrière gauche" },
+  rear_right_door: { pt: "Porta Traseira Direita", fr: "Porte arrière droite" },
+  rear_left_quarter: { pt: "Lateral / Para-lama Traseiro Esquerdo", fr: "Aile arrière gauche" },
+  rear_right_quarter: { pt: "Lateral / Para-lama Traseiro Direito", fr: "Aile arrière droite" },
+  left_mirror: { pt: "Retrovisor Esquerdo", fr: "Rétroviseur gauche" },
+  right_mirror: { pt: "Retrovisor Direito", fr: "Rétroviseur droit" },
+  left_rail: { pt: "Coluna / Arco Superior Esquerdo", fr: "Montant / Brancard gauche" },
+  right_rail: { pt: "Coluna / Arco Superior Direito", fr: "Montant / Brancard droit" },
+  left_sill: { pt: "Soleira Esquerda", fr: "Bas de caisse gauche" },
+  right_sill: { pt: "Soleira Direita", fr: "Bas de caisse droit" },
+  general: { pt: "Outro Componente Automotivo", fr: "Composant automobile divers" },
+
+  // Blueprint / legacy shorthand aliases
   fender_fl: { pt: "Para-lama Diant. Esq.", fr: "Aile avant gauche" },
   fender_fr: { pt: "Para-lama Diant. Dir.", fr: "Aile avant droite" },
   fender_rl: { pt: "Lateral Tras. Esq.", fr: "Aile arrière gauche" },
@@ -1397,7 +1432,7 @@ const PART_NAME_DICT: Record<string, { pt: string; fr: string }> = {
   headlight_l: { pt: "Farol Dianteiro Esq.", fr: "Phare avant gauche" },
   headlight_r: { pt: "Farol Dianteiro Dir.", fr: "Phare avant droit" },
   taillight_l: { pt: "Lanterna Traseira Esq.", fr: "Feu arrière gauche" },
-  taillight_r: { pt: "Lanterna Traseira Dir.", fr: "Feu arrière droit" },
+  taillight_r: { pt: "Lanterna Traseira Dir.", fr: "Feu arrière direito" },
   rocker_l: { pt: "Soleira / Caixa de Ar Esq.", fr: "Bas de caisse gauche" },
   rocker_r: { pt: "Soleira / Caixa de Ar Dir.", fr: "Bas de caisse droit" },
   pillar_a_l: { pt: "Coluna A Esq.", fr: "Montant A gauche" },
@@ -1409,11 +1444,16 @@ const PART_NAME_DICT: Record<string, { pt: string; fr: string }> = {
 };
 
 const DAMAGE_TYPE_DICT: Record<string, { pt: string; fr: string }> = {
+  hail: { pt: "Granizo (PDR)", fr: "Grêle (DSP)" },
   dent: { pt: "Mossa PDR (Martelinho)", fr: "Bosse DSP" },
+  dent_small: { pt: "Amassado Leve (< 3cm)", fr: "Bosse légère (< 3cm)" },
+  dent_medium: { pt: "Amassado Médio (3-8cm)", fr: "Bosse moyenne (3-8cm)" },
+  dent_large: { pt: "Amassado Severo (> 8cm)", fr: "Bosse sévère (> 8cm)" },
+  crease: { pt: "Vinco", fr: "Pli / Arête" },
   scratch: { pt: "Risco / Arranhão", fr: "Rayure / Éraflure" },
+  paint_damage: { pt: "Dano na Pintura", fr: "Dégât peinture" },
   replace: { pt: "Substituição da Peça", fr: "Remplacement pièce" },
   crack: { pt: "Fissura / Trinca", fr: "Fissure / Cassure" },
-  paint_damage: { pt: "Dano na Pintura", fr: "Dégât peinture" },
 };
 
 function formatPartLabel(code: string | null | undefined, isFr: boolean): string {
@@ -1495,8 +1535,8 @@ export async function buildInspectionAnnexPages(
     content.push("40 786 515 28 re f");
 
     const headerTitle = chunks.length > 1
-      ? (isFr ? `ANNEXE 1 — CONSTAT PRÉALABLE & ÉVIDENCES (${pIdx + 1}/${chunks.length})` : `ANEXO 1 — CHECKLIST DE ENTRADA & VISTORIA (${pIdx + 1}/${chunks.length})`)
-      : (isFr ? "ANNEXE 1 — CONSTAT PRÉALABLE & ÉVIDENCES PHOTOGRAPHIQUES" : "ANEXO 1 — CHECKLIST DE ENTRADA & VISTORIA CAUTELAR");
+      ? (isFr ? `ANNEXE 1 - CONSTAT PRÉALABLE & ÉVIDENCES (${pIdx + 1}/${chunks.length})` : `ANEXO 1 - CHECKLIST DE ENTRADA & VISTORIA (${pIdx + 1}/${chunks.length})`)
+      : (isFr ? "ANNEXE 1 - CONSTAT PRÉALABLE & ÉVIDENCES PHOTOGRAPHIQUES" : "ANEXO 1 - CHECKLIST DE ENTRADA & VISTORIA CAUTELAR");
 
     content.push("BT");
     content.push("1 1 1 rg");
@@ -1550,14 +1590,15 @@ export async function buildInspectionAnnexPages(
       // Barra de cabeçalho do card
       const hdrBg = isPreExisting ? "1 0.95 0.90 rg" : "0.92 0.96 0.98 rg";
       content.push(hdrBg + " " + cardX + " " + (cardY + cardH - 18) + " " + cardW + " 18 re f");
-      content.push("BT 0.1 0.12 0.16 rg /F2 7 Tf " + (cardX + 6) + " " + (cardY + cardH - 12) + " Td (#" + item.index + " — " + pdfEscapeWinAnsi(clipCell(partName, 20)) + ") Tj ET");
+      const cardTitle = "#" + item.index + " - " + clipCell(partName, 22);
+      content.push("BT 0.1 0.12 0.16 rg /F2 7 Tf " + (cardX + 6) + " " + (cardY + cardH - 12) + " Td (" + pdfEscapeWinAnsi(cardTitle) + ") Tj ET");
 
       // Badge no canto direito da barra do card
       const badgeText = isPreExisting
         ? (isFr ? "[PRÉEXISTANT]" : "[PRÉ-EXISTENTE]")
         : (isFr ? "[FACTURÉ / DSP]" : "[ORÇADO]");
       const badgeColor = isPreExisting ? "0.75 0.35 0 rg" : "0.05 0.5 0.5 rg";
-      content.push("BT " + badgeColor + " /F2 5.5 Tf " + (cardX + cardW - 75) + " " + (cardY + cardH - 12) + " Td (" + badgeText + ") Tj ET");
+      content.push("BT " + badgeColor + " /F2 5.5 Tf " + (cardX + cardW - 75) + " " + (cardY + cardH - 12) + " Td (" + pdfEscapeWinAnsi(badgeText) + ") Tj ET");
 
       // Se possui foto anexada
       if (item.img) {
@@ -1641,7 +1682,7 @@ export async function buildInspectionAnnexPages(
         const sigTag = isFr ? `[Constat validé et signé par: ${signer} le ${dateStr}]` : `[Vistoria confirmada e assinada por: ${signer} em ${dateStr}]`;
         content.push("BT 0.08 0.55 0.25 rg /F2 6 Tf 48 98 Td (" + pdfEscapeWinAnsi(sigTag) + ") Tj ET");
       } else {
-        const pendTag = isFr ? "[Constat contradictoire d'entrée horodaté — Système Operix]" : "[Checklist de entrada registrado no Sistema Operix]";
+        const pendTag = isFr ? "[Constat contradictoire d'entrée horodaté - Système Operix]" : "[Checklist de entrada registrado no Sistema Operix]";
         content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 48 98 Td (" + pdfEscapeWinAnsi(pendTag) + ") Tj ET");
       }
     }
@@ -1651,9 +1692,9 @@ export async function buildInspectionAnnexPages(
     content.push("40 45 m 555 45 l S");
     content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 40 35 Td (" + pdfEscapeWinAnsi(companyName) + ") Tj ET");
     content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 40 27 Td (" + pdfEscapeWinAnsi(legalAddress + " - " + postalCity) + ") Tj ET");
-    content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 230 35 Td (" + pdfEscapeWinAnsi("Tel: " + companyPhone + " | N' Vert: " + tollFree) + ") Tj ET");
+    content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 230 35 Td (" + pdfEscapeWinAnsi("Tel: " + companyPhone + " | N. Vert: " + tollFree) + ") Tj ET");
     content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 230 27 Td (" + pdfEscapeWinAnsi(companyEmail + " - " + companyWebsite) + ") Tj ET");
-    content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 475 35 Td (" + (isFr ? "Document émis le:" : "Emitido em:") + ") Tj ET");
+    content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 475 35 Td (" + pdfEscapeWinAnsi(isFr ? "Document émis le:" : "Emitido em:") + ") Tj ET");
     content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 475 27 Td (" + pdfEscapeWinAnsi((new Date()).toISOString().slice(0, 10)) + ") Tj ET");
 
     pages.push({
@@ -2183,6 +2224,385 @@ export async function buildProtocoleDeReparationPdf(
   return assembleMultiPagePdf([page1Def, ...annexPages]);
 }
 
+export async function buildAutomotiveServicePdf(
+  budget: any,
+  rev: any,
+  workspace?: any,
+  inspection?: any,
+  logoImage?: PdfImageObject | null,
+  langRaw: string = "pt",
+): Promise<Buffer> {
+  const lang = normalizePdfLang(langRaw);
+  const isFr = lang === "fr";
+  const content: string[] = [];
+
+  const brand = workspace?.brandConfig || {};
+  const companyName = brand.legalName || brand.name || workspace?.billingProfile?.companyName || workspace?.billingProfile?.legalName || workspace?.name || "Operix Automotive";
+  const defaultTagline = isFr ? "Atelier de réparation & carrosserie automobile de précision" : "Oficina de reparação e serviços automotivos de precisão";
+  const tagline = brand.tagline || defaultTagline;
+  const legalAddress = brand.address || workspace?.billingProfile?.billingAddress || "388 Rue Louis Joseph Gay Lussac";
+  const postalCity = [brand.postalCode || workspace?.billingProfile?.postalCode || "26100", brand.city || workspace?.billingProfile?.city || "Romans sur Isere"].filter(Boolean).join(" ");
+  const companyPhone = brand.phone || "04 87 20 01 47";
+  const tollFree = brand.tollFree || companyPhone;
+  const companyEmail = brand.email || workspace?.billingProfile?.billingEmail || "contact@operix.app";
+  const companyWebsite = brand.website || "www.operix.app";
+
+  const clientSnap = (rev?.clientSnapshot as any) || {};
+  const vehiclePlate = String(budget.vehiclePlate || (isFr ? "SANS IMMAT" : "SEM PLACA")).toUpperCase();
+  const protocolCode = budget.code || "ORC-0000";
+  const revDate = (rev?.createdAt ? new Date(rev.createdAt) : budget?.createdAt ? new Date(budget.createdAt) : new Date()).toISOString().slice(0, 10);
+  const isApproved = rev?.status === "approved" || budget?.status === "approved";
+
+  // Category Title based on budget type
+  const rawType = String(rev?.budgetType || budget?.budget_type || "").toLowerCase();
+  let categoryTitle = isFr ? "DEVIS DE RÉPARATION AUTOMOBILE" : "ORÇAMENTO DE REPARAÇÃO AUTOMOTIVA";
+  if (rawType === "mechanics") {
+    categoryTitle = isFr ? "DEVIS - MÉCANIQUE GÉNÉRALE" : "ORÇAMENTO - MECÂNICA GERAL";
+  } else if (rawType === "body_paint") {
+    categoryTitle = isFr ? "DEVIS - FUNILARIA & PINTURA" : "ORÇAMENTO - FUNILARIA & PINTURA";
+  } else if (rawType === "assembly_disassembly") {
+    categoryTitle = isFr ? "DEVIS - MONTAGEM & DESMONTAGEM" : "ORÇAMENTO - MONTAGEM & DESMONTAGEM";
+  }
+
+  // 1. TOP HEADER & TITLE
+  content.push("0.1 0.12 0.16 rg");
+  content.push("300 794 255 28 re f");
+
+  content.push("BT");
+  content.push("1 1 1 rg");
+  content.push("/F2 10.5 Tf");
+  content.push("312 804 Td");
+  content.push(`(${pdfEscapeWinAnsi(categoryTitle)}) Tj`);
+  content.push("ET");
+
+  // Red plate badge
+  const plateText = vehiclePlate;
+  const plateW = plateText.length * 6.2;
+  const badgeW = Math.max(96, plateW + 20);
+  const badgeX = 555 - badgeW;
+  const badgeY = 766;
+  const badgeH = 20;
+
+  content.push("0.98 0.94 0.94 rg");
+  content.push(`${badgeX.toFixed(1)} ${badgeY} ${badgeW.toFixed(1)} ${badgeH} re f`);
+  content.push("0.85 0.15 0.15 RG 1.5 w");
+  content.push(`${badgeX.toFixed(1)} ${badgeY} ${badgeW.toFixed(1)} ${badgeH} re s`);
+
+  const textX = badgeX + (badgeW - plateW) / 2;
+  content.push("BT");
+  content.push("0.75 0.1 0.1 rg");
+  content.push("/F2 10 Tf");
+  content.push(`${textX.toFixed(1)} ${badgeY + 6} Td`);
+  content.push(`(${pdfEscapeWinAnsi(plateText)}) Tj`);
+  content.push("ET");
+
+  // Document code & revision date
+  const docMeta = `${isFr ? "Devis N°" : "Orçamento N°"}: ${protocolCode} | Rev. ${rev?.revisionNumber || 1} | ${revDate}`;
+  content.push("BT 0.3 0.35 0.4 rg /F2 6.5 Tf 305 750 Td (" + pdfEscapeWinAnsi(docMeta) + ") Tj ET");
+
+  // Company Brand / Logo on Left
+  if (logoImage) {
+    const maxW = 250;
+    const maxH = 60;
+    const aspect = (logoImage.width || 1) / (logoImage.height || 1);
+    let renderW = maxW;
+    let renderH = maxW / aspect;
+    if (renderH > maxH) {
+      renderH = maxH;
+      renderW = maxH * aspect;
+    }
+    const imgX = 40;
+    const imgY = 750 + (maxH - renderH) / 2;
+
+    content.push("q");
+    content.push(`${renderW.toFixed(2)} 0 0 ${renderH.toFixed(2)} ${imgX} ${imgY.toFixed(2)} cm`);
+    content.push("/Im1 Do");
+    content.push("Q");
+
+    content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 40 743 Td (" + pdfEscapeWinAnsi(tagline) + ") Tj ET");
+  } else {
+    content.push("BT 0.1 0.12 0.16 rg /F2 16 Tf 40 798 Td (" + pdfEscapeWinAnsi(companyName) + ") Tj ET");
+    content.push("BT 0.35 0.4 0.45 rg /F1 7 Tf 40 784 Td (" + pdfEscapeWinAnsi(`${legalAddress} - ${postalCity} | Tel: ${companyPhone}`) + ") Tj ET");
+    content.push("BT 0.35 0.4 0.45 rg /F1 6.5 Tf 40 772 Td (" + pdfEscapeWinAnsi(`${companyEmail} - ${companyWebsite}`) + ") Tj ET");
+    content.push("BT 0.4 0.45 0.5 rg /F2 6 Tf 40 745 Td (" + pdfEscapeWinAnsi(tagline) + ") Tj ET");
+  }
+
+  // Divider Line
+  content.push("0.1 0.12 0.16 RG 1.5 w");
+  content.push("40 738 m 555 738 l S");
+
+  // 2. CLIENT & VEHICLE GRID (Y: 735 -> 675, H: 60)
+  content.push("0.75 0.78 0.82 RG 0.5 w");
+  content.push("40 675 515 60 re s");
+  content.push("170 675 m 170 735 l S");
+  content.push("285 675 m 285 735 l S");
+  content.push("415 675 m 415 735 l S");
+  content.push("40 715 m 555 715 l S");
+  content.push("40 695 m 555 695 l S");
+
+  // Col 1: CLIENT
+  const cName = budget.clientName || clientSnap.name || (isFr ? "Client particulier" : "Cliente particular");
+  const cAddr = clientSnap.address?.street
+    ? [clientSnap.address.street, clientSnap.address.postal, clientSnap.address.city].filter(Boolean).join(", ")
+    : (typeof clientSnap.address === "string" ? clientSnap.address : "-");
+  const cPhone = clientSnap.phone || clientSnap.telephone || "-";
+
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 44 725 Td (${pdfEscapeWinAnsi(isFr ? "NOM DU CLIENT" : "NOME DO CLIENTE")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7 Tf 44 717 Td (${pdfEscapeWinAnsi(clipCell(cName, 22))}) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 44 705 Td (${pdfEscapeWinAnsi(isFr ? "ADRESSE / VILLE" : "ENDEREÇO / CIDADE")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 44 697 Td (${pdfEscapeWinAnsi(clipCell(cAddr, 24))}) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 44 685 Td (${pdfEscapeWinAnsi(isFr ? "N° TÉL." : "N° TEL.")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7 Tf 44 677 Td (${pdfEscapeWinAnsi(clipCell(cPhone, 20))}) Tj ET`);
+
+  // Col 2: VEHICLE
+  const vBrand = budget.vehicleBrand || "-";
+  const vModel = budget.vehicleModel || "-";
+  const vColor = budget.vehicleColor || (rev?.vehicleSnapshot as any)?.color || "-";
+
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 174 725 Td (${pdfEscapeWinAnsi(isFr ? "MARQUE" : "MARCA")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7 Tf 174 717 Td (${pdfEscapeWinAnsi(clipCell(vBrand, 16))}) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 174 705 Td (${pdfEscapeWinAnsi(isFr ? "MODÈLE" : "MODELO")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7 Tf 174 697 Td (${pdfEscapeWinAnsi(clipCell(vModel, 16))}) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 174 685 Td (${pdfEscapeWinAnsi(isFr ? "COULEUR" : "COR")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 174 677 Td (${pdfEscapeWinAnsi(clipCell(vColor, 16))}) Tj ET`);
+
+  // Col 3: IDENTIFICATION
+  const vVin = budget.vehicleVin || "-";
+  const vKm = budget.mileage || (rev?.vehicleSnapshot as any)?.mileage || "-";
+
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 289 725 Td (${pdfEscapeWinAnsi(isFr ? "IMMATRICULATION" : "PLACA / MATRÍCULA")}) Tj ET`);
+  content.push(`BT 0.75 0.1 0.1 rg /F2 7.5 Tf 289 717 Td (${pdfEscapeWinAnsi(plateText)}) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 289 705 Td (${pdfEscapeWinAnsi(isFr ? "N° DE CHÂSSIS (VIN)" : "N° DE CHASSI (VIN)")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 289 697 Td (${pdfEscapeWinAnsi(clipCell(vVin, 18))}) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 289 685 Td (${pdfEscapeWinAnsi(isFr ? "KILOMÉTRAGE" : "QUILOMETRAGEM")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 289 677 Td (${pdfEscapeWinAnsi(vKm !== "-" ? `${vKm} km` : "-")}) Tj ET`);
+
+  // Col 4: PROTOCOL
+  const validText = isApproved ? (isFr ? "Validé / Approuvé" : "Aprovado / Confirmado") : (isFr ? "Valable 15 jours" : "Válido por 15 dias");
+
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 419 725 Td (${pdfEscapeWinAnsi(isFr ? "N° DU DEVIS" : "N° DO ORÇAMENTO")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7 Tf 419 717 Td (${pdfEscapeWinAnsi(protocolCode)}) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 419 705 Td (${pdfEscapeWinAnsi(isFr ? "DATE D'ÉMISSION" : "DATA DE EMISSÃO")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F1 6.5 Tf 419 697 Td (${pdfEscapeWinAnsi(revDate)}) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 419 685 Td (${pdfEscapeWinAnsi(isFr ? "VALIDITÉ / STATUT" : "VALIDADE / STATUS")}) Tj ET`);
+  content.push(`BT ${isApproved ? "0.08 0.55 0.25" : "0.3 0.35 0.4"} rg /F2 6.5 Tf 419 677 Td (${pdfEscapeWinAnsi(validText)}) Tj ET`);
+
+  // 3. TABLE ITEMS HEADER (Y: 652 -> 670)
+  content.push("0.15 0.20 0.28 rg 40 650 515 18 re f");
+  content.push("BT 1 1 1 rg /F2 7 Tf 46 656 Td (" + pdfEscapeWinAnsi(isFr ? "DESCRIPTION DES PRESTATIONS & PIÈCES" : "DESCRIÇÃO DOS SERVIÇOS & PEÇAS") + ") Tj ET");
+  content.push("BT 1 1 1 rg /F2 7 Tf 300 656 Td (" + pdfEscapeWinAnsi(isFr ? "CATÉGORIE" : "CATEGORIA") + ") Tj ET");
+  content.push("BT 1 1 1 rg /F2 7 Tf 375 656 Td (" + pdfEscapeWinAnsi(isFr ? "QTÉ / H" : "QTD / H") + ") Tj ET");
+  content.push("BT 1 1 1 rg /F2 7 Tf 440 656 Td (" + pdfEscapeWinAnsi(isFr ? "UNIT. EUR" : "UNIT. EUR") + ") Tj ET");
+  content.push("BT 1 1 1 rg /F2 7 Tf 510 656 Td (" + pdfEscapeWinAnsi(isFr ? "TOTAL EUR" : "TOTAL EUR") + ") Tj ET");
+
+  // 4. ITEMS LISTING
+  const svcRows = (Array.isArray(rev?.services) ? rev.services : []) as any[];
+  const partRows = (Array.isArray(rev?.parts) ? rev.parts : []) as any[];
+  const laborRows = (Array.isArray(rev?.labor) ? rev.labor : []) as any[];
+
+  let curY = 634;
+  const rowH = 15;
+  const maxY = 255;
+
+  const renderSectionHeader = (title: string) => {
+    if (curY < maxY) return;
+    content.push(`0.92 0.94 0.97 rg 40 ${curY - 3} 515 14 re f`);
+    content.push(`0.8 0.83 0.88 RG 0.5 w 40 ${curY - 3} 515 14 re s`);
+    content.push(`BT 0.2 0.25 0.35 rg /F2 6.5 Tf 46 ${curY + 1} Td (${pdfEscapeWinAnsi(title)}) Tj ET`);
+    curY -= 15;
+  };
+
+  const renderTableRow = (desc: string, cat: string, qty: string, pu: string, tot: string, idx: number) => {
+    if (curY < maxY) return;
+    if (idx % 2 === 0) {
+      content.push(`0.98 0.98 0.99 rg 40 ${curY - 3} 515 ${rowH} re f`);
+    }
+    content.push(`0.9 0.92 0.94 RG 0.5 w 40 ${curY - 3} m 555 ${curY - 3} l S`);
+
+    content.push(`BT 0.15 0.18 0.22 rg /F1 6.5 Tf 46 ${curY + 2} Td (${pdfEscapeWinAnsi(clipCell(desc, 44))}) Tj ET`);
+    content.push(`BT 0.35 0.4 0.45 rg /F1 6.5 Tf 300 ${curY + 2} Td (${pdfEscapeWinAnsi(clipCell(cat, 14))}) Tj ET`);
+    content.push(`BT 0.15 0.18 0.22 rg /F1 6.5 Tf 380 ${curY + 2} Td (${pdfEscapeWinAnsi(qty)}) Tj ET`);
+    content.push(`BT 0.15 0.18 0.22 rg /F1 6.5 Tf 440 ${curY + 2} Td (${pdfEscapeWinAnsi(pu)}) Tj ET`);
+    content.push(`BT 0.1 0.12 0.16 rg /F2 6.5 Tf 510 ${curY + 2} Td (${pdfEscapeWinAnsi(tot)}) Tj ET`);
+    curY -= rowH;
+  };
+
+  let rowCount = 0;
+
+  // 4.1 Services
+  if (svcRows.length > 0) {
+    renderSectionHeader(isFr ? `1. PRESTATIONS & SERVICES TECHNIQUES (${svcRows.length})` : `1. PRESTAÇÕES & SERVIÇOS TÉCNICOS (${svcRows.length})`);
+    svcRows.forEach((s: any) => {
+      const isFixed = s.pricing_mode === "fixed" || s.pricingMode === "fixed";
+      const q = Math.max(1, Number(s.quantity ?? 1) || 1);
+      const pu = Number(s.unit_price ?? s.unitPrice ?? s.price ?? 0) || 0;
+      const tot = Number(s.total) || (isFixed ? pu : q * pu);
+      const desc = s.name || s.description || (isFr ? "Prestation d'atelier" : "Serviço de oficina");
+      const cat = isFixed ? (isFr ? "Forfait" : "Fixo") : (isFr ? "Service" : "Serviço");
+      renderTableRow(desc, cat, String(q), `${pu.toFixed(2)}`, `${tot.toFixed(2)}`, rowCount++);
+    });
+  }
+
+  // 4.2 Parts
+  if (partRows.length > 0) {
+    renderSectionHeader(isFr ? `2. PIÈCES & FOURNITURES (${partRows.length})` : `2. PEÇAS & MATERIAIS DE REPOSIÇÃO (${partRows.length})`);
+    partRows.forEach((p: any) => {
+      const q = Math.max(1, Number(p.quantity ?? 1) || 1);
+      const pu = Number(p.unit_price ?? p.unitPrice ?? p.price ?? 0) || 0;
+      const tot = Number(p.total) || (q * pu);
+      const desc = p.description || p.name || (isFr ? "Pièce détachée" : "Peça de reposição");
+      renderTableRow(desc, isFr ? "Pièce" : "Peça", String(q), `${pu.toFixed(2)}`, `${tot.toFixed(2)}`, rowCount++);
+    });
+  }
+
+  // 4.3 Labor
+  if (laborRows.length > 0) {
+    renderSectionHeader(isFr ? `3. MAIN-D'ŒUVRE TECHNIQUE (${laborRows.length})` : `3. MÃO DE OBRA & OPERAÇÕES TÉCNICAS (${laborRows.length})`);
+    laborRows.forEach((l: any) => {
+      const h = Math.max(0.5, Number(l.hours ?? l.quantity ?? 1) || 1);
+      const rate = Number(l.hourly_rate ?? l.hourlyRate ?? l.rate ?? l.unitPrice ?? 0) || 0;
+      const tot = Number(l.total) || (h * rate);
+      const desc = l.description || l.name || (isFr ? "Main d'œuvre" : "Mão de Obra");
+      renderTableRow(desc, isFr ? "M.O." : "Mão de Obra", `${h.toFixed(1)} h`, `${rate.toFixed(2)}`, `${tot.toFixed(2)}`, rowCount++);
+    });
+  }
+
+  // Fallback if no items listed
+  if (rowCount === 0) {
+    const grossVal = Number(rev?.grossTotal ?? budget?.gross_total ?? 0) || 0;
+    renderTableRow(
+      isFr ? "Prestation de réparation et remise en état d'atelier" : "Serviço de reparação e manutenção veicular em oficina",
+      isFr ? "Général" : "Geral",
+      "1",
+      grossVal.toFixed(2),
+      grossVal.toFixed(2),
+      0
+    );
+  }
+
+  // 5. OBSERVATIONS / TECHNICAL SCOPE (Left Box, Y: 150 -> 245, W: 275)
+  const obsY = 150;
+  const obsH = 95;
+  content.push(`0.98 0.98 0.99 rg 40 ${obsY} 275 ${obsH} re f`);
+  content.push(`0.75 0.78 0.82 RG 0.5 w 40 ${obsY} 275 ${obsH} re s`);
+
+  content.push(`0.2 0.25 0.32 rg 40 ${obsY + obsH - 14} 275 14 re f`);
+  content.push(`BT 1 1 1 rg /F2 6.5 Tf 46 ${obsY + obsH - 10} Td (${pdfEscapeWinAnsi(isFr ? "AVIS TECHNIQUE & PÉRIMÈTRE D'INTERVENTION" : "PARECER TÉCNICO & ESCOPO DE INTERVENÇÃO")}) Tj ET`);
+
+  const diagText = rev?.diagnosis || rev?.technicalDescription || rev?.notes || (isFr
+    ? "Prestations exécutées selon les règles de l'art et les préconisations du constructeur."
+    : "Serviços e peças executados conforme normas técnicas e padrões do fabricante.");
+  const diagSplit = splitTwoLines(diagText, 44, 44);
+  content.push(`BT 0.2 0.25 0.3 rg /F1 6 Tf 46 ${obsY + 64} Td (${pdfEscapeWinAnsi(diagSplit.line1)}) Tj ET`);
+  if (diagSplit.line2) {
+    content.push(`BT 0.2 0.25 0.3 rg /F1 6 Tf 46 ${obsY + 54} Td (${pdfEscapeWinAnsi(diagSplit.line2)}) Tj ET`);
+  }
+
+  const intervList = Array.isArray(rev?.interventionTypes) && rev.interventionTypes.length > 0
+    ? rev.interventionTypes.join(", ")
+    : null;
+  if (intervList) {
+    const intSplit = splitTwoLines(`${isFr ? "Interventions: " : "Intervenções: "}${intervList}`, 44, 44);
+    content.push(`BT 0.3 0.45 0.6 rg /F2 6 Tf 46 ${obsY + 38} Td (${pdfEscapeWinAnsi(intSplit.line1)}) Tj ET`);
+    if (intSplit.line2) {
+      content.push(`BT 0.3 0.45 0.6 rg /F2 6 Tf 46 ${obsY + 28} Td (${pdfEscapeWinAnsi(intSplit.line2)}) Tj ET`);
+    }
+  }
+
+  const legalReassurance = isFr
+    ? "Garantie pièces et main-d'œuvre selon les conditions générales de vente de l'atelier."
+    : "Garantia de peças e serviços conforme normas vigentes e diretrizes técnicas do fabricante.";
+  content.push(`BT 0.45 0.5 0.55 rg /F1 5 Tf 46 ${obsY + 12} Td (${pdfEscapeWinAnsi(legalReassurance)}) Tj ET`);
+
+  // 6. COMMERCIAL TOTALS BOX (Right Box, Y: 150 -> 245, W: 230)
+  const totX = 325;
+  const totW = 230;
+  content.push(`0.97 0.98 0.99 rg ${totX} ${obsY} ${totW} ${obsH} re f`);
+  content.push(`0.75 0.78 0.82 RG 0.5 w ${totX} ${obsY} ${totW} ${obsH} re s`);
+
+  const grossTotal = Number(rev?.grossTotal ?? budget?.gross_total ?? 0) || 0;
+  const discountTotal = Number(rev?.discountTotal ?? 0) || 0;
+  const discountPct = Number(rev?.discountPct ?? 0) || 0;
+  const taxPct = Number(rev?.taxPct ?? 20) || 20;
+  const taxTotal = Number(rev?.taxTotal ?? ((grossTotal - discountTotal) * (taxPct / 100))) || 0;
+  const finalTotal = Number(rev?.finalTotal ?? budget?.final_total ?? (grossTotal - discountTotal + taxTotal)) || 0;
+
+  content.push(`BT 0.35 0.4 0.45 rg /F1 7 Tf ${totX + 8} ${obsY + 76} Td (${pdfEscapeWinAnsi(isFr ? "Sous-total Brut H.T. :" : "Subtotal Bruto H.T. :")}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7.5 Tf ${totX + 155} ${obsY + 76} Td (${pdfEscapeWinAnsi(`${grossTotal.toFixed(2)} EUR`)}) Tj ET`);
+
+  if (discountTotal > 0 || discountPct > 0) {
+    const discLabel = isFr ? `Remise (${discountPct}%) :` : `Desconto (${discountPct}%) :`;
+    content.push(`BT 0.8 0.2 0.2 rg /F1 7 Tf ${totX + 8} ${obsY + 61} Td (${pdfEscapeWinAnsi(discLabel)}) Tj ET`);
+    content.push(`BT 0.8 0.2 0.2 rg /F2 7.5 Tf ${totX + 150} ${obsY + 61} Td (${pdfEscapeWinAnsi(`- ${discountTotal.toFixed(2)} EUR`)}) Tj ET`);
+  }
+
+  const taxLabel = isFr ? `TVA (${taxPct}%) :` : `IVA / Imposto (${taxPct}%) :`;
+  content.push(`BT 0.35 0.4 0.45 rg /F1 7 Tf ${totX + 8} ${obsY + 46} Td (${pdfEscapeWinAnsi(taxLabel)}) Tj ET`);
+  content.push(`BT 0.1 0.12 0.16 rg /F2 7.5 Tf ${totX + 155} ${obsY + 46} Td (${pdfEscapeWinAnsi(`${taxTotal.toFixed(2)} EUR`)}) Tj ET`);
+
+  // Final Total Bar (Highlight)
+  content.push(`0.1 0.12 0.16 rg ${totX} ${obsY} ${totW} 26 re f`);
+  content.push(`BT 1 1 1 rg /F2 9.5 Tf ${totX + 8} ${obsY + 9} Td (${pdfEscapeWinAnsi(isFr ? "TOTAL GÉNÉRAL TTC :" : "TOTAL GERAL TTC :")}) Tj ET`);
+  content.push(`BT 1 0.85 0.3 rg /F2 10 Tf ${totX + 140} ${obsY + 9} Td (${pdfEscapeWinAnsi(`${finalTotal.toFixed(2)} EUR`)}) Tj ET`);
+
+  // 7. SIGNATURES BLOCK (Y: 60 -> 138, H: 78)
+  const sigY = 60;
+  const sigH = 78;
+
+  // Box 1: Client Signature
+  content.push(`0.98 0.98 0.99 rg 40 ${sigY} 250 ${sigH} re f`);
+  content.push(`0.75 0.78 0.82 RG 0.5 w 40 ${sigY} 250 ${sigH} re s`);
+  content.push(`0.25 0.3 0.38 rg 40 ${sigY + sigH - 14} 250 14 re f`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 46 ${sigY + sigH - 10} Td (${pdfEscapeWinAnsi(isFr ? "BON POUR ACCORD & SIGNATURE DU CLIENT" : "TERMO DE ACEITE & ASSINATURA DO CLIENTE")}) Tj ET`);
+
+  const sig = rev?.signature;
+  if (sig && (sig.signed || sig.signedAt)) {
+    const signer = sig.signerName || budget.clientName || clientSnap.name || (isFr ? "Client" : "Cliente");
+    const dateStr = (sig.signedAt || "").slice(0, 10);
+    content.push(`0.93 0.98 0.94 rg 48 ${sigY + 22} 234 34 re f`);
+    content.push(`0.15 0.65 0.3 RG 0.5 w 48 ${sigY + 22} 234 34 re s`);
+    content.push(`BT 0.08 0.55 0.25 rg /F2 7 Tf 54 ${sigY + 44} Td (${pdfEscapeWinAnsi(isFr ? "[DEVIS SIGNÉ & APPROUVÉ PAR LE CLIENT]" : "[ORÇAMENTO ASSINADO DIGITALMENTE]")}) Tj ET`);
+    content.push(`BT 0.2 0.25 0.3 rg /F1 6.5 Tf 54 ${sigY + 33} Td (${pdfEscapeWinAnsi(`${isFr ? "Signataire:" : "Signatário:"} ${signer}`)}) Tj ET`);
+    content.push(`BT 0.4 0.45 0.5 rg /F1 6 Tf 54 ${sigY + 24} Td (${pdfEscapeWinAnsi(`Date: ${dateStr}`)}) Tj ET`);
+  } else {
+    content.push(`BT 0.4 0.45 0.5 rg /F1 6 Tf 48 ${sigY + 48} Td (${pdfEscapeWinAnsi(isFr ? "Bon pour commande et exécution des travaux chiffrés." : "Autorizo a execução dos serviços e fornecimento de peças.")}) Tj ET`);
+    content.push(`BT 0.5 0.55 0.6 rg /F1 6 Tf 48 ${sigY + 28} Td (................................................................................) Tj ET`);
+    content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 48 ${sigY + 16} Td (${pdfEscapeWinAnsi(isFr ? "Signature et date du client précédées de « Bon pour accord »" : "Assinatura do Cliente / Data")}) Tj ET`);
+  }
+
+  // Box 2: Workshop Technical Manager
+  content.push(`0.98 0.98 0.99 rg 305 ${sigY} 250 ${sigH} re f`);
+  content.push(`0.75 0.78 0.82 RG 0.5 w 305 ${sigY} 250 ${sigH} re s`);
+  content.push(`0.25 0.3 0.38 rg 305 ${sigY + sigH - 14} 250 14 re f`);
+  content.push(`BT 1 1 1 rg /F2 6 Tf 311 ${sigY + sigH - 10} Td (${pdfEscapeWinAnsi(isFr ? "DIRECTION TECHNIQUE & ATELIER" : "RESPONSÁVEL TÉCNICO & OFICINA")}) Tj ET`);
+
+  content.push(`BT 0.2 0.25 0.3 rg /F2 7 Tf 313 ${sigY + 48} Td (${pdfEscapeWinAnsi(companyName)}) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F1 6 Tf 313 ${sigY + 38} Td (${pdfEscapeWinAnsi(isFr ? "Engagement de conformité technique et garantie d'exécution." : "Garantia de conformidade técnica e operacional.")}) Tj ET`);
+  content.push(`BT 0.5 0.55 0.6 rg /F1 6 Tf 313 ${sigY + 24} Td (................................................................................) Tj ET`);
+  content.push(`BT 0.4 0.45 0.5 rg /F2 5.5 Tf 313 ${sigY + 14} Td (${pdfEscapeWinAnsi(isFr ? "Visa et cachet de l'atelier" : "Visto e carimbo da oficina")}) Tj ET`);
+
+  // 8. MULTI-TENANT FOOTER (Y: 45 -> 15)
+  content.push("0.1 0.12 0.16 RG 1 w");
+  content.push("40 45 m 555 45 l S");
+
+  content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 40 35 Td (" + pdfEscapeWinAnsi(companyName) + ") Tj ET");
+  content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 40 27 Td (" + pdfEscapeWinAnsi(legalAddress + " - " + postalCity) + ") Tj ET");
+
+  content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 230 35 Td (" + pdfEscapeWinAnsi("Tel: " + companyPhone + " | N. Vert: " + tollFree) + ") Tj ET");
+  content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 230 27 Td (" + pdfEscapeWinAnsi(companyEmail + " - " + companyWebsite) + ") Tj ET");
+
+  content.push("BT 0.2 0.25 0.3 rg /F2 6 Tf 475 35 Td (" + pdfEscapeWinAnsi(isFr ? "Document émis le:" : "Emitido em:") + ") Tj ET");
+  content.push("BT 0.3 0.35 0.4 rg /F1 5.5 Tf 475 27 Td (" + pdfEscapeWinAnsi((new Date()).toISOString().slice(0, 10)) + ") Tj ET");
+
+  const page1Def: PdfPageDef = {
+    contentStream: content.join("\n"),
+    images: logoImage ? { Im1: logoImage } : undefined,
+  };
+
+  const annexPages = await buildInspectionAnnexPages(budget, rev, workspace, inspection, langRaw);
+  return assembleMultiPagePdf([page1Def, ...annexPages]);
+}
+
 export async function generateBudgetPdfBuffer(
   budget: any,
   rev: any,
@@ -2190,96 +2610,20 @@ export async function generateBudgetPdfBuffer(
   inspection?: any,
   langRaw: string = "pt",
 ): Promise<Buffer> {
-  const isPdr =
-    rev?.budgetType === "pdr" ||
-    budget?.budget_type === "pdr" ||
-    (Array.isArray(inspection?.damagePoints) && inspection.damagePoints.length > 0) ||
-    (Array.isArray(rev?.services) && rev.services.some((s: any) => {
-      const d = String(s.name || s.description || "").toLowerCase();
-      return d.includes("dsp") || d.includes("pdr") || d.includes("mossa") || d.includes("bosse") || d.includes("grele") || d.includes("granizo");
-    }));
+  const rawType = String(rev?.budgetType || budget?.budget_type || "").toLowerCase();
+  const svcRows = (Array.isArray(rev?.services) ? rev?.services : []) as any[];
+  const hasPdrServices = svcRows.some((s: any) => {
+    const d = String(s.name || s.description || "").toLowerCase();
+    return d.includes("dsp") || d.includes("pdr") || d.includes("martelinho") || d.includes("déchocage") || d.includes("grele") || d.includes("grêle") || d.includes("granizo");
+  });
+  const isPdr = rawType === "pdr" || (!rawType && hasPdrServices);
+
+  const rawLogoUrl = workspace?.logoUrl || (workspace?.brandConfig as any)?.logoUrl;
+  const logoImage = await loadWorkspaceLogo(rawLogoUrl);
 
   if (isPdr) {
-    const rawLogoUrl = workspace?.logoUrl || (workspace?.brandConfig as any)?.logoUrl;
-    const logoImage = await loadWorkspaceLogo(rawLogoUrl);
     return await buildProtocoleDeReparationPdf(budget, rev, workspace, inspection, logoImage, langRaw);
   }
 
-  const clientSnap = (rev?.clientSnapshot as any) || {};
-  const currency = rev?.currencyCode || "EUR";
-
-  const svcRows = (Array.isArray(rev?.services) ? rev?.services : []) as any[];
-  const partRows = (Array.isArray(rev?.parts) ? rev?.parts : []) as any[];
-  const laborRows = (Array.isArray(rev?.labor) ? rev?.labor : []) as any[];
-
-  const items: BudgetPdfItem[] = [];
-  for (const s of svcRows) {
-    const isFixed = s.pricing_mode === "fixed" || s.pricingMode === "fixed";
-    const qty = Math.max(1, Number(s.quantity ?? 1) || 1);
-    const pu = Number(s.unit_price ?? s.unitPrice ?? s.price ?? 0) || 0;
-    const lineTotal = Number(s.total) || (isFixed ? pu : qty * pu);
-    items.push({
-      type: "service",
-      description: s.name || s.description || "Prestation générale",
-      quantity: qty,
-      unitPrice: pu,
-      total: lineTotal,
-    });
-  }
-  for (const p of partRows) {
-    const qty = Math.max(1, Number(p.quantity ?? 1) || 1);
-    const pu = Number(p.unit_price ?? p.unitPrice ?? p.price ?? 0) || 0;
-    const lineTotal = Number(p.total) || (qty * pu);
-    items.push({
-      type: "part",
-      description: p.description || p.name || "Pièce détachée",
-      quantity: qty,
-      unitPrice: pu,
-      total: lineTotal,
-    });
-  }
-  for (const l of laborRows) {
-    const hours = Math.max(0.5, Number(l.hours ?? l.quantity ?? 1) || 1);
-    const rate = Number(l.hourly_rate ?? l.hourlyRate ?? l.rate ?? l.unitPrice ?? 0) || 0;
-    const lineTotal = Number(l.total) || (hours * rate);
-    items.push({
-      type: "labor",
-      description: l.description || l.name || "Main d'œuvre",
-      quantity: hours,
-      unitPrice: rate,
-      total: lineTotal,
-    });
-  }
-
-  return buildBudgetDocumentPdf({
-    code: budget.code,
-    revisionNumber: rev?.revisionNumber ?? 1,
-    status: rev?.status || budget.status,
-    date: (rev?.createdAt ?? budget.createdAt).toISOString().slice(0, 10),
-    client: {
-      name: budget.clientName || clientSnap.name || "Client particulier",
-      document: clientSnap.document || null,
-      phone: clientSnap.phone || null,
-      email: clientSnap.email || null,
-      address: clientSnap.address?.street ? [clientSnap.address.street, clientSnap.address.postal, clientSnap.address.city].filter(Boolean).join(", ") : null,
-    },
-    vehicle: {
-      brandModel: [budget.vehicleBrand, budget.vehicleModel].filter(Boolean).join(" ") || null,
-      plate: budget.vehiclePlate || null,
-      vin: budget.vehicleVin || null,
-    },
-    items,
-    currency,
-    grossTotal: Number(rev?.grossTotal ?? 0),
-    discountPct: Number(rev?.discountPct ?? 0),
-    discountTotal: Number(rev?.discountTotal ?? 0),
-    taxPct: Number(rev?.taxPct ?? 0),
-    taxTotal: Number(rev?.taxTotal ?? 0),
-    finalTotal: Number(rev?.finalTotal ?? 0),
-    signature: rev?.signature ? {
-      signed: Boolean((rev.signature as any).signed),
-      signerName: (rev.signature as any).signerName,
-      signedAt: (rev.signature as any).signedAt,
-    } : null,
-  }, langRaw);
+  return await buildAutomotiveServicePdf(budget, rev, workspace, inspection, logoImage, langRaw);
 }
