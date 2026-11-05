@@ -31,6 +31,11 @@ export default function ProductionPage() {
     setOpen(null);
   };
 
+  const handleOpenOrder = (order: ProductionOrder) => {
+    setOrderKeyCounter((c) => c + 1);
+    setOpen(order);
+  };
+
   const openNewOrder = () => {
     setOrderKeyCounter((c) => c + 1);
     setOpen({ ...BLANK, workspace_id: workspaceId ?? "" });
@@ -38,7 +43,7 @@ export default function ProductionPage() {
 
   const handleOpenOrderFromBudget = (order: ProductionOrder) => {
     setActiveTab("board");
-    setOpen(order);
+    handleOpenOrder(order);
   };
 
   return (
@@ -147,11 +152,11 @@ export default function ProductionPage() {
                 <Plus className="h-4 w-4" /> {t("production.newOrder", "Nova Ordem")}
               </Button>
             </div>
-            <ProductionBoard onOpen={setOpen} />
+            <ProductionBoard onOpen={handleOpenOrder} />
           </TabsContent>
         </ErrorBoundary>
         <TabsContent value="history" className="mt-4">
-          <ProductionHistoryTable onOpenOrder={setOpen} />
+          <ProductionHistoryTable onOpenOrder={handleOpenOrder} />
         </TabsContent>
       </Tabs>
 

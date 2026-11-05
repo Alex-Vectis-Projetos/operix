@@ -32,6 +32,8 @@ import {
   Flame,
   Layers,
   LayoutGrid,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -407,7 +409,7 @@ export function ProductionBoard({ onOpen }: Props) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 5,
+        distance: 8,
       },
     })
   );
@@ -1194,18 +1196,27 @@ function StageOrderCardContent({
           ? "border-primary bg-card shadow-2xl"
           : locked
           ? "opacity-85 cursor-pointer bg-card/90"
-          : "cursor-grab active:cursor-grabbing hover:border-primary/50 hover:shadow-md bg-card"
+          : "cursor-pointer active:cursor-grabbing hover:border-primary/50 hover:shadow-md bg-card"
       }`}
     >
       {/* Cabeçalho do Card */}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <Hash className="h-3.5 w-3.5" />
+        <div
+          className="flex min-w-0 items-center gap-2 cursor-pointer group"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen(order);
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          title="Clique para abrir a ficha completa do veículo"
+        >
+          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+            <Eye className="h-3.5 w-3.5" />
           </span>
           <div className="min-w-0">
-            <div className="truncate text-xs font-semibold tracking-tight text-foreground">
-              {displayNumber}
+            <div className="truncate text-xs font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors flex items-center gap-1">
+              <span>{displayNumber}</span>
+              <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity text-primary" />
             </div>
             <div className="text-[10px] font-mono text-muted-foreground">
               OS {order.code || "—"}
@@ -1323,9 +1334,24 @@ function StageOrderCardContent({
         </div>
 
         <div
+          className="flex items-center gap-1.5 shrink-0"
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
         >
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 px-2.5 text-[11px] font-medium border-primary/20 hover:border-primary hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen(order);
+            }}
+            title="Abrir ficha completa do carro"
+          >
+            <FileText className="h-3 w-3 text-primary" />
+            Ficha
+          </Button>
+
           {locked ? (
             <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30 gap-1">
               <Lock className="h-2.5 w-2.5" /> Bloqueado
