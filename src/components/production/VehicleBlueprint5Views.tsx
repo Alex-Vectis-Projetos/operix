@@ -427,6 +427,7 @@ export function VehicleBlueprint5Views({
   // Modal de confirmação para troca de carroceria com histórico preservado
   const [pendingBodyType, setPendingBodyType] = useState<VehicleBodyType | null>(null);
   const [showBodyTypeConfirm, setShowBodyTypeConfirm] = useState<boolean>(false);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
 
   const handleSelectBodyType = (newType: VehicleBodyType) => {
     if (newType === bodyType) return;
@@ -1379,25 +1380,70 @@ export function VehicleBlueprint5Views({
             {/* Evidência Fotográfica com Câmera Funcional */}
             <div className="md:col-span-2 space-y-1">
               <Label className="text-xs font-medium">Evidência Fotográfica</Label>
-              <div className="flex items-center gap-1.5">
-                <Input
-                  className="h-8 text-xs font-mono flex-1"
-                  placeholder="URL ou arquivo de imagem..."
-                  value={selectedPoint.photoStoragePath ?? ""}
-                  onChange={(e) => updateSelectedPoint({ photoStoragePath: e.target.value })}
-                />
+              {selectedPoint.photoStoragePath ? (
+                <div className="flex items-center gap-2 p-1.5 rounded-lg border border-cyan-800/60 bg-cyan-950/20">
+                  <div
+                    className="relative group cursor-pointer shrink-0"
+                    onClick={() => setPreviewPhotoUrl(selectedPoint.photoStoragePath || null)}
+                    title="Clique para ampliar a foto"
+                  >
+                    <img
+                      src={selectedPoint.photoStoragePath}
+                      alt="Evidência da avaria"
+                      className="h-10 w-10 rounded-md object-cover border border-cyan-500/40 shadow-sm"
+                    />
+                    <div className="absolute inset-0 bg-black/40 rounded-md opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <ZoomIn className="h-4 w-4 text-white" />
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-medium text-cyan-300 block truncate">
+                      Foto da avaria anexada
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewPhotoUrl(selectedPoint.photoStoragePath || null)}
+                      className="text-[10px] text-muted-foreground hover:text-cyan-400 underline block"
+                    >
+                      Visualizar ampliada
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+                      title="Substituir foto"
+                      onClick={handlePhotoUploadClick}
+                    >
+                      <Camera className="h-3.5 w-3.5" />
+                      <span className="text-[10px] hidden sm:inline">Trocar</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                      title="Remover foto"
+                      onClick={() => updateSelectedPoint({ photoStoragePath: null })}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
                 <Button
                   size="sm"
                   type="button"
                   variant="outline"
-                  className="h-8 px-2.5 border-slate-700 hover:text-cyan-400 gap-1 shrink-0"
-                  title="Tirar foto ou carregar imagem da avaria"
+                  className="h-10 w-full border-dashed border-slate-700 hover:border-cyan-500 hover:bg-cyan-950/20 text-muted-foreground hover:text-cyan-300 gap-2 justify-center"
                   onClick={handlePhotoUploadClick}
                 >
-                  <Camera className="h-3.5 w-3.5" />
-                  <span className="text-[11px] hidden sm:inline">Foto</span>
+                  <Camera className="h-4 w-4 text-cyan-400" />
+                  <span className="text-xs">Tirar Foto ou Anexar Evidência</span>
                 </Button>
-              </div>
+              )}
             </div>
 
             {/* BARRA DE AÇÃO: VALIDAR PEÇA E VINCULAR AO ORÇAMENTO */}
@@ -1618,6 +1664,26 @@ export function VehicleBlueprint5Views({
               Confirmar e Ajustar Modelo
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* MODAL DE VISUALIZAÇÃO AMPLIADA DA FOTO */}
+      <Dialog open={!!previewPhotoUrl} onOpenChange={(open) => !open && setPreviewPhotoUrl(null)}>
+        <DialogContent className="sm:max-w-xl p-4">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Camera className="h-4 w-4 text-cyan-400" />
+              Evidência Fotográfica da Avaria
+            </DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[75vh] flex items-center justify-center overflow-hidden rounded-lg bg-black/80 p-1 border border-border/60">
+            {previewPhotoUrl && (
+              <img
+                src={previewPhotoUrl}
+                alt="Foto da avaria ampliada"
+                className="max-h-[70vh] w-auto max-w-full rounded object-contain"
+              />
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

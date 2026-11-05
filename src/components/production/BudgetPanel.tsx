@@ -171,11 +171,10 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   const totals = useMemo(() => {
     return items.reduce(
       (acc, b) => {
+        const rawFinal = (b as any).final_total ?? (b as any).finalTotal;
         const total =
-          (b as any).final_total != null &&
-          !isNaN(Number((b as any).final_total)) &&
-          ((b as any).is_summary || (!b.parts?.length && !b.services?.length && !b.labor?.length))
-            ? Number((b as any).final_total)
+          rawFinal != null && !isNaN(Number(rawFinal)) && Number(rawFinal) > 0
+            ? Number(rawFinal)
             : (() => {
                 const p = (b.parts || []).reduce(
                   (s, x) =>
@@ -379,14 +378,11 @@ export function BudgetPanel({ onOpenOrder }: Props) {
   };
 
   const computeTotalsFor = (b: Budget) => {
-    if (
-      (b as any).final_total != null &&
-      !isNaN(Number((b as any).final_total)) &&
-      ((b as any).is_summary || (!b.parts?.length && !b.services?.length && !b.labor?.length))
-    ) {
-      const total = Number((b as any).final_total);
-      const gross = Number((b as any).gross_total ?? total);
-      return { parts: 0, services: 0, labor: 0, gross, disc: 0, net: gross, iva: total - gross, total };
+    const rawFinal = (b as any).final_total ?? (b as any).finalTotal;
+    if (rawFinal != null && !isNaN(Number(rawFinal)) && Number(rawFinal) > 0) {
+      const total = Number(rawFinal);
+      const gross = Number((b as any).gross_total ?? (b as any).grossTotal ?? total);
+      return { parts: 0, services: 0, labor: 0, gross, disc: 0, net: gross, iva: Math.max(0, total - gross), total };
     }
     const p = (b.parts || []).reduce(
       (s, x) =>

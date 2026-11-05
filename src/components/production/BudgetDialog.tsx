@@ -64,7 +64,7 @@ import { useRole } from "@/hooks/useRole";
 import { useExtractProductionOrder, type FieldConfidence } from "@/hooks/useExtractProductionOrder";
 import { FileUploadZone } from "@/components/service-orders/FileUploadZone";
 import { WeeklogSignatureCanvas, type WeeklogSignatureCanvasRef } from "@/components/service-orders/WeeklogSignatureCanvas";
-import { useServiceCatalogItems } from "@/hooks/useServiceCatalog";
+import { useServiceCatalogItems, type ServiceCatalogItemDto } from "@/hooks/useServiceCatalog";
 
 export type BudgetPartLine = {
   id: string;
@@ -86,11 +86,109 @@ export type BudgetServiceLine = {
 };
 
 export const BUDGET_TYPE_TO_CATEGORIES: Record<string, string[]> = {
-  pdr: ["pdr"],
-  assembly_disassembly: ["assembly_disassembly"],
-  body_paint: ["bodywork", "paint", "detailing", "glass_exterior"],
+  pdr: ["pdr", "assembly_disassembly", "detailing", "bodywork", "paint", "glass_exterior"],
+  assembly_disassembly: ["assembly_disassembly", "pdr", "bodywork"],
+  body_paint: ["bodywork", "paint", "detailing", "glass_exterior", "assembly_disassembly"],
   mechanics: ["mechanics", "brakes_suspension", "electrical_adas", "diagnostics", "wheels_tires", "hvac"],
 };
+
+interface ServiceCatalogAutocompleteProps {
+  value: string;
+  catalogItems: ServiceCatalogItemDto[];
+  placeholder?: string;
+  disabled?: boolean;
+  currencyCode?: string;
+  onChange: (value: string) => void;
+  onSelect: (item: ServiceCatalogItemDto) => void;
+}
+
+export function ServiceCatalogAutocomplete({
+  value,
+  catalogItems,
+  placeholder,
+  disabled,
+  currencyCode = "EUR",
+  onChange,
+  onSelect,
+}: ServiceCatalogAutocompleteProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const filteredItems = useMemo(() => {
+    const q = (value || "").trim().toLowerCase();
+    if (!q) return catalogItems.slice(0, 30);
+    return catalogItems
+      .filter(
+        (it) =>
+          it.name.toLowerCase().includes(q) ||
+          it.code.toLowerCase().includes(q) ||
+          (it.categoryName && it.categoryName.toLowerCase().includes(q)) ||
+          (it.categoryCode && it.categoryCode.toLowerCase().includes(q))
+      )
+      .slice(0, 30);
+  }, [value, catalogItems]);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <Input
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setIsOpen(true);
+        }}
+        onFocus={() => setIsOpen(true)}
+        placeholder={placeholder}
+        disabled={disabled}
+        className="h-8 text-xs font-medium"
+      />
+      {isOpen && !disabled && filteredItems.length > 0 && (
+        <div className="absolute left-0 top-full mt-1 w-full min-w-[320px] max-w-md z-50 rounded-lg border border-slate-700 bg-slate-900/95 backdrop-blur shadow-2xl p-1 max-h-60 overflow-y-auto">
+          {filteredItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="w-full text-left p-2 rounded-md hover:bg-slate-800 transition-colors flex items-center justify-between gap-2 group"
+              onClick={() => {
+                onSelect(item);
+                setIsOpen(false);
+              }}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-medium text-foreground group-hover:text-cyan-400 truncate">
+                  {item.name}
+                </div>
+                <div className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                  <span className="font-mono text-cyan-500/80">{item.code}</span>
+                  {item.categoryName && (
+                    <>
+                      <span>·</span>
+                      <span className="truncate">{item.categoryName}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              {item.suggestedPrice != null && Number(item.suggestedPrice) > 0 && (
+                <Badge variant="outline" className="text-[11px] font-mono shrink-0 border-emerald-600/50 bg-emerald-950/40 text-emerald-300">
+                  {Number(item.suggestedPrice).toFixed(2)} {currencyCode}
+                </Badge>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export type BudgetLaborLine = {
   id: string;
@@ -1256,6 +1354,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   }>({ open: false, pending: null, source: "choose_step" });
   const [intervPopoverOpen, setIntervPopoverOpen] = useState(false);
   const [intervQuery, setIntervQuery] = useState("");
+  const [intervActiveCategory, setIntervActiveCategory] = useState<string>("all");
   const [inspectionPoints, setInspectionPoints] = useState<DamagePointData[]>([]);
 
   useEffect(() => {
@@ -1516,6 +1615,55 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   }, [form.budget_type, langDisplay, catalogItems, form]);
 
   const selectedInterventions = useMemo(() => getBudgetInterventions(form), [form]);
+
+  const detailedInterventionsCatalogue = useMemo(() => {
+    const list: Array<{ name: string; categoryCode: string; categoryName: string }> = [];
+    const seen = new Set<string>();
+
+    const pdrGeneric = langDisplay === "fr" ? "Réparation PDR" : "Reparação PDR";
+    list.push({
+      name: pdrGeneric,
+      categoryCode: "pdr",
+      categoryName: "PDR",
+    });
+    seen.add(pdrGeneric);
+
+    (catalogItems || []).forEach((item) => {
+      if (!seen.has(item.name)) {
+        seen.add(item.name);
+        list.push({
+          name: item.name,
+          categoryCode: item.categoryCode || "other",
+          categoryName: item.categoryName || item.categoryCode || "Geral",
+        });
+      }
+    });
+
+    const legacy = getInterventionsListFor(form.budget_type || "pdr", langDisplay);
+    legacy.forEach((name) => {
+      if (!seen.has(name)) {
+        seen.add(name);
+        list.push({
+          name,
+          categoryCode: form.budget_type || "pdr",
+          categoryName: btLabel(form.budget_type || "pdr", langDisplay),
+        });
+      }
+    });
+
+    (selectedInterventions || []).forEach((name) => {
+      if (!seen.has(name)) {
+        seen.add(name);
+        list.push({
+          name,
+          categoryCode: "custom",
+          categoryName: langDisplay === "fr" ? "Personnalisé" : "Personalizado",
+        });
+      }
+    });
+
+    return list;
+  }, [catalogItems, langDisplay, form.budget_type, selectedInterventions]);
 
   const hasIncompatibleInterventions = (nextType: BudgetType): boolean => {
     if (selectedInterventions.length === 0) return false;
@@ -3753,8 +3901,51 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                             <ChevronDown className="h-4 w-4 opacity-60 text-muted-foreground" />
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-[min(calc(100vw-2rem),420px] p-0" align="start">
-                          <div className="border-b p-2 px-3 py-2">
+                        <PopoverContent className="w-[min(calc(100vw-2rem),540px)] p-0" align="start">
+                          {/* Categorias Pills Navigation */}
+                          <div className="flex items-center gap-1.5 overflow-x-auto p-2 border-b bg-muted/20 scrollbar-thin">
+                            {[
+                              { code: "all", labelPt: "Todas", labelFr: "Toutes" },
+                              { code: "pdr", labelPt: "PDR", labelFr: "PDR" },
+                              { code: "assembly_disassembly", labelPt: "Desmontagem", labelFr: "Démontage" },
+                              { code: "bodywork", labelPt: "Funilaria", labelFr: "Tôlerie" },
+                              { code: "paint", labelPt: "Pintura", labelFr: "Peinture" },
+                              { code: "mechanics", labelPt: "Mecânica", labelFr: "Mécanique" },
+                              { code: "detailing", labelPt: "Estética", labelFr: "Esthétique" },
+                            ].map((cat) => {
+                              const isAct = intervActiveCategory === cat.code;
+                              const count =
+                                cat.code === "all"
+                                  ? detailedInterventionsCatalogue.length
+                                  : detailedInterventionsCatalogue.filter((i) => i.categoryCode === cat.code).length;
+                              return (
+                                <button
+                                  key={cat.code}
+                                  type="button"
+                                  onClick={() => setIntervActiveCategory(cat.code)}
+                                  className={cn(
+                                    "px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-all flex items-center gap-1.5",
+                                    isAct
+                                      ? "bg-primary text-primary-foreground font-semibold shadow-sm"
+                                      : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
+                                  )}
+                                >
+                                  <span>{langDisplay === "fr" ? cat.labelFr : cat.labelPt}</span>
+                                  <span
+                                    className={cn(
+                                      "text-[10px] rounded-full px-1",
+                                      isAct
+                                        ? "bg-primary-foreground/20 text-primary-foreground"
+                                        : "bg-background/80 text-muted-foreground",
+                                    )}
+                                  >
+                                    {count}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="border-b p-2 px-3">
                             <div className="relative">
                               <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70" />
                               <Input
@@ -3763,33 +3954,39 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                                 placeholder={
                                   langDisplay === "fr"
                                     ? "Rechercher une intervention…"
-                                    : "Buscar intervenção…"
+                                    : "Buscar intervenção no catálogo…"
                                 }
-                                className="pl-8 h-9"
+                                className="pl-8 h-8 text-xs"
                               />
                             </div>
                           </div>
-                          <ScrollArea className="max-h-72">
+                          <ScrollArea className="max-h-80">
                             <div className="p-2 space-y-0.5">
                               {(() => {
                                 const q = intervQuery.trim().toLowerCase();
-                                const list = interventionsCatalogue.filter(
-                                  (v) => q.length === 0 || v.toLowerCase().includes(q),
-                                );
-                                if (list.length === 0) {
+                                const filtered = detailedInterventionsCatalogue.filter((it) => {
+                                  const matchCat =
+                                    intervActiveCategory === "all" || it.categoryCode === intervActiveCategory;
+                                  const matchQuery =
+                                    q.length === 0 ||
+                                    it.name.toLowerCase().includes(q) ||
+                                    it.categoryName.toLowerCase().includes(q);
+                                  return matchCat && matchQuery;
+                                });
+                                if (filtered.length === 0) {
                                   return (
-                                    <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                                    <div className="px-3 py-6 text-center text-xs text-muted-foreground">
                                       {langDisplay === "fr"
-                                        ? "Aucune intervention ne correspond."
-                                        : "Nenhuma intervenção correspondente."}
+                                        ? "Aucune intervention trouvée."
+                                        : "Nenhuma intervenção encontrada."}
                                     </div>
                                   );
                                 }
-                                return list.map((opt) => {
-                                  const checked = selectedInterventions.includes(opt);
+                                return filtered.map((opt) => {
+                                  const checked = selectedInterventions.includes(opt.name);
                                   return (
                                     <label
-                                      key={opt}
+                                      key={opt.name}
                                       className={cn(
                                         "flex items-center gap-2.5 rounded-md px-2 py-1.5 cursor-pointer select-none hover:bg-accent hover:text-accent-foreground transition-colors",
                                         checked ? "bg-accent/40" : "",
@@ -3797,12 +3994,18 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                                     >
                                       <Checkbox
                                         checked={checked}
-                                        onCheckedChange={() => toggleIntervention(opt)}
-                                        id={`interv-${opt}`}
+                                        onCheckedChange={() => toggleIntervention(opt.name)}
+                                        id={`interv-${opt.name}`}
                                       />
-                                      <span className="text-sm leading-tight">{opt}</span>
+                                      <span className="text-xs leading-tight flex-1 font-medium">{opt.name}</span>
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] px-1.5 py-0 h-4 border-slate-700 text-muted-foreground shrink-0"
+                                      >
+                                        {opt.categoryName}
+                                      </Badge>
                                       {checked ? (
-                                        <CheckIcon className="ml-auto h-4 w-4 text-emerald-600" />
+                                        <CheckIcon className="ml-auto h-3.5 w-3.5 text-emerald-500 shrink-0" />
                                       ) : null}
                                     </label>
                                   );
@@ -3812,9 +4015,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                           </ScrollArea>
                           <div className="border-t p-2 flex items-center justify-between text-[11px] text-muted-foreground">
                             <span>
-                              {langDisplay === "fr"
-                                ? `${interventionsCatalogue.length} au total`
-                                : `${interventionsCatalogue.length} no catálogo`}
+                              {detailedInterventionsCatalogue.length}{" "}
+                              {langDisplay === "fr" ? "au total" : "no catálogo"}
                             </span>
                             <div className="flex gap-2">
                               <Button
@@ -4102,8 +4304,9 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                             return (
                               <TableRow key={s.id}>
                                 <TableCell>
-                                  <Input
-                                    list={`service-catalog-dl-${s.id}`}
+                                  <ServiceCatalogAutocomplete
+                                    value={s.description}
+                                    catalogItems={catalogItems}
                                     placeholder={
                                       form.budget_type === "mechanics"
                                         ? "Ex.: Diagnóstico eletrônico / Geometria"
@@ -4111,36 +4314,24 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                                           ? "Ex.: Pintura / Polimento / Tratamento"
                                           : "Ex.: Avaliação detalhada de áreas"
                                     }
-                                    value={s.description}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      const matched = catalogItems.find(
-                                        (it) => it.name.trim().toLowerCase() === val.trim().toLowerCase(),
-                                      );
-                                      if (matched) {
-                                        const patch: Partial<BudgetServiceLine> = {
-                                          description: matched.name,
-                                          catalogItemId: matched.id,
-                                          catalogItemCode: matched.code,
-                                          categoryCode: matched.categoryCode,
-                                        };
-                                        if (matched.suggestedPrice && (!s.unit_price || s.unit_price === 0)) {
-                                          patch.unit_price = Number(matched.suggestedPrice);
-                                        }
-                                        updateService(s.id, patch);
-                                      } else {
-                                        updateService(s.id, { description: val });
-                                      }
-                                    }}
                                     disabled={isLocked}
+                                    currencyCode={form.currency || "EUR"}
+                                    onChange={(val) => {
+                                      updateService(s.id, { description: val });
+                                    }}
+                                    onSelect={(matched) => {
+                                      const patch: Partial<BudgetServiceLine> = {
+                                        description: matched.name,
+                                        catalogItemId: matched.id,
+                                        catalogItemCode: matched.code,
+                                        categoryCode: matched.categoryCode,
+                                      };
+                                      if (matched.suggestedPrice && (!s.unit_price || s.unit_price === 0)) {
+                                        patch.unit_price = Number(matched.suggestedPrice);
+                                      }
+                                      updateService(s.id, patch);
+                                    }}
                                   />
-                                  <datalist id={`service-catalog-dl-${s.id}`}>
-                                    {catalogItems.map((item) => (
-                                      <option key={item.id} value={item.name}>
-                                        {item.categoryName ? `${item.categoryName} — ` : ""}{item.code}
-                                      </option>
-                                    ))}
-                                  </datalist>
                                   {s.catalogItemCode ? (
                                     <span className="text-[10px] text-muted-foreground font-mono mt-0.5 block">
                                       {s.categoryCode ? `${s.categoryCode} · ` : ""}{s.catalogItemCode}
