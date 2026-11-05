@@ -78,7 +78,91 @@ productionPhotosRouter.get("/", async (req: Request, res: Response, next: NextFu
       })
     );
 
-    return res.json(photosWithUrls);
+    // Agrega fotos da vistoria/inspeção e do orçamento de origem para a categoria "before" (Veículo na entrada)
+    const inspectionPhotos: any[] = [];
+    const inspection = await prisma.vehicleInspection.findFirst({
+      where: {
+        OR: [
+          { productionOrderId: orderId },
+          ...(order.budgetId ? [{ budgetId: order.budgetId }] : []),
+        ],
+        workspaceId: ctx.activeWorkspaceId,
+      },
+      include: { damagePoints: true },
+    });
+
+    if (inspection && Array.isArray(inspection.damagePoints)) {
+      for (const dp of inspection.damagePoints) {
+        if (dp.photoStoragePath) {
+          try {
+            let url = dp.photoStoragePath;
+            if (!url.startsWith("http") && !url.startsWith("blob:")) {
+              url = await getPresignedDownloadUrl("production-photos", dp.photoStoragePath, 900);
+            }
+            inspectionPhotos.push({
+              id: `dp-${dp.id}`,
+              production_order_id: orderId,
+              productionOrderId: orderId,
+              workspace_id: ctx.activeWorkspaceId,
+              workspaceId: ctx.activeWorkspaceId,
+              uploaded_by: "Vistoria Inicial",
+              uploadedBy: "Vistoria Inicial",
+              category: "before",
+              storage_path: dp.photoStoragePath,
+              storagePath: dp.photoStoragePath,
+              caption: dp.contracted ? `Dano orçado (${dp.carPartCode})` : `Checklist entrada: ${dp.carPartCode} (Pré-existente)`,
+              size_bytes: null,
+              sizeBytes: null,
+              url,
+              download_url: url,
+              created_at: dp.createdAt instanceof Date ? dp.createdAt.toISOString() : new Date(dp.createdAt).toISOString(),
+              createdAt: dp.createdAt instanceof Date ? dp.createdAt.toISOString() : new Date(dp.createdAt).toISOString(),
+            });
+          } catch (err) {
+            console.warn("Falha ao gerar presigned url para foto de vistoria:", err);
+          }
+        }
+      }
+    }
+
+    if (order.budgetId) {
+      const budgetPhotos = await prisma.budgetPhoto.findMany({
+        where: { budgetId: order.budgetId, workspaceId: ctx.activeWorkspaceId },
+      });
+      for (const bp of budgetPhotos) {
+        if (bp.storagePath) {
+          try {
+            let url = bp.storagePath;
+            if (!url.startsWith("http") && !url.startsWith("blob:")) {
+              url = await getPresignedDownloadUrl("production-photos", bp.storagePath, 900);
+            }
+            inspectionPhotos.push({
+              id: `bp-${bp.id}`,
+              production_order_id: orderId,
+              productionOrderId: orderId,
+              workspace_id: ctx.activeWorkspaceId,
+              workspaceId: ctx.activeWorkspaceId,
+              uploaded_by: bp.uploadedBy || "Orçamento",
+              uploadedBy: bp.uploadedBy || "Orçamento",
+              category: "before",
+              storage_path: bp.storagePath,
+              storagePath: bp.storagePath,
+              caption: bp.caption || "Foto da Vistoria / Orçamento",
+              size_bytes: bp.sizeBytes ?? null,
+              sizeBytes: bp.sizeBytes ?? null,
+              url,
+              download_url: url,
+              created_at: bp.createdAt instanceof Date ? bp.createdAt.toISOString() : new Date(bp.createdAt).toISOString(),
+              createdAt: bp.createdAt instanceof Date ? bp.createdAt.toISOString() : new Date(bp.createdAt).toISOString(),
+            });
+          } catch (err) {
+            console.warn("Falha ao gerar presigned url para foto do orçamento:", err);
+          }
+        }
+      }
+    }
+
+    return res.json([...photosWithUrls, ...inspectionPhotos]);
   } catch (error) {
     return next(error);
   }
@@ -172,6 +256,12 @@ productionPhotosRouter.delete(
       }
 
       const { orderId, photoId } = req.params as { orderId: string; photoId: string };
+
+      if (photoId.startsWith("dp-") || photoId.startsWith("bp-")) {
+        return res.status(400).json({
+          message: "Fotos do checklist/vistoria de entrada são evidências de conformidade do orçamento e não podem ser excluídas na produção.",
+        });
+      }
 
       const order = await prisma.productionOrder.findUnique({
         where: { id: orderId },

@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "./useWorkspace";
 import { useAuth } from "./useAuth";
 import { toast } from "sonner";
+import { apiRequest } from "@/lib/api";
 import {
   listProductionOrders,
   createProductionOrder,
@@ -272,12 +273,15 @@ export function useProductionKpis() {
   });
 }
 
-export function useProductionTimeline(_orderId: string | null) {
+export function useProductionTimeline(orderId: string | null) {
   return useQuery({
-    queryKey: ["production_events", _orderId],
-    enabled: false,
-    queryFn: async () => [] as unknown[],
-    retry: 0,
+    queryKey: ["production_events", orderId],
+    enabled: Boolean(orderId && orderId !== "__new__"),
+    queryFn: async () => {
+      if (!orderId || orderId === "__new__") return [];
+      return apiRequest<any[]>(`/production-orders/${orderId}/timeline`);
+    },
+    retry: 1,
     placeholderData: [],
   });
 }

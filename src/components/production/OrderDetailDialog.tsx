@@ -633,13 +633,24 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const [newServiceName, setNewServiceName] = useState("");
   const [newServicePrice, setNewServicePrice] = useState("");
 
-  useEffect(() => {
-    if (order?.id && order.id !== "__new__") {
-      apiRequest<{ tasks: ProductionTaskItem[] }>(`/production-orders/${order.id}/tasks`)
+  const [promotedId, setPromotedId] = useState<string | null>(null);
+  const isNew = order?.id === "__new__" && !promotedId;
+  const effectiveOrderId = promotedId ?? (isNew ? null : order?.id ?? null);
+  const locked = !isNew && !promotedId && isOrderLocked(order?.status);
+
+  const refreshTasks = () => {
+    const targetId = effectiveOrderId ?? order?.id;
+    if (targetId && targetId !== "__new__") {
+      apiRequest<{ tasks: ProductionTaskItem[] }>(`/production-orders/${targetId}/tasks`)
         .then((res) => setProductionTasks(res.tasks || []))
         .catch(() => setProductionTasks([]));
+    }
+  };
 
-      apiRequest<{ inspection: any }>(`/production-orders/${order.id}/inspection`)
+  const refreshInspection = () => {
+    const targetId = effectiveOrderId ?? order?.id;
+    if (targetId && targetId !== "__new__") {
+      apiRequest<{ inspection: any }>(`/production-orders/${targetId}/inspection`)
         .then((res) => {
           if (res?.inspection?.damagePoints) {
             setInspectionPoints(
@@ -653,6 +664,9 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                 dentCount: p.dentCount,
                 contracted: p.contracted,
                 estimatedAmount: p.estimatedAmount ? Number(p.estimatedAmount) : null,
+                photoStoragePath: p.photoStoragePath,
+                partMaterial: p.partMaterial || "steel",
+                pricingMode: p.pricingMode || "fixed",
                 notes: p.notes,
               }))
             );
@@ -660,11 +674,12 @@ export function OrderDetailDialog({ order, onClose }: Props) {
         })
         .catch(() => setInspectionPoints([]));
     }
-  }, [order?.id]);
-  const [promotedId, setPromotedId] = useState<string | null>(null);
-  const isNew = order?.id === "__new__" && !promotedId;
-  const effectiveOrderId = promotedId ?? (isNew ? null : order?.id ?? null);
-  const locked = !isNew && !promotedId && isOrderLocked(order?.status);
+  };
+
+  useEffect(() => {
+    refreshTasks();
+    refreshInspection();
+  }, [effectiveOrderId, order?.id]);
   const { extract, isExtracting } = useExtractProductionOrder();
   const [ocrStatus, setOcrStatus] = useState<{ type: "error" | "success"; message: string } | null>(null);
 
@@ -2177,6 +2192,54 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                   </Button>
                 )}
               </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="tasks" className="pt-4 space-y-4">
+            <ProductionTaskList
+              orderId={effectiveOrderId ?? order?.id ?? ""}
+              tasks={productionTasks}
+              inspectionDamagePoints={inspectionPoints}
+              onTaskUpdated={refreshTasks}
+              canEdit={!locked}
+            />
+          </TabsContent>
+
+          <TabsContent value="blueprint" className="pt-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Blueprint 5 Vistas do Veículo</h3>
+                <p className="text-xs text-muted-foreground">
+                  Visualização técnica e acompanhamento dos pontos de intervenção e vistorias de danos do veículo.
+                </p>
+              </div>
+              {!locked && (
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await apiRequest(`/production-orders/${effectiveOrderId ?? order?.id}/inspection`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ damagePoints: inspectionPoints }),
+                      });
+                      toast.success("Blueprint atualizado com sucesso!");
+                      refreshInspection();
+                    } catch (err: any) {
+                      toast.error(err?.message || "Falha ao salvar blueprint.");
+                    }
+                  }}
+                >
+                  <Save className="h-4 w-4 mr-2" /> Salvar Blueprint
+                </Button>
+              )}
+            </div>
+            <div className="rounded-xl border bg-card p-4">
+              <VehicleBlueprint5Views
+                damagePoints={inspectionPoints}
+                onChange={setInspectionPoints}
+                readOnly={locked}
+              />
             </div>
           </TabsContent>
 

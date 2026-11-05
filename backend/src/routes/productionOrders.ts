@@ -1,5 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
+import { getPresignedDownloadUrl } from "../lib/minio.js";
 import { requireAuth } from "../middleware/auth.js";
 import { resolveRequestContext, type RequestContext } from "../middleware/requestContext.js";
 import {
@@ -709,6 +711,9 @@ productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, 
     const order = await prisma.productionOrder.findUnique({
       where: { id },
       include: {
+        budget: true,
+        budgetRevision: true,
+        photos: true,
         weeklogEntries: {
           orderBy: { createdAt: "asc" },
         },
@@ -723,8 +728,11 @@ productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, 
     assertObjectAccess(ctx, order);
 
     type TimelineEventType =
+      | "budget_approved"
       | "created"
       | "in_production"
+      | "status_changed"
+      | "photo_added"
       | "finalized"
       | "weeklog_entry"
       | "rectification_requested"
@@ -734,39 +742,105 @@ productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, 
       type: TimelineEventType;
       timestamp: string;
       actorId?: string | null;
+      actorName?: string | null;
+      fromValue?: string | null;
+      toValue?: string | null;
       metadata?: Record<string, any>;
     }
 
     const events: TimelineEvent[] = [];
 
-    // 1. Fact: created
+    // 1. Fact: budget_approved (se gerado a partir de orçamento)
+    if (order.budget) {
+      const approvedAt = order.budgetRevision?.approvedAt || order.budget.createdAt;
+      events.push({
+        type: "budget_approved",
+        timestamp: approvedAt instanceof Date ? approvedAt.toISOString() : new Date(approvedAt).toISOString(),
+        actorId: null,
+        actorName: order.budget.clientName || order.clientName || "Cliente",
+        toValue: order.budget.code,
+        metadata: {
+          budgetCode: order.budget.code,
+          budgetId: order.budget.id,
+          finalTotal: order.budgetRevision?.finalTotal ? Number(order.budgetRevision.finalTotal) : null,
+        },
+      });
+    }
+
+    // 2. Fact: created
     events.push({
       type: "created",
       timestamp: order.createdAt instanceof Date ? order.createdAt.toISOString() : new Date(order.createdAt).toISOString(),
       actorId: order.createdBy || null,
+      actorName: order.technicianName || "Operador",
+      toValue: order.status,
       metadata: {
         code: order.code,
         clientId: order.clientId,
         licensePlate: order.licensePlate,
+        status: order.status,
       },
     });
 
-    // 2. Fact: in_production (if startedAt present)
-    if (order.startedAt) {
+    // 3. Fact: in_production (se iniciado ou se o status atual já é in_production)
+    if (order.startedAt || order.status === "in_production") {
       events.push({
         type: "in_production",
-        timestamp: order.startedAt instanceof Date ? order.startedAt.toISOString() : new Date(order.startedAt).toISOString(),
+        timestamp: order.startedAt
+          ? (order.startedAt instanceof Date ? order.startedAt.toISOString() : new Date(order.startedAt).toISOString())
+          : (order.createdAt instanceof Date ? order.createdAt.toISOString() : new Date(order.createdAt).toISOString()),
         actorId: order.technicianUserId || null,
+        actorName: order.technicianName || "Técnico",
+        metadata: {
+          technicianName: order.technicianName,
+        },
       });
     }
 
-    // 3. Fact: finalized (finishedAt or deliveredAt, if present)
+    // 4. Fact: stage / status history
+    if (Array.isArray(order.stageHistory)) {
+      for (const tr of order.stageHistory as any[]) {
+        if (tr && tr.changedAt) {
+          events.push({
+            type: "status_changed",
+            timestamp: new Date(tr.changedAt).toISOString(),
+            actorId: tr.changedBy || null,
+            actorName: tr.changedBy === "system" ? "Sistema" : "Operador",
+            fromValue: tr.from,
+            toValue: tr.to,
+            metadata: {
+              from: tr.from,
+              to: tr.to,
+              reason: tr.reason,
+            },
+          });
+        }
+      }
+    }
+
+    // 5. Fact: photos
+    for (const p of order.photos) {
+      events.push({
+        type: "photo_added",
+        timestamp: p.createdAt instanceof Date ? p.createdAt.toISOString() : new Date(p.createdAt).toISOString(),
+        actorId: p.uploadedBy || null,
+        actorName: "Técnico / Vistoria",
+        toValue: p.category,
+        metadata: {
+          category: p.category,
+          caption: p.caption,
+        },
+      });
+    }
+
+    // 6. Fact: finalized (finishedAt or deliveredAt, if present)
     const finalizedTime = order.finishedAt ?? order.deliveredAt;
     if (finalizedTime) {
       events.push({
         type: "finalized",
         timestamp: finalizedTime instanceof Date ? finalizedTime.toISOString() : new Date(finalizedTime).toISOString(),
         actorId: order.technicianUserId || null,
+        actorName: order.technicianName || "Responsável",
         metadata: {
           finishedAt: order.finishedAt ? (order.finishedAt instanceof Date ? order.finishedAt.toISOString() : new Date(order.finishedAt).toISOString()) : null,
           deliveredAt: order.deliveredAt ? (order.deliveredAt instanceof Date ? order.deliveredAt.toISOString() : new Date(order.deliveredAt).toISOString()) : null,
@@ -774,12 +848,13 @@ productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, 
       });
     }
 
-    // 4. Fact: weeklog_entry (associated WeeklogEntry records)
+    // 7. Fact: weeklog_entry (associated WeeklogEntry records)
     for (const entry of order.weeklogEntries) {
       events.push({
         type: "weeklog_entry",
         timestamp: entry.createdAt instanceof Date ? entry.createdAt.toISOString() : new Date(entry.createdAt).toISOString(),
         actorId: entry.technicianUserId || null,
+        actorName: "Técnico",
         metadata: {
           weeklogEntryId: entry.id,
           weeklogId: entry.weeklogId,
@@ -804,6 +879,7 @@ productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, 
           events.push({
             type: "rectification_requested",
             timestamp: eventTimestamp,
+            actorName: "Avaliador",
             metadata: {
               weeklogEntryId: entry.id,
               isRectification: entry.isRectification,
@@ -815,7 +891,7 @@ productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, 
       }
     }
 
-    // 5. Fact: reopened / rectification lineage
+    // 8. Fact: reopened / rectification lineage
     if (order.rectificationOriginId || order.executionSequence > 1) {
       events.push({
         type: "reopened",
@@ -829,12 +905,15 @@ productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, 
 
     // Deterministic tie-breaker priorities
     const typePriority: Record<TimelineEventType, number> = {
+      budget_approved: 0,
       created: 1,
       in_production: 2,
-      finalized: 3,
-      weeklog_entry: 4,
-      rectification_requested: 5,
-      reopened: 6,
+      status_changed: 3,
+      photo_added: 4,
+      finalized: 5,
+      weeklog_entry: 6,
+      rectification_requested: 7,
+      reopened: 8,
     };
 
     events.sort((a, b) => {
@@ -843,7 +922,20 @@ productionOrdersRouter.get("/:id/timeline", async (req: Request, res: Response, 
       return (typePriority[a.type] ?? 99) - (typePriority[b.type] ?? 99);
     });
 
-    return res.status(200).json(events);
+    const formattedEvents = events.map((e, idx) => ({
+      id: `${e.type}-${e.timestamp}-${idx}`,
+      type: e.type,
+      event_type: e.type,
+      timestamp: e.timestamp,
+      created_at: e.timestamp,
+      actorId: e.actorId,
+      actor_name: e.actorName || (e.actorId ? `Usuário (${e.actorId.slice(0, 8)})` : "Sistema"),
+      from_value: e.fromValue,
+      to_value: e.toValue,
+      metadata: e.metadata,
+    }));
+
+    return res.status(200).json(formattedEvents);
   } catch (error) {
     return next(error);
   }
@@ -1718,7 +1810,121 @@ productionOrdersRouter.get("/:id/inspection", async (req: Request, res: Response
       });
     }
 
+    if (inspection && Array.isArray(inspection.damagePoints)) {
+      const resolvedPoints = await Promise.all(
+        inspection.damagePoints.map(async (dp) => {
+          let resolvedPhoto = dp.photoStoragePath;
+          if (resolvedPhoto && !resolvedPhoto.startsWith("http") && !resolvedPhoto.startsWith("blob:")) {
+            try {
+              resolvedPhoto = await getPresignedDownloadUrl("production-photos", resolvedPhoto, 3600);
+            } catch (err) {
+              console.warn("Falha ao gerar presigned url para dano:", err);
+            }
+          }
+          return {
+            ...dp,
+            photoStoragePath: resolvedPhoto,
+          };
+        })
+      );
+      return res.status(200).json({ inspection: { ...inspection, damagePoints: resolvedPoints } });
+    }
+
     return res.status(200).json({ inspection: inspection || null });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * PUT /api/production-orders/:id/inspection
+ * Atualiza ou registra os pontos do blueprint da ordem de produção.
+ */
+productionOrdersRouter.put("/:id/inspection", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const ctx = req.ctx;
+    if (!ctx?.activeWorkspaceId) {
+      return res.status(403).json({ message: "Workspace ativo não definido." });
+    }
+
+    const order = await prisma.productionOrder.findFirst({
+      where: { id, workspaceId: ctx.activeWorkspaceId },
+    });
+    if (!order) {
+      return res.status(404).json({ message: "Ordem de produção não encontrada." });
+    }
+
+    const b = req.body || {};
+    const damagePoints = Array.isArray(b.damage_points || b.damagePoints)
+      ? (b.damage_points || b.damagePoints)
+      : [];
+
+    const inspection = await prisma.$transaction(async (tx) => {
+      let existing = await tx.vehicleInspection.findFirst({
+        where: { productionOrderId: id, workspaceId: ctx.activeWorkspaceId },
+      });
+
+      if (!existing && order.budgetId) {
+        existing = await tx.vehicleInspection.findFirst({
+          where: { budgetId: order.budgetId, workspaceId: ctx.activeWorkspaceId },
+        });
+      }
+
+      if (!existing) {
+        existing = await tx.vehicleInspection.create({
+          data: {
+            workspaceId: ctx.activeWorkspaceId!,
+            productionOrderId: id,
+            budgetId: order.budgetId || null,
+            acknowledgedPreExisting: Boolean(b.acknowledged_pre_existing ?? b.acknowledgedPreExisting),
+            clientSignedAt: b.client_signed_at ? new Date(b.client_signed_at) : null,
+            signatureStoragePath: b.signature_storage_path ?? null,
+            notes: b.notes ?? null,
+          },
+        });
+      } else {
+        existing = await tx.vehicleInspection.update({
+          where: { id: existing.id },
+          data: {
+            productionOrderId: id,
+            acknowledgedPreExisting: b.acknowledged_pre_existing !== undefined ? Boolean(b.acknowledged_pre_existing) : existing.acknowledgedPreExisting,
+            clientSignedAt: b.client_signed_at ? new Date(b.client_signed_at) : existing.clientSignedAt,
+            signatureStoragePath: b.signature_storage_path !== undefined ? b.signature_storage_path : existing.signatureStoragePath,
+            notes: b.notes !== undefined ? b.notes : existing.notes,
+          },
+        });
+        await tx.vehicleDamagePoint.deleteMany({
+          where: { inspectionId: existing.id, workspaceId: ctx.activeWorkspaceId },
+        });
+      }
+
+      for (const pt of damagePoints) {
+        await tx.vehicleDamagePoint.create({
+          data: {
+            inspectionId: existing.id,
+            workspaceId: ctx.activeWorkspaceId!,
+            view: String(pt.view || "top"),
+            coordX: new Prisma.Decimal(pt.coord_x ?? pt.coordX ?? 0),
+            coordY: new Prisma.Decimal(pt.coord_y ?? pt.coordY ?? 0),
+            carPartCode: String(pt.car_part_code ?? pt.carPartCode ?? "general"),
+            damageType: String(pt.damage_type ?? pt.damageType ?? "dent"),
+            dentCount: pt.dent_count != null ? Number(pt.dent_count) : (pt.dentCount != null ? Number(pt.dentCount) : null),
+            contracted: pt.contracted !== undefined ? Boolean(pt.contracted) : true,
+            estimatedAmount: pt.estimated_amount != null ? new Prisma.Decimal(pt.estimated_amount) : (pt.estimatedAmount != null ? new Prisma.Decimal(pt.estimatedAmount) : null),
+            photoStoragePath: pt.photo_storage_path ?? pt.photoStoragePath ?? null,
+            notes: pt.notes ?? null,
+          },
+        });
+      }
+
+      return await tx.vehicleInspection.findUnique({
+        where: { id: existing.id },
+        include: { damagePoints: true },
+      });
+    });
+
+    return res.status(200).json({ inspection });
   } catch (error) {
     return next(error);
   }
