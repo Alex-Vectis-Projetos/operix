@@ -3924,7 +3924,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                                   type="button"
                                   onClick={() => setIntervActiveCategory(cat.code)}
                                   className={cn(
-                                    "px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-all flex items-center gap-1.5",
+                                    "px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0",
                                     isAct
                                       ? "bg-primary text-primary-foreground font-semibold shadow-sm"
                                       : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -3960,59 +3960,61 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                               />
                             </div>
                           </div>
-                          <ScrollArea className="max-h-80">
-                            <div className="p-2 space-y-0.5">
-                              {(() => {
-                                const q = intervQuery.trim().toLowerCase();
-                                const filtered = detailedInterventionsCatalogue.filter((it) => {
-                                  const matchCat =
-                                    intervActiveCategory === "all" || it.categoryCode === intervActiveCategory;
-                                  const matchQuery =
-                                    q.length === 0 ||
-                                    it.name.toLowerCase().includes(q) ||
-                                    it.categoryName.toLowerCase().includes(q);
-                                  return matchCat && matchQuery;
-                                });
-                                if (filtered.length === 0) {
-                                  return (
-                                    <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                                      {langDisplay === "fr"
-                                        ? "Aucune intervention trouvée."
-                                        : "Nenhuma intervenção encontrada."}
-                                    </div>
-                                  );
-                                }
-                                return filtered.map((opt) => {
-                                  const checked = selectedInterventions.includes(opt.name);
-                                  return (
-                                    <label
-                                      key={opt.name}
-                                      className={cn(
-                                        "flex items-center gap-2.5 rounded-md px-2 py-1.5 cursor-pointer select-none hover:bg-accent hover:text-accent-foreground transition-colors",
-                                        checked ? "bg-accent/40" : "",
-                                      )}
+                          <div
+                            className="p-2 space-y-0.5 overflow-y-auto overscroll-contain touch-pan-y scrollbar-thin"
+                            style={{ maxHeight: "340px", overflowY: "auto" }}
+                            onWheel={(e) => e.stopPropagation()}
+                          >
+                            {(() => {
+                              const q = intervQuery.trim().toLowerCase();
+                              const filtered = detailedInterventionsCatalogue.filter((it) => {
+                                const matchCat =
+                                  intervActiveCategory === "all" || it.categoryCode === intervActiveCategory;
+                                const matchQuery =
+                                  q.length === 0 ||
+                                  it.name.toLowerCase().includes(q) ||
+                                  it.categoryName.toLowerCase().includes(q);
+                                return matchCat && matchQuery;
+                              });
+                              if (filtered.length === 0) {
+                                return (
+                                  <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                                    {langDisplay === "fr"
+                                      ? "Aucune intervention trouvée."
+                                      : "Nenhuma intervenção encontrada."}
+                                  </div>
+                                );
+                              }
+                              return filtered.map((opt) => {
+                                const checked = selectedInterventions.includes(opt.name);
+                                return (
+                                  <label
+                                    key={opt.name}
+                                    className={cn(
+                                      "flex items-center gap-2.5 rounded-md px-2 py-1.5 cursor-pointer select-none hover:bg-accent hover:text-accent-foreground transition-colors",
+                                      checked ? "bg-accent/40" : "",
+                                    )}
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={() => toggleIntervention(opt.name)}
+                                      id={`interv-${opt.name}`}
+                                    />
+                                    <span className="text-xs leading-tight flex-1 font-medium">{opt.name}</span>
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] px-1.5 py-0 h-4 border-slate-700 text-muted-foreground shrink-0"
                                     >
-                                      <Checkbox
-                                        checked={checked}
-                                        onCheckedChange={() => toggleIntervention(opt.name)}
-                                        id={`interv-${opt.name}`}
-                                      />
-                                      <span className="text-xs leading-tight flex-1 font-medium">{opt.name}</span>
-                                      <Badge
-                                        variant="outline"
-                                        className="text-[10px] px-1.5 py-0 h-4 border-slate-700 text-muted-foreground shrink-0"
-                                      >
-                                        {opt.categoryName}
-                                      </Badge>
-                                      {checked ? (
-                                        <CheckIcon className="ml-auto h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                                      ) : null}
-                                    </label>
-                                  );
-                                });
-                              })()}
-                            </div>
-                          </ScrollArea>
+                                      {opt.categoryName}
+                                    </Badge>
+                                    {checked ? (
+                                      <CheckIcon className="ml-auto h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                    ) : null}
+                                  </label>
+                                );
+                              });
+                            })()}
+                          </div>
                           <div className="border-t p-2 flex items-center justify-between text-[11px] text-muted-foreground">
                             <span>
                               {detailedInterventionsCatalogue.length}{" "}
