@@ -1511,6 +1511,31 @@ budgetsRouter.get("/:id/inspection", async (req: Request, res: Response, next: N
       include: { damagePoints: true },
     });
 
+    if (inspection && Array.isArray(inspection.damagePoints)) {
+      const resolvedPoints = await Promise.all(
+        inspection.damagePoints.map(async (dp) => {
+          let resolvedPhoto = dp.photoStoragePath;
+          if (
+            resolvedPhoto &&
+            !resolvedPhoto.startsWith("data:") &&
+            !resolvedPhoto.startsWith("http") &&
+            !resolvedPhoto.startsWith("blob:")
+          ) {
+            try {
+              resolvedPhoto = await getPresignedDownloadUrl("production-photos", resolvedPhoto, 3600);
+            } catch (err) {
+              console.warn("Falha ao gerar presigned url para foto da avaria:", err);
+            }
+          }
+          return {
+            ...dp,
+            photoStoragePath: resolvedPhoto,
+          };
+        })
+      );
+      return res.status(200).json({ inspection: { ...inspection, damagePoints: resolvedPoints } });
+    }
+
     return res.status(200).json({ inspection: inspection || null });
   } catch (error) {
     return next(error);

@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import {
   Shield,
   ShieldAlert,
+  ShieldCheck,
   Wrench,
   Trash2,
   Plus,
@@ -707,38 +708,87 @@ export function VehicleBlueprint5Views({
         });
       });
 
-      toast.success(`Conjunto validado com sucesso! Total: ${pkgAmount.toFixed(2)} € para ${totalAllDents} mossas PDR.`);
+      toast.success(`Conjunto validado com sucesso! Total: ${pkgAmount.toFixed(2)} € para ${totalContractedPdrDents} mossas PDR.`);
     }
   };
 
-  // Upload de foto da avaria
+  // Compressão e persistência permanente de fotos em base64 Data URL (sobrevive a reload/reabertura)
+  const compressImageFileToDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1000;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            resolve(reader.result as string);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+          resolve(dataUrl);
+        };
+        img.onerror = () => resolve(reader.result as string);
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Upload e vinculação permanente de foto da avaria
   const handlePhotoUploadClick = () => {
     fileInputRef.current?.click();
   };
 
-  const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    updateSelectedPoint({ photoStoragePath: url });
+    try {
+      const permanentDataUrl = await compressImageFileToDataUrl(file);
+      updateSelectedPoint({ photoStoragePath: permanentDataUrl });
+      toast.success("Foto da avaria anexada e salva com sucesso!");
+    } catch (err) {
+      console.error("Erro ao processar imagem:", err);
+      toast.error("Erro ao carregar foto.");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
-  // Contagem dinâmica total de mossas somando apenas peças de Martelinho/PDR (exclui Substituição da Peça)
-  const totalAllDents = useMemo(() => {
+  // Mossas PDR contratadas/orçadas para reparação (exclui substituição e vistoria pré-existente)
+  const totalContractedPdrDents = useMemo(() => {
     return damagePoints
-      .filter((p) => p.damageType !== "replace")
+      .filter((p) => p.contracted !== false && p.damageType !== "replace")
       .reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
   }, [damagePoints]);
 
-  const totalReplaceDents = useMemo(() => {
+  // Peças orçadas para substituição
+  const totalContractedReplaceDents = useMemo(() => {
     return damagePoints
-      .filter((p) => p.damageType === "replace")
+      .filter((p) => p.contracted !== false && p.damageType === "replace")
       .reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
   }, [damagePoints]);
 
-  const totalContractedDents = useMemo(() => {
+  // Danos pré-existentes identificados no checklist de entrada (Vistoria Cautelar)
+  const totalPreExistingDamages = useMemo(() => {
     return damagePoints
-      .filter((p) => p.contracted && p.damageType !== "replace")
+      .filter((p) => p.contracted === false)
       .reduce((acc, p) => acc + (Math.max(1, Number(p.dentCount) || 1)), 0);
   }, [damagePoints]);
 
@@ -978,14 +1028,19 @@ export function VehicleBlueprint5Views({
               </span>
               <span className="inline-flex items-center gap-1 rounded-md bg-cyan-950/70 border border-cyan-700/60 px-2 py-0.5 text-cyan-200 font-semibold shadow-sm">
                 <Sparkles className="h-3 w-3 text-cyan-400" />
-                <strong className="text-white">{totalAllDents}</strong> {totalAllDents === 1 ? "mossa PDR" : "mossas PDR"}{totalReplaceDents > 0 ? ` (+${totalReplaceDents} subst.)` : ""}
+                <strong className="text-white">{totalContractedPdrDents}</strong> {totalContractedPdrDents === 1 ? "mossa a reparar" : "mossas a reparar (Orçadas)"}
               </span>
-              <span className="inline-flex items-center gap-1 rounded-md bg-blue-950/50 border border-blue-800/60 px-2 py-0.5 text-cyan-300 font-medium">
-                {totalContractedDents} orçadas
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-md bg-amber-950/50 border border-amber-800/60 px-2 py-0.5 text-amber-300 font-medium">
-                {damagePoints.filter((p) => !p.contracted).length} pré-existentes
-              </span>
+              {totalContractedReplaceDents > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-rose-950/50 border border-rose-800/60 px-2 py-0.5 text-rose-300 font-medium">
+                  {totalContractedReplaceDents} em substituição
+                </span>
+              )}
+              {totalPreExistingDamages > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-amber-950/70 border border-amber-600/70 px-2 py-0.5 text-amber-300 font-semibold shadow-sm">
+                  <ShieldCheck className="h-3.5 w-3.5 text-amber-400" />
+                  <strong className="text-amber-200">{totalPreExistingDamages}</strong> {totalPreExistingDamages === 1 ? "dano pré-existente (Checklist)" : "danos pré-existentes (Checklist)"}
+                </span>
+              )}
             </div>
           </div>
 
@@ -1398,6 +1453,9 @@ export function VehicleBlueprint5Views({
                       src={selectedPoint.photoStoragePath}
                       alt="Evidência da avaria"
                       className="h-10 w-10 rounded-md object-cover border border-cyan-500/40 shadow-sm"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.opacity = "0.4";
+                      }}
                     />
                     <div className="absolute inset-0 bg-black/40 rounded-md opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                       <ZoomIn className="h-4 w-4 text-white" />
@@ -1486,19 +1544,20 @@ export function VehicleBlueprint5Views({
       {/* CONSOLIDADO DE DANOS POR PEÇA (Substitui a lista desordenada de 50 cards azuis) */}
       {piecesSummary.length > 0 && (
         <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
-          {/* BANNER DE CONTROLE GLOBAL PARA CONJUNTO (Requisito Alex) */}
-          <div className="p-3 rounded-lg border border-cyan-700/60 bg-cyan-950/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-cyan-400 shrink-0" />
-              <div>
-                <p className="text-xs font-semibold text-cyan-200">
-                  Fechamento por Conjunto Geral (Preço Único para Todas as Mossas)
-                </p>
-                <p className="text-[11px] text-cyan-400/80">
-                  Aplica modalidade de preço global nas {totalAllDents} mossas e consolida o valor direto no orçamento.
-                </p>
+          {/* BANNER DE CONTROLE GLOBAL PARA CONJUNTO (Apenas para mossas orçadas a reparar) */}
+          {totalContractedPdrDents > 0 && (
+            <div className="p-3 rounded-lg border border-cyan-700/60 bg-cyan-950/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-cyan-400 shrink-0" />
+                <div>
+                  <p className="text-xs font-semibold text-cyan-200">
+                    Fechamento por Conjunto Geral (Preço Único para Todas as Mossas)
+                  </p>
+                  <p className="text-[11px] text-cyan-400/80">
+                    Aplica modalidade de preço global nas <strong className="text-white">{totalContractedPdrDents}</strong> mossas orçadas a reparar (exclui danos pré-existentes da vistoria).
+                  </p>
+                </div>
               </div>
-            </div>
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
               <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded border border-cyan-800">
                 <span className="text-[11px] text-muted-foreground whitespace-nowrap">Total Conjunto:</span>
@@ -1532,16 +1591,17 @@ export function VehicleBlueprint5Views({
               </Button>
             </div>
           </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-between pb-2 border-b gap-2">
             <div className="flex items-center gap-2">
               <Car className="h-4 w-4 text-cyan-400" />
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Dossiê Consolidado por Peça ({piecesSummary.length} {piecesSummary.length === 1 ? "peça" : "peças"} • <strong className="text-cyan-400 font-bold">{totalAllDents}</strong> {totalAllDents === 1 ? "mossa PDR" : "mossas PDR"}{totalReplaceDents > 0 ? ` + ${totalReplaceDents} informativas em substituição` : ""})
+                Dossiê Consolidado por Peça ({piecesSummary.length} {piecesSummary.length === 1 ? "peça" : "peças"} • <strong className="text-cyan-400 font-bold">{totalContractedPdrDents}</strong> {totalContractedPdrDents === 1 ? "mossa a reparar" : "mossas a reparar"}{totalPreExistingDamages > 0 ? ` • ${totalPreExistingDamages} avarias pré-existentes` : ""})
               </span>
             </div>
             <span className="text-[11px] text-muted-foreground">
-              Selecione para ajustar detalhes ou clique em Validar para transferir aos itens financeiros
+              Avarias orçadas são transferidas para as tabelas financeiras; danos pré-existentes permanecem como histórico de vistoria.
             </span>
           </div>
 
@@ -1577,13 +1637,18 @@ export function VehicleBlueprint5Views({
 
                   {/* Detalhes Técnicos e Contagens */}
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                    {piece.damageTypes.includes("replace") ? (
+                    {!piece.hasContracted ? (
+                      <span className="font-medium text-amber-400 flex items-center gap-1">
+                        <ShieldCheck className="h-3.5 w-3.5 text-amber-400" />
+                        {piece.totalDents} {piece.totalDents === 1 ? "avaria pré-existente" : "avarias pré-existentes"} (Checklist Entrada)
+                      </span>
+                    ) : piece.damageTypes.includes("replace") ? (
                       <span className="font-medium text-amber-400">
                         {piece.totalDents} {piece.totalDents === 1 ? "mossa" : "mossas"} (Informativo - Substituição)
                       </span>
                     ) : (
                       <span className="font-medium text-cyan-300">
-                        {piece.totalDents} {piece.totalDents === 1 ? "mossa" : "mossas"}
+                        {piece.totalDents} {piece.totalDents === 1 ? "mossa" : "mossas"} a reparar
                       </span>
                     )}
                     {piece.dentSizeLabel && (
@@ -1625,14 +1690,20 @@ export function VehicleBlueprint5Views({
                           size="sm"
                           type="button"
                           variant="ghost"
-                          className="h-6 px-1.5 text-[10px] text-cyan-400 hover:bg-cyan-950/80 gap-1"
+                          className={cn(
+                            "h-6 px-1.5 text-[10px] gap-1",
+                            piece.hasContracted
+                              ? "text-cyan-400 hover:bg-cyan-950/80"
+                              : "text-amber-400 hover:bg-amber-950/80"
+                          )}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleValidatePiece(piece.carPartCode);
                           }}
-                          title="Validar e sincronizar com itens do orçamento"
+                          title={piece.hasContracted ? "Validar e sincronizar com itens do orçamento" : "Validar dano pré-existente na vistoria (sem cobrança)"}
                         >
-                          <CheckCheck className="h-3 w-3" /> Validar
+                          <CheckCheck className="h-3 w-3" />
+                          {piece.hasContracted ? "Validar" : "Validar Vistoria"}
                         </Button>
                       )}
                       <Button
