@@ -72,6 +72,7 @@ export type BudgetPartLine = {
   quantity: number;
   unit_price: number;
   pricing_mode?: "fixed" | "unit" | "global";
+  interventionSource?: string;
 };
 
 export type BudgetServiceLine = {
@@ -83,6 +84,7 @@ export type BudgetServiceLine = {
   quantity: number;
   unit_price: number;
   pricing_mode?: "fixed" | "unit" | "global";
+  interventionSource?: string;
 };
 
 export const BUDGET_TYPE_TO_CATEGORIES: Record<string, string[]> = {
@@ -195,6 +197,7 @@ export type BudgetLaborLine = {
   description: string;
   hours: number;
   hourly_rate: number;
+  interventionSource?: string;
 };
 
 export type OcrDamageArea = {
@@ -1767,10 +1770,119 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     if (isLocked) return;
     setFormSafe((f) => {
       const current = getBudgetInterventions(f);
-      const idx = current.indexOf(value);
-      const next = idx >= 0 ? current.filter((v) => v !== value) : [...current, value];
+      const isChecking = !current.includes(value);
+      const next = isChecking ? [...current, value] : current.filter((v) => v !== value);
+
       const out: Budget = { ...f, updated_at: new Date().toISOString() };
       setBudgetInterventions((patch) => Object.assign(out, patch), next);
+
+      let nextParts = [...(f.parts || [])];
+      let nextServices = [...(f.services || [])];
+      let nextLabor = [...(f.labor || [])];
+
+      if (isChecking) {
+        // Encontra metadados no catálogo detalhado
+        const catItem = detailedInterventionsCatalogue.find((i) => i.name === value) ||
+          catalogItems.find((i) => i.name === value);
+
+        const isReplacement =
+          catItem?.categoryCode === "replace" ||
+          /substitui[çc][ãa]o|remplacement|troca|peça|pièce|filtro|filtre|bomba|pompe|pastilha|plaquette|disco|disque|correia|courroie|amortecedor|amortisseur|vela|bougie|óleo|huile|fluido|liquide|radiador|radiateur|condensador|condenseur|farol|phare|lanterna|feu|parachoque|para-choque|bouclier|retrovisor|rétroviseur/i.test(value);
+
+        // 1. Peças / Materiais (apenas se for substituição de componente físico)
+        if (isReplacement) {
+          const rawPartName = value
+            .replace(/^(Substituição de |Substituição da |Substituição do |Substituição |Remplacement de |Remplacement du |Remplacement d'|Troca de |Troca do |Troca da )/i, "")
+            .trim();
+          const cleanPartName = rawPartName.charAt(0).toUpperCase() + rawPartName.slice(1);
+          const partDesc = `${cleanPartName} (Peça nova)`;
+
+          // Não duplica se já existir
+          if (!nextParts.some((p) => p.description === partDesc || p.interventionSource === value)) {
+            const newPart: BudgetPartLine = {
+              id: uid(),
+              description: partDesc,
+              quantity: 1,
+              unit_price: 0,
+              pricing_mode: "fixed",
+              interventionSource: value,
+            };
+            if (nextParts.length === 1 && !nextParts[0].description && Number(nextParts[0].unit_price) === 0) {
+              nextParts = [newPart];
+            } else {
+              nextParts.push(newPart);
+            }
+          }
+        }
+
+        // 2. Serviços
+        if (!nextServices.some((s) => s.description === value || s.interventionSource === value)) {
+          const newService: BudgetServiceLine = {
+            id: uid(),
+            description: value,
+            quantity: 1,
+            unit_price: 0,
+            pricing_mode: "fixed",
+            catalogItemId: (catItem as any)?.id,
+            catalogItemCode: (catItem as any)?.code,
+            categoryCode: catItem?.categoryCode,
+            interventionSource: value,
+          };
+          if (nextServices.length === 1 && !nextServices[0].description && Number(nextServices[0].unit_price) === 0) {
+            nextServices = [newService];
+          } else {
+            nextServices.push(newService);
+          }
+        }
+
+        // 3. Mão de obra
+        const laborDesc = `Mão de obra - ${value}`;
+        if (!nextLabor.some((l) => l.description === laborDesc || l.interventionSource === value)) {
+          const newLabor: BudgetLaborLine = {
+            id: uid(),
+            description: laborDesc,
+            hours: 1,
+            hourly_rate: 0,
+            interventionSource: value,
+          };
+          if (nextLabor.length === 1 && !nextLabor[0].description && Number(nextLabor[0].hourly_rate) === 0) {
+            nextLabor = [newLabor];
+          } else {
+            nextLabor.push(newLabor);
+          }
+        }
+
+        toast.success(
+          langDisplay === "fr"
+            ? `Intervention "${value}" liée et pré-remplie.`
+            : `Intervenção "${value}" vinculada e pré-preenchida em ${isReplacement ? "Peças, Serviços e Mão de obra" : "Serviços e Mão de obra"}.`
+        );
+      } else {
+        // Desmarcando: remove linhas associadas
+        nextParts = nextParts.filter(
+          (p) => p.interventionSource !== value && !(p.description && p.description.toLowerCase().includes(value.toLowerCase()))
+        );
+        nextServices = nextServices.filter(
+          (s) => s.interventionSource !== value && s.description !== value
+        );
+        nextLabor = nextLabor.filter(
+          (l) => l.interventionSource !== value && !(l.description && l.description.includes(value))
+        );
+
+        if (nextParts.length === 0) nextParts = [{ id: uid(), description: "", quantity: 1, unit_price: 0 }];
+        if (nextServices.length === 0) nextServices = [{ id: uid(), description: "", quantity: 1, unit_price: 0 }];
+        if (nextLabor.length === 0) nextLabor = [{ id: uid(), description: "", hours: 1, hourly_rate: 0 }];
+
+        toast.warning(
+          langDisplay === "fr"
+            ? `Intervention "${value}" retirée : lignes correspondantes supprimées.`
+            : `Intervenção "${value}" desmarcada: itens correspondentes removidos de Peças, Serviços e Mão de obra.`
+        );
+      }
+
+      out.parts = nextParts;
+      out.services = nextServices;
+      out.labor = nextLabor;
       return out;
     });
   };
@@ -4194,14 +4306,21 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                                 variant="ghost"
                                 type="button"
                                 onClick={() => {
-                                  setForm((f) => {
+                                  setFormSafe((f) => {
                                     const out: Budget = { ...f, updated_at: new Date().toISOString() };
                                     setBudgetInterventions(
                                       (p) => Object.assign(out, p),
                                       [],
                                     );
+                                    out.parts = (out.parts || []).filter((p) => !p.interventionSource);
+                                    out.services = (out.services || []).filter((s) => !s.interventionSource);
+                                    out.labor = (out.labor || []).filter((l) => !l.interventionSource);
+                                    if (out.parts.length === 0) out.parts = [{ id: uid(), description: "", quantity: 1, unit_price: 0 }];
+                                    if (out.services.length === 0) out.services = [{ id: uid(), description: "", quantity: 1, unit_price: 0 }];
+                                    if (out.labor.length === 0) out.labor = [{ id: uid(), description: "", hours: 1, hourly_rate: 0 }];
                                     return out;
                                   });
+                                  toast.info(langDisplay === "fr" ? "Toutes les interventions ont été effacées." : "Todas as intervenções foram limpas e os itens automáticos removidos.");
                                 }}
                                 disabled={selectedInterventions.length === 0}
                                 className="h-7 px-2 text-[11px]"
