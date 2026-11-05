@@ -1213,7 +1213,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
   return (
     <Dialog open={!!order} onOpenChange={(o) => { if (!o) minimize(); }}>
-      <DialogContent className="w-[96vw] sm:w-full max-w-6xl max-h-[92vh] overflow-y-auto p-3 sm:p-6">
+      <DialogContent onPointerDownOutside={(e) => e.preventDefault()} className="w-[96vw] sm:w-full max-w-6xl max-h-[92vh] overflow-y-auto p-3 sm:p-6">
         <DialogHeader className="space-y-2">
           <DialogTitle className="flex flex-wrap items-center gap-3">
             <span className="flex items-center gap-2">

@@ -6,7 +6,7 @@ import {
   type DamagePointData,
   type ValidatedPartSummary,
 } from "./VehicleBlueprint5Views";
-import { Eye } from "lucide-react";
+import { Eye, CheckCheck, Sparkles } from "lucide-react";
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getBudget, apiBudgetToLocalBudget, getBudgetPdf, sendBudgetEmail, uploadBudgetPhoto, markBudgetSent, getBudgetSignLink } from "@/lib/apiBudgets";
@@ -1336,12 +1336,28 @@ interface Props {
 
 type DialogStep = "choose_type" | "form";
 
+function hasMeaningfulContent(b?: Budget | null, points: DamagePointData[] = []): boolean {
+  if (!b) return false;
+  if (points && points.length > 0) return true;
+  if (b.vehicle_plate || b.vehicle_vin || b.vehicle_brand || b.vehicle_model) return true;
+  if (b.client_id || (b.client_name && b.client_name !== "Cliente" && b.client_name.trim().length > 0)) return true;
+  if (b.parts && b.parts.some((p) => p.description?.trim().length > 0 || Number(p.unit_price) > 0)) return true;
+  if (b.services && b.services.some((s) => s.description?.trim().length > 0 || Number(s.unit_price) > 0)) return true;
+  if (b.labor && b.labor.some((l) => l.description?.trim().length > 0 || Number(l.hours) > 0)) return true;
+  return false;
+}
+
+const getBudgetDraftKey = (wsId?: string | null) => `operix_budget_active_draft_${wsId || "default"}`;
+
 export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   const { dbRole } = useRole();
   const isClient = dbRole === "client";
   const [form, setForm] = useState<Budget>(() => emptyBudget());
   const lastLoadedIdRef = useRef<string | null>(null);
+
   const [saving, setSaving] = useState(false);
+  const [lastAutoSavedAt, setLastAutoSavedAt] = useState<Date | null>(null);
+  const [hasRestoredDraft, setHasRestoredDraft] = useState(false);
   const [step, setStep] = useState<DialogStep>(() => {
     const bt = initial?.budget_type;
     return isValidBudgetType(bt) ? "form" : "choose_type";
@@ -1853,9 +1869,37 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
     if (initial) {
       setStep("form");
       setShowBackToType(true);
+      setHasRestoredDraft(false);
     } else {
-      setStep("choose_type");
-      setShowBackToType(false);
+      let restored = false;
+      try {
+        const cachedRaw = localStorage.getItem(getBudgetDraftKey(workspaceId));
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw);
+          if (cached && cached.form && Date.now() - (cached.timestamp || 0) < 48 * 3600 * 1000) {
+            if (hasMeaningfulContent(cached.form, cached.inspectionPoints)) {
+              setForm(cached.form);
+              if (cached.inspectionPoints && Array.isArray(cached.inspectionPoints)) {
+                setInspectionPoints(cached.inspectionPoints);
+              }
+              setStep(cached.step || "form");
+              setShowBackToType(true);
+              setHasRestoredDraft(true);
+              restored = true;
+              toast.info(
+                langDisplay === "fr"
+                  ? "Brouillon non enregistré récupéré automatiquement."
+                  : "Rascunho não salvo recuperado automaticamente."
+              );
+            }
+          }
+        }
+      } catch {}
+      if (!restored) {
+        setStep("choose_type");
+        setShowBackToType(false);
+        setHasRestoredDraft(false);
+      }
     }
     setIntervQuery("");
     setIntervPopoverOpen(false);
@@ -1888,7 +1932,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       const isIncluded =
         (p as any).pricing_mode === "global" ||
         (p as any).pricingMode === "global" ||
-        (p.description && p.description.includes("Incluso no Conjunto"));
+        (p as any).pricing_mode === "included" ||
+        Boolean(p.description && /inclus[oe]/i.test(p.description));
       if (isIncluded) return sum;
       const q = Math.max(0, Number(p.quantity) || 0);
       const u = Math.max(0, Number(p.unit_price) || 0);
@@ -1899,7 +1944,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       const isIncluded =
         (s as any).pricing_mode === "global" ||
         (s as any).pricingMode === "global" ||
-        (s.description && s.description.includes("Incluso no Conjunto"));
+        (s as any).pricing_mode === "included" ||
+        Boolean(s.description && /inclus[oe]/i.test(s.description));
       if (isIncluded) return sum;
       const q = Math.max(0, Number(s.quantity) || 0);
       const u = Math.max(0, Number(s.unit_price) || 0);
@@ -1920,6 +1966,30 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
   }, [form.parts, form.services, form.labor, form.discount_pct, form.iva_pct]);
 
   const isLocked = form.status === "approved" || form.status === "rejected";
+
+  // Auto-save debounce effect (salva automaticamente rascunho ativo no localStorage)
+  useEffect(() => {
+    if (!open || isLocked) return;
+    if (!hasMeaningfulContent(form, inspectionPoints)) return;
+
+    const timer = setTimeout(() => {
+      try {
+        const payload = {
+          form,
+          inspectionPoints,
+          step,
+          timestamp: Date.now(),
+        };
+        localStorage.setItem(getBudgetDraftKey(workspaceId), JSON.stringify(payload));
+        setLastAutoSavedAt(new Date());
+      } catch (err) {
+        console.warn("Error auto-saving budget draft:", err);
+      }
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [form, inspectionPoints, step, open, isLocked, workspaceId]);
+
 
   const handleScanFilesSelected = async (files: File[]) => {
     if (isLocked) {
@@ -2754,6 +2824,10 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       }
 
       if (closeOnFinish) {
+        try {
+          localStorage.removeItem(getBudgetDraftKey(workspaceId));
+        } catch {}
+        setHasRestoredDraft(false);
         toast.success(
           draftToSave.status === "approved"
             ? (langDisplay === "fr" ? "Devis approuvé et envoyé en production !" : "Orçamento aprovado e enviado para a Produção!")
@@ -3087,6 +3161,34 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
       updated_at: new Date().toISOString(),
     }));
 
+  const handleSafeOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      if (!isLocked && hasMeaningfulContent(form, inspectionPoints)) {
+        try {
+          const payload = {
+            form,
+            inspectionPoints,
+            step,
+            timestamp: Date.now(),
+          };
+          localStorage.setItem(getBudgetDraftKey(workspaceId), JSON.stringify(payload));
+          setLastAutoSavedAt(new Date());
+          persistCurrentState(false).catch(() => {});
+          toast.info(
+            langDisplay === "fr"
+              ? "Brouillon sauvegardé automatiquement."
+              : "Rascunho salvo automaticamente."
+          );
+        } catch (e) {
+          console.warn("Failed to persist draft on close", e);
+        }
+      }
+      onOpenChange(false);
+    } else {
+      onOpenChange(true);
+    }
+  };
+
   const save = async () => {
     await persistCurrentState(true);
   };
@@ -3097,8 +3199,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[calc(100vw-1.5rem)] sm:w-full max-w-6xl max-h-[92vh] overflow-y-auto overflow-x-hidden">
+      <Dialog open={open} onOpenChange={handleSafeOpenChange}>
+        <DialogContent onPointerDownOutside={(e) => e.preventDefault()} className="w-[calc(100vw-1.5rem)] sm:w-full max-w-6xl max-h-[92vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle className="flex flex-wrap items-center gap-3">
               {step === "form" && showBackToType && !initial ? (
@@ -3136,6 +3238,13 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                 </Badge>
               ) : null}
               <StatusBadge status={form.status} />
+              {lastAutoSavedAt && (
+                <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-800/40">
+                  <CheckCheck className="h-3 w-3 text-emerald-400" />
+                  {langDisplay === "fr" ? "Auto-enregistré " : "Auto-salvo "}
+                  {lastAutoSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
               {step === "form" && !isLocked ? (
                 <Button
                   type="button"
@@ -3164,6 +3273,38 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                 : "Formulário técnico de orçamento com dados do cliente, veículo, itens e totais."}
             </DialogDescription>
           </DialogHeader>
+          {hasRestoredDraft && !initial && (
+            <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-cyan-700/60 bg-cyan-950/40 text-cyan-200 text-xs shadow-sm mb-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-cyan-400 shrink-0" />
+                <span>
+                  {langDisplay === "fr"
+                    ? "Brouillon non finalisé restauré automatiquement avec vos dernières modifications."
+                    : "Rascunho não finalizado restaurado automaticamente com suas últimas alterações."}
+                </span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs border-cyan-600/80 hover:bg-cyan-900/60 text-cyan-100"
+                onClick={() => {
+                  try {
+                    localStorage.removeItem(getBudgetDraftKey(workspaceId));
+                  } catch {}
+                  setForm(emptyBudget());
+                  setInspectionPoints([]);
+                  setStep("choose_type");
+                  setShowBackToType(false);
+                  setHasRestoredDraft(false);
+                  setLastAutoSavedAt(null);
+                  toast.info(langDisplay === "fr" ? "Brouillon ignoré. Nouveau devis vide démarré." : "Rascunho descartado. Novo orçamento iniciado do zero.");
+                }}
+              >
+                {langDisplay === "fr" ? "Recommencer de zéro" : "Começar do zero"}
+              </Button>
+            </div>
+          )}
 
           {isLocked ? (
             <div
@@ -3266,7 +3407,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
               </Section>
               <DialogFooter className="pt-1">
                 <div className="flex w-full flex-wrap justify-between gap-2">
-                  <Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
+                  <Button variant="ghost" type="button" onClick={() => handleSafeOpenChange(false)}>
                     <X className="h-4 w-4 mr-1" /> {langDisplay === "fr" ? "Annuler" : "Cancelar"}
                   </Button>
                   <div className="flex gap-2">
@@ -4152,7 +4293,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                             const isIncluded =
                               (p as any).pricing_mode === "global" ||
                               (p as any).pricingMode === "global" ||
-                              (p.description && p.description.includes("Incluso no Conjunto"));
+                              (p as any).pricing_mode === "included" ||
+                              Boolean(p.description && /inclus[oe]/i.test(p.description));
 
                             return (
                               <TableRow key={p.id}>
@@ -4301,7 +4443,8 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
                             const isIncluded =
                               (s as any).pricing_mode === "global" ||
                               (s as any).pricingMode === "global" ||
-                              (s.description && s.description.includes("Incluso no Conjunto"));
+                              (s as any).pricing_mode === "included" ||
+                              Boolean(s.description && /inclus[oe]/i.test(s.description));
 
                             return (
                               <TableRow key={s.id}>
@@ -4826,7 +4969,7 @@ export function BudgetDialog({ open, initial, onOpenChange, onSave }: Props) {
             <DialogFooter className="pt-4">
               <div className="flex w-full flex-wrap justify-between gap-2">
                 <div>
-                  <Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
+                  <Button variant="ghost" type="button" onClick={() => handleSafeOpenChange(false)}>
                     <X className="h-4 w-4" /> {isLocked ? (langDisplay === "fr" ? "Fermer" : "Fechar") : (langDisplay === "fr" ? "Annuler" : "Cancelar")}
                   </Button>
                 </div>

@@ -176,19 +176,28 @@ export function BudgetPanel({ onOpenOrder }: Props) {
           rawFinal != null && !isNaN(Number(rawFinal)) && Number(rawFinal) > 0
             ? Number(rawFinal)
             : (() => {
+                const isLineIncluded = (item: any) =>
+                  item?.pricing_mode === "global" ||
+                  item?.pricingMode === "global" ||
+                  item?.pricing_mode === "included" ||
+                  (typeof item?.description === "string" && /inclus[oe]/i.test(item.description));
                 const p = (b.parts || []).reduce(
                   (s, x) =>
-                    s +
-                    Math.max(0, Number(x?.quantity) || 0) *
-                    Math.max(0, Number(x?.unit_price) || 0),
+                    isLineIncluded(x)
+                      ? s
+                      : s +
+                        Math.max(0, Number(x?.quantity) || 0) *
+                        Math.max(0, Number(x?.unit_price) || 0),
                   0,
                 );
                 const sv = Array.isArray((b as any).services)
                   ? (b as any).services.reduce(
                       (s: number, x: any) =>
-                        s +
-                        Math.max(0, Number(x?.quantity) || 0) *
-                        Math.max(0, Number(x?.unit_price) || 0),
+                        isLineIncluded(x)
+                          ? s
+                          : s +
+                            Math.max(0, Number(x?.quantity) || 0) *
+                            Math.max(0, Number(x?.unit_price) || 0),
                       0,
                     )
                   : 0;
@@ -384,19 +393,28 @@ export function BudgetPanel({ onOpenOrder }: Props) {
       const gross = Number((b as any).gross_total ?? (b as any).grossTotal ?? total);
       return { parts: 0, services: 0, labor: 0, gross, disc: 0, net: gross, iva: Math.max(0, total - gross), total };
     }
+    const isLineIncluded = (item: any) =>
+      item?.pricing_mode === "global" ||
+      item?.pricingMode === "global" ||
+      item?.pricing_mode === "included" ||
+      (typeof item?.description === "string" && /inclus[oe]/i.test(item.description));
     const p = (b.parts || []).reduce(
       (s, x) =>
-        s +
-        Math.max(0, Number(x?.quantity) || 0) *
-        Math.max(0, Number(x?.unit_price) || 0),
+        isLineIncluded(x)
+          ? s
+          : s +
+            Math.max(0, Number(x?.quantity) || 0) *
+            Math.max(0, Number(x?.unit_price) || 0),
       0,
     );
     const sv = Array.isArray((b as any).services)
       ? (b as any).services.reduce(
         (s: number, x: any) =>
-          s +
-          Math.max(0, Number(x?.quantity) || 0) *
-          Math.max(0, Number(x?.unit_price) || 0),
+          isLineIncluded(x)
+            ? s
+            : s +
+              Math.max(0, Number(x?.quantity) || 0) *
+              Math.max(0, Number(x?.unit_price) || 0),
         0,
       )
       : 0;

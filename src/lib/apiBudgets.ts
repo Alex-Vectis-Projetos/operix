@@ -406,14 +406,16 @@ export function apiBudgetToLocalBudget(api: ApiBudget): any {
       const isIncluded =
         p?.pricing_mode === "global" ||
         p?.pricingMode === "global" ||
-        (typeof p?.description === "string" && p.description.includes("Incluso no Conjunto"));
+        p?.pricing_mode === "included" ||
+        (typeof p?.description === "string" && (p.description.includes("Incluso no Conjunto") || /inclus[oe]/i.test(p.description)));
       return isIncluded ? { ...p, unit_price: 0, pricing_mode: "global" } : p;
     }),
     services: (rev?.services || []).map((s: any) => {
       const isIncluded =
         s?.pricing_mode === "global" ||
         s?.pricingMode === "global" ||
-        (typeof s?.description === "string" && s.description.includes("Incluso no Conjunto"));
+        s?.pricing_mode === "included" ||
+        (typeof s?.description === "string" && (s.description.includes("Incluso no Conjunto") || /inclus[oe]/i.test(s.description)));
       return isIncluded ? { ...s, unit_price: 0, pricing_mode: "global" } : s;
     }),
     labor: rev?.labor || [],
